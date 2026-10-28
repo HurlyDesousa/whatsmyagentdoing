@@ -1,15 +1,13 @@
 // High-quality office: same floor plan and behaviour as the 2D office
-// (office.js), rendered in 3D with Kenney's CC0 models (assets/kenney).
+// (office.js), rendered in 3D with Kenney's CC0 furniture (assets/kenney)
+// and Grok-style soft blob avatars (Hurly sidebar shapes) instead of humanoids.
 // Bubbles and name tags are drawn by the 2D code on a canvas overlay.
 // Source file: `npm run build` bundles it with three.js into public/office3d.js.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
-const CHARACTERS = ['male-a', 'male-b', 'male-c', 'male-d', 'male-e', 'male-f',
-  'female-a', 'female-b', 'female-c', 'female-d', 'female-e', 'female-f'];
 const FURNITURE = ['desk', 'chairDesk', 'computerScreen', 'computerKeyboard', 'computerMouse', 'laptop',
   'pottedPlant', 'plantSmall1', 'plantSmall2', 'plantSmall3', 'kitchenCabinet', 'kitchenCoffeeMachine',
   'kitchenSink', 'kitchenFridgeLarge', 'kitchenMicrowave', 'stoolBar', 'tableRound', 'table',
@@ -17,12 +15,120 @@ const FURNITURE = ['desk', 'chairDesk', 'computerScreen', 'computerKeyboard', 'c
   'lampRoundFloor', 'lampSquareTable', 'televisionModern', 'cabinetTelevision', 'trashcan',
   'coatRackStanding', 'radio', 'speaker', 'toaster', 'cardboardBoxClosed'];
 
+// Soft flat Grok Bot sidebar blobs: purple triangle, red drop, green cloud,
+// orange oval, brown oval, pink wedge — each with two black oval eyes.
+const GROK_BLOBS = [
+  { kind: 'triangle', color: 0x9b5cff },
+  { kind: 'drop', color: 0xe84545 },
+  { kind: 'cloud', color: 0x4ecf7a },
+  { kind: 'oval', color: 0xff8a3d, rx: 0.42, ry: 0.52 },
+  { kind: 'oval', color: 0x8b5e3c, rx: 0.48, ry: 0.4 },
+  { kind: 'wedge', color: 0xff6fae },
+];
+
 const STATUS_COLOR = {
   thinking: 0x8b6be6, tool: 0x3b8ee0, typing: 0x22a874, waiting: 0xe09412, error: 0xde4b40,
 };
 const CHAR_HEIGHT = 0.92; // world units (≈ tiles)
 const WALL_H = 2.4;
-const SIT_FORWARD = 0.16;
+const SIT_FORWARD = 0.1;
+
+function blobExtrude(shape, depth = 0.2) {
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    bevelEnabled: true,
+    bevelThickness: 0.045,
+    bevelSize: 0.04,
+    bevelSegments: 3,
+    curveSegments: 20,
+  });
+  geo.translate(0, 0, -depth / 2);
+  return geo;
+}
+
+function makeBlobBody(def) {
+  const mat = new THREE.MeshStandardMaterial({
+    color: def.color,
+    roughness: 0.55,
+    metalness: 0.02,
+  });
+  if (def.kind === 'cloud') {
+    const g = new THREE.Group();
+    const bumps = [
+      [0, 0.02, 0.34, 0.3], [-0.26, -0.02, 0.26, 0.24], [0.26, -0.04, 0.26, 0.24],
+      [-0.12, 0.18, 0.22, 0.2], [0.14, 0.16, 0.2, 0.18], [0, -0.18, 0.28, 0.2],
+    ];
+    for (const [x, y, rx, ry] of bumps) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 16), mat);
+      m.scale.set(rx, ry, 0.16);
+      m.position.set(x, y, 0);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      g.add(m);
+    }
+    return g;
+  }
+  const s = new THREE.Shape();
+  if (def.kind === 'triangle') {
+    s.moveTo(0, 0.58);
+    s.quadraticCurveTo(0.52, -0.05, 0.46, -0.48);
+    s.quadraticCurveTo(0, -0.58, -0.46, -0.48);
+    s.quadraticCurveTo(-0.52, -0.05, 0, 0.58);
+  } else if (def.kind === 'drop') {
+    s.moveTo(0, 0.62);
+    s.bezierCurveTo(0.32, 0.28, 0.48, -0.05, 0.3, -0.38);
+    s.quadraticCurveTo(0, -0.58, -0.3, -0.38);
+    s.bezierCurveTo(-0.48, -0.05, -0.32, 0.28, 0, 0.62);
+  } else if (def.kind === 'wedge') {
+    s.moveTo(0, 0.56);
+    s.quadraticCurveTo(0.42, 0.05, 0.5, -0.42);
+    s.quadraticCurveTo(0, -0.56, -0.5, -0.42);
+    s.quadraticCurveTo(-0.42, 0.05, 0, 0.56);
+  } else {
+    const rx = def.rx || 0.42, ry = def.ry || 0.52;
+    const pts = new THREE.EllipseCurve(0, 0, rx, ry, 0, Math.PI * 2, false, 0).getPoints(36);
+    s.setFromPoints(pts);
+  }
+  const mesh = new THREE.Mesh(blobExtrude(s), mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+function createGrokBlob(index) {
+  const def = GROK_BLOBS[((index % GROK_BLOBS.length) + GROK_BLOBS.length) % GROK_BLOBS.length];
+  const root = new THREE.Group();
+  const body = makeBlobBody(def);
+  root.add(body);
+
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.35 });
+  const eyeGeo = new THREE.SphereGeometry(0.075, 14, 12);
+  eyeGeo.scale(0.72, 1.2, 0.55);
+  const left = new THREE.Mesh(eyeGeo, eyeMat);
+  const right = new THREE.Mesh(eyeGeo.clone(), eyeMat);
+  left.position.set(-0.12, 0.06, 0.14);
+  right.position.set(0.12, 0.06, 0.14);
+  left.castShadow = true;
+  right.castShadow = true;
+  const eyes = new THREE.Group();
+  eyes.add(left, right);
+  root.add(eyes);
+
+  // Soft face highlight (demo “candy” sheen).
+  const sheen = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, roughness: 0.2 }),
+  );
+  sheen.position.set(-0.16, 0.22, 0.12);
+  sheen.scale.set(1.4, 0.7, 0.5);
+  root.add(sheen);
+
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root);
+  const h = Math.max(0.01, box.max.y - box.min.y);
+  root.position.y = -box.min.y;
+  return { root, body, eyes, leftEye: left, rightEye: right, color: def.color, kind: def.kind, nativeH: h };
+}
 
 // Turn a scene manifest into the floor plan the shared simulation uses:
 // stations play the part of desks, pois are where off-duty agents hang out.
@@ -83,7 +189,7 @@ export class Office3D extends window.Office {
     this.gl.shadowMap.type = THREE.PCFSoftShadowMap;
     this.gl.outputColorSpace = THREE.SRGBColorSpace;
     this.gl.toneMapping = THREE.ACESFilmicToneMapping;
-    this.gl.toneMappingExposure = 1.15;
+    this.gl.toneMappingExposure = 1.28;
     this.gl.domElement.className = 'office-gl';
     root.insertBefore(this.gl.domElement, this.canvas);
 
@@ -98,9 +204,10 @@ export class Office3D extends window.Office {
     this.controls.screenSpacePanning = true;
     this.controls.zoomToCursor = true;
 
-    this.hemi = new THREE.HemisphereLight(0xfff8ee, 0x8a7a66, 1.0);
+    // Softer pastel keying closer to the 0xRafy Grok office demo.
+    this.hemi = new THREE.HemisphereLight(0xffeaf5, 0xb09a88, 1.2);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xfff1dc, 1.6);
+    this.sun = new THREE.DirectionalLight(0xfff2e4, 1.35);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0006;
@@ -139,11 +246,10 @@ export class Office3D extends window.Office {
     const loader = new GLTFLoader();
     loader.setMeshoptDecoder(MeshoptDecoder);
     const get = (url) => new Promise((ok, fail) => loader.load(url, ok, undefined, fail));
-    const [chars, furn] = await Promise.all([
-      Promise.all(CHARACTERS.map((c) => get(`/assets/kenney/characters/character-${c}.glb`))),
-      Promise.all(FURNITURE.map((f) => get(`/assets/kenney/furniture/${f}.glb`).then((g) => [f, g.scene]))),
-    ]);
-    this.chars = chars;
+    // Avatars are procedural Grok blobs — only furniture GLBs are fetched.
+    const furn = await Promise.all(
+      FURNITURE.map((f) => get(`/assets/kenney/furniture/${f}.glb`).then((g) => [f, g.scene])),
+    );
     this.models = Object.fromEntries(furn);
     if (this.sceneDef) {
       const extra = [...new Set(this.sceneDef.props.filter((p) => p.f && !this.models[p.f]).map((p) => p.f))];
@@ -261,7 +367,7 @@ export class Office3D extends window.Office {
     this.room.add(mat);
 
     // walls: back (z=0) with windows, left (x=0) with a door
-    const wallCol = dark ? 0x4a4640 : 0xf4efe6;
+    const wallCol = dark ? 0x4a4640 : 0xf7f1ea;
     const wallMat = new THREE.MeshStandardMaterial({ color: wallCol, roughness: 0.95 });
     const T = 0.12;
     let cx = -T;
@@ -986,34 +1092,28 @@ export class Office3D extends window.Office {
   actorFor(p) {
     let a = this.actors.get(p.key);
     if (a) return a;
-    const gltf = this.chars[p.h % this.chars.length];
-    const obj = cloneSkinned(gltf.scene);
-    obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    const box = new THREE.Box3().setFromObject(obj);
-    const s = CHAR_HEIGHT * (p.s && p.s.subagent ? 0.8 : 1) / (box.max.y - box.min.y);
-    obj.scale.setScalar(s);
-    const mixer = new THREE.AnimationMixer(obj);
-    const actions = {};
-    for (const clip of gltf.animations) actions[clip.name] = mixer.clipAction(clip);
-    let head = null, armR = null;
-    obj.traverse((o) => { if (o.name === 'head') head = o; if (o.name === 'arm-right') armR = o; });
+    const blob = createGrokBlob(p.h);
+    const obj = blob.root;
+    const targetH = CHAR_HEIGHT * (p.s && p.s.subagent ? 0.8 : 1);
+    obj.scale.setScalar(targetH / blob.nativeH);
     const prop = new THREE.Group();
     const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.1, 10), new THREE.MeshStandardMaterial({ color: 0xffffff }));
     const book = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, 0.04), new THREE.MeshStandardMaterial({ color: 0xc96442 }));
     prop.add(cup, book);
     this.scene.add(obj, prop);
-    a = { obj, mixer, actions, current: null, head, headRest: head ? head.rotation.x : 0, armR, prop, cup, book, yaw: 0, last: { x: p.x, y: p.y } };
+    a = {
+      obj, body: blob.body, eyes: blob.eyes, leftEye: blob.leftEye, rightEye: blob.rightEye,
+      mixer: null, actions: {}, current: 'idle',
+      head: blob.eyes, headRest: 0, armR: null, prop, cup, book,
+      yaw: 0, last: { x: p.x, y: p.y }, baseScale: targetH / blob.nativeH, tiltX: 0, tiltZ: 0,
+    };
     this.actors.set(p.key, a);
     return a;
   }
 
   play(a, name) {
     if (a.current === name) return;
-    const next = a.actions[name] || a.actions.idle;
-    if (!next) return;
-    next.reset().setEffectiveWeight(1).fadeIn(0.25).play();
-    if (a.current && a.actions[a.current]) a.actions[a.current].fadeOut(0.25);
-    a.current = name;
+    a.current = name || 'idle';
   }
 
   facing(p, st) {
@@ -1050,7 +1150,6 @@ export class Office3D extends window.Office {
       if (st.act === 'station') chosen = p.s.status === 'thinking' ? 'idle' : (p.desk.anim || 'interact-right');
       else if (st.pose !== 'walk' && p.poi && p.poi.anim) chosen = p.poi.anim;
       this.play(a, chosen);
-      a.mixer.update(dt);
 
       // position + facing
       const dx = p.x - a.last.x, dy = p.y - a.last.y;
@@ -1062,32 +1161,63 @@ export class Office3D extends window.Office {
         a.yaw += d * Math.min(1, dt * 10);
       }
       a.last = { x: p.x, y: p.y };
-      a.obj.rotation.y = a.yaw;
       const seatY = st.pose === 'sit' ? this.seatHeight(p.x, p.y, st.sitZ)
         : this.plan.terrain ? this.groundHeight(p.x, p.y) : 0;
-      // The sit pose's torso leans back past its origin; slide the body
-      // forward so the back rests against the backrest instead of in it.
       const fwd = st.pose === 'sit' ? SIT_FORWARD : 0;
       let lift = 0;
       if (st.pose !== 'walk' && p.poi && p.poi.float) {
-        // zero gravity: drift up and down, slowly turning
         const k = this.t / 1000 + p.phase;
         lift = 0.45 + Math.sin(k * 0.9) * 0.18;
         a.yaw += dt * 0.35;
       }
-      a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift, p.y + Math.cos(a.yaw) * fwd);
-      if (a.head) {
-        if (st.act === 'nap') { a.head.rotation.x = a.headRest + 0.55; a.napped = true; }
-        else if (a.napped) { a.head.rotation.x = a.headRest; a.napped = false; }
+
+      // Procedural blob motion (no skeletal clips).
+      const t = this.t / 1000 + p.phase;
+      let bob = 0;
+      let sx = a.baseScale, sy = a.baseScale, sz = a.baseScale;
+      let tiltX = 0, tiltZ = 0;
+      if (st.pose === 'walk') {
+        bob = Math.abs(Math.sin(t * 10)) * 0.06;
+        tiltZ = Math.sin(t * 10) * 0.12;
+        sy = a.baseScale * (1 + Math.sin(t * 10) * 0.04);
+      } else if (st.pose === 'sit') {
+        sy = a.baseScale * 0.86;
+        sx = sz = a.baseScale * 1.06;
+        tiltX = 0.18;
+      } else if (a.current === 'emote-yes') {
+        tiltZ = Math.sin(t * 9) * 0.35;
+        bob = Math.abs(Math.sin(t * 9)) * 0.04;
+      } else if (String(a.current).startsWith('interact') || a.current === 'holding-right' || a.current === 'holding-both') {
+        tiltX = 0.22 + Math.sin(t * 6) * 0.06;
+        bob = Math.sin(t * 3) * 0.015;
+      } else if (st.act === 'nap') {
+        tiltX = 0.85;
+        sy = a.baseScale * 0.75;
+        sx = sz = a.baseScale * 1.12;
+      } else {
+        bob = Math.sin(t * 2.2) * 0.02;
       }
-      // hand-held props
+      // Blink: squash eyes occasionally.
+      const blink = Math.sin(t * 0.65) > 0.97;
+      if (a.leftEye && a.rightEye) {
+        const ey = blink || p.s.status === 'idle' ? 0.18 : 1;
+        a.leftEye.scale.set(1, ey, 1);
+        a.rightEye.scale.set(1, ey, 1);
+      }
+      a.obj.scale.set(sx, sy, sz);
+      a.obj.rotation.set(tiltX, a.yaw, tiltZ);
+      a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift + bob, p.y + Math.cos(a.yaw) * fwd);
+
+      // hand-held props float beside the blob
       a.cup.visible = st.act === 'coffee' || st.act === 'water' || (st.pose !== 'walk' && p.poi && p.poi.prop === 'cup');
       a.book.visible = st.act === 'read';
-      if (a.armR && (a.cup.visible || a.book.visible)) {
-        a.obj.updateMatrixWorld(true);
-        const hand = new THREE.Vector3(0, -0.4, 0.15);
-        a.armR.localToWorld(hand);
-        a.prop.position.copy(hand);
+      if (a.cup.visible || a.book.visible) {
+        const side = 0.28 * a.baseScale;
+        a.prop.position.set(
+          p.x + Math.cos(a.yaw) * side + Math.sin(a.yaw) * 0.05,
+          seatY + lift + bob + 0.42 * a.baseScale,
+          p.y - Math.sin(a.yaw) * side + Math.cos(a.yaw) * 0.05,
+        );
         a.prop.rotation.y = a.yaw;
         a.cup.material.color.set(st.act === 'water' ? 0x9fd3ff : 0xffffff);
       }

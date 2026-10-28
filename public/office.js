@@ -36,6 +36,15 @@
   }
   const PANTS = ['#34405a', '#2c2c34', '#4a3f35', '#3b4a3f'];
   const PANEL = ['#7d93c4', '#d98b6a', '#7fb08a', '#c9a24c'];
+  // Grok Bot sidebar blobs (match High 3D avatars): soft flat shapes + oval eyes.
+  const GROK_BLOBS = [
+    { kind: 'triangle', color: '#9b5cff' },
+    { kind: 'drop', color: '#e84545' },
+    { kind: 'cloud', color: '#4ecf7a' },
+    { kind: 'oval', color: '#ff8a3d' },
+    { kind: 'oval-wide', color: '#8b5e3c' },
+    { kind: 'wedge', color: '#ff6fae' },
+  ];
 
   const STATUS_COLOR = {
     thinking: '#8b6be6', tool: '#3b8ee0', typing: '#22a874', waiting: '#e09412',
@@ -1152,6 +1161,39 @@
       return { pose: 'stand', face: 'front', act: null, sitZ: 0 };
     }
 
+    fillGrokBlob(kind, color) {
+      const c = this.ctx;
+      c.fillStyle = color;
+      if (kind === 'cloud') {
+        for (const [cx, cy, r] of [[-7, 2, 7.5], [7, 3, 7.2], [0, -4, 8.5], [-3, 8, 5.5], [4, 8, 5]]) {
+          c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+        }
+        return;
+      }
+      c.beginPath();
+      if (kind === 'triangle') {
+        c.moveTo(0, -16);
+        c.quadraticCurveTo(14, -2, 12, 12);
+        c.quadraticCurveTo(0, 16, -12, 12);
+        c.quadraticCurveTo(-14, -2, 0, -16);
+      } else if (kind === 'drop') {
+        c.moveTo(0, -16);
+        c.bezierCurveTo(9, -6, 13, 2, 8, 10);
+        c.quadraticCurveTo(0, 16, -8, 10);
+        c.bezierCurveTo(-13, 2, -9, -6, 0, -16);
+      } else if (kind === 'wedge') {
+        c.moveTo(0, -15);
+        c.quadraticCurveTo(12, 0, 13, 12);
+        c.quadraticCurveTo(0, 16, -13, 12);
+        c.quadraticCurveTo(-12, 0, 0, -15);
+      } else if (kind === 'oval-wide') {
+        c.ellipse(0, 0, 13, 10, 0, 0, Math.PI * 2);
+      } else {
+        c.ellipse(0, 0, 11, 14, 0, 0, Math.PI * 2);
+      }
+      c.fill();
+    }
+
     person(p) {
       const c = this.ctx;
       const t = this.t / 1000;
@@ -1163,7 +1205,7 @@
       const front = st.face !== 'back';
       const b = this.iso(p.x, p.y, st.sitZ);
       const step = moving ? Math.sin(t * 12 + p.phase) : 0;
-      const bob = moving ? Math.abs(step) * 1.5 : 0;
+      const bob = moving ? Math.abs(step) * 1.5 : Math.sin(t * 2.2 + p.phase) * 0.6;
 
       const fb = this.iso(p.x, p.y, 0);
       c.fillStyle = this.pal.shadow;
@@ -1175,133 +1217,47 @@
       }
 
       let x = b.x;
-      const y = b.y - bob;
+      const y = b.y - bob - (seated ? 2 : 8);
       if (st.act === 'pingpong') x += Math.sin(t * 7 + p.phase) * 4;
       if (st.act === 'foosball') x += Math.sin(t * 5 + p.phase) * 1.5;
       const sc = s.subagent ? 0.8 : 1;
+      const blob = GROK_BLOBS[p.h % GROK_BLOBS.length];
       c.save();
       c.translate(x, y);
       c.scale(sc, sc);
+      if (st.act === 'wave') c.rotate(Math.sin(t * 8 + p.phase) * 0.18);
+      if (st.act === 'nap') { c.rotate(0.9); c.scale(1.08, 0.78); }
+      else if (seated) c.scale(1.05, 0.88);
 
-      c.fillStyle = p.pants;
-      if (seated) {
-        c.fillRect(-5, -4, 4, 5);
-        c.fillRect(1, -4, 4, 5);
-      } else {
-        c.fillRect(-5, -10, 4, 10 + step * 2);
-        c.fillRect(1, -10, 4, 10 - step * 2);
-        c.fillStyle = '#2a2a2a';
-        c.fillRect(-5, -1 + step, 4, 2);
-        c.fillRect(1, -1 - step, 4, 2);
-      }
-      const hip = seated ? -4 : -10;
-      this.roundRect(-7, hip - 13, 14, 14, 3, p.shirt);
-      const arm = this.shade(p.shirt, -18);
-      const hand = (hx, hy) => { c.fillStyle = p.skin; c.beginPath(); c.arc(hx, hy, 2.2, 0, Math.PI * 2); c.fill(); };
-      c.fillStyle = arm;
-      const sip = Math.sin(t * 0.9 + p.phase) > 0.6;
-      switch (st.act) {
-        case 'wave': {
-          const wave = Math.sin(t * 8 + p.phase) * 2;
-          c.fillRect(6, hip - 26, 3, 14);
-          hand(7.5 + wave * 0.5, hip - 27);
-          c.fillStyle = arm; c.fillRect(-9, hip - 11, 3, 10);
-          break;
-        }
-        case 'type': {
-          const k1 = Math.sin(t * 18 + p.phase) > 0 ? 1 : 0;
-          c.fillRect(-9, hip - 11 - k1, 3, 8);
-          c.fillRect(6, hip - 11 - (1 - k1), 3, 8);
-          break;
-        }
-        case 'coffee':
-        case 'water': {
-          c.fillRect(-9, hip - 11, 3, 10);
-          c.fillRect(6, sip ? hip - 15 : hip - 11, 3, sip ? 7 : 10);
-          const cupY = sip && front ? hip - 19 : hip - 4;
-          c.fillStyle = st.act === 'water' ? 'rgba(170,215,255,.95)' : '#fafafa';
-          c.fillRect(6, cupY, 5, 6);
-          if (st.act === 'coffee') { c.fillStyle = '#6b3f22'; c.fillRect(7, cupY, 3, 1.5); }
-          break;
-        }
-        case 'read': {
-          c.fillRect(-8, hip - 11, 3, 7);
-          c.fillRect(5, hip - 11, 3, 7);
-          if (front) { c.fillStyle = pick(this.pal.book, p.h, 5); c.fillRect(-7, hip - 12, 14, 9); c.fillStyle = '#fff'; c.fillRect(-0.5, hip - 12, 1, 9); }
-          break;
-        }
-        case 'whiteboard':
-        case 'arcade': {
-          const k = Math.sin(t * (st.act === 'arcade' ? 14 : 3) + p.phase);
-          c.fillRect(-9, hip - 11, 3, 10);
-          c.fillRect(6, hip - 20 + k * 2, 3, 12);
-          hand(7.5, hip - 21 + k * 2);
-          break;
-        }
-        case 'pingpong': {
-          c.fillRect(-9, hip - 11, 3, 10);
-          c.fillRect(6, hip - 14, 3, 9);
-          c.fillStyle = '#c0392b';
-          c.beginPath(); c.arc(10, hip - 16, 4, 0, Math.PI * 2); c.fill();
-          break;
-        }
-        case 'foosball': {
-          const k1 = Math.sin(t * 16 + p.phase) * 1.5;
-          c.fillRect(-9, hip - 12 + k1, 3, 7);
-          c.fillRect(6, hip - 12 - k1, 3, 7);
-          break;
-        }
-        case 'phone': {
-          c.fillRect(-9, hip - 11, 3, 10);
-          c.fillRect(5, hip - 22, 3, 12);
-          c.fillStyle = '#222'; c.fillRect(5, hip - 25, 3, 6);
-          break;
-        }
-        case 'nap': {
-          c.fillRect(-9, hip - 13, 3, 6);
-          c.fillRect(6, hip - 13, 3, 6);
-          break;
-        }
-        default: {
-          const sw = moving ? step * 2 : 0;
-          c.fillRect(-9, hip - 11 + sw, 3, 10);
-          c.fillRect(6, hip - 11 - sw, 3, 10);
-        }
-      }
+      this.fillGrokBlob(blob.kind, blob.color);
+      // Soft top highlight
+      c.fillStyle = 'rgba(255,255,255,0.22)';
+      c.beginPath(); c.ellipse(-4, -6, 4, 2.2, -0.4, 0, Math.PI * 2); c.fill();
 
-      const napping = st.act === 'nap';
-      const hy = hip - 20 + (napping ? 7 : 0) + (st.act === 'think' ? Math.sin(t * 1.5 + p.phase) * 0.6 : 0);
-      c.fillStyle = p.skin;
-      c.beginPath(); c.arc(0, hy, 7, 0, Math.PI * 2); c.fill();
-      c.fillStyle = p.hair;
-      if (front && !napping) {
-        c.beginPath(); c.arc(0, hy - 1.5, 7.3, Math.PI * 1.05, Math.PI * 1.95); c.fill();
-        if (p.hairStyle === 1) { c.fillRect(-7.3, hy - 2, 2.5, 8); c.fillRect(4.8, hy - 2, 2.5, 8); }
-        if (p.hairStyle === 2) { c.beginPath(); c.arc(0, hy - 8, 3.2, 0, Math.PI * 2); c.fill(); }
-        c.fillStyle = '#2a2018';
+      if (front && st.act !== 'nap') {
         const sleepy = s.status === 'idle';
         const blink = Math.sin(t * 0.7 + p.phase * 3) > 0.985;
-        c.fillRect(-3, hy - 0.5, 1.6, blink || sleepy ? 0.7 : 2);
-        c.fillRect(1.6, hy - 0.5, 1.6, blink || sleepy ? 0.7 : 2);
-        c.strokeStyle = '#2a2018'; c.lineWidth = 1;
-        if (p.mode === 'wander' && !sleepy) {
-          c.beginPath(); c.arc(0, hy + 2.2, 2, 0.15 * Math.PI, 0.85 * Math.PI); c.stroke();
-        } else if (s.status === 'error' && p.mode === 'work') {
-          c.beginPath(); c.arc(0, hy + 4.5, 2, 1.15 * Math.PI, 1.85 * Math.PI); c.stroke();
-        }
-      } else {
-        c.beginPath(); c.arc(0, hy - 0.5, 7.2, 0, Math.PI * 2); c.fill();
-        if (p.hairStyle === 2) { c.beginPath(); c.arc(0, hy - 7, 3.2, 0, Math.PI * 2); c.fill(); }
-        if (p.hairStyle === 1) c.fillRect(-6, hy, 12, 8);
+        c.fillStyle = '#1a1a1a';
+        const eh = blink || sleepy ? 1.1 : 3.4;
+        c.beginPath(); c.ellipse(-3.6, -1, 2.1, eh / 2, 0, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.ellipse(3.6, -1, 2.1, eh / 2, 0, 0, Math.PI * 2); c.fill();
       }
-      if (st.act === 'arcade' || st.act === 'beanbag') {
-        c.strokeStyle = '#222'; c.lineWidth = 2;
-        c.beginPath(); c.arc(0, hy, 8, Math.PI * 1.1, Math.PI * 1.9); c.stroke();
+
+      // Tiny props beside the blob (coffee / book) so wander acts still read.
+      if (st.act === 'coffee' || st.act === 'water') {
+        c.fillStyle = st.act === 'water' ? 'rgba(170,215,255,.95)' : '#fafafa';
+        c.fillRect(10, -2, 5, 7);
+        if (st.act === 'coffee') { c.fillStyle = '#6b3f22'; c.fillRect(11, -1, 3, 2); }
+      } else if (st.act === 'read' && front) {
+        c.fillStyle = pick(this.pal.book, p.h, 5);
+        c.fillRect(9, -6, 8, 11);
+        c.fillStyle = '#fff'; c.fillRect(12.5, -6, 1, 11);
       }
+
       c.restore();
 
-      const headTop = y + (hy - 8) * sc;
-      this.hit.push({ key: p.key, x0: x - 13, x1: x + 13, y0: headTop - 22, y1: fb.y + 4 });
+      const headTop = y - 18 * sc;
+      this.hit.push({ key: p.key, x0: x - 14, x1: x + 14, y0: headTop - 8, y1: fb.y + 4 });
       return { x, y: headTop, act: st.act };
     }
 
