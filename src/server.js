@@ -55,6 +55,12 @@ function view(s, now, { privacy }) {
   if (status === 'tool' && quiet > 45 * 60_000) status = 'idle';
   if ((status === 'waiting' || status === 'error') && quiet > 2 * 3600_000) status = 'idle';
 
+  // Hurly crew keeps a live activity line while thinking/typing (current
+  // Paperclip tool or status). Other agents only have one during a tool call
+  // or when they are waiting, matching the parsers.
+  const hurly = s.agent === 'grokbot' || s.agent === 'paperclip';
+  const showActivity = status === 'tool' || status === 'waiting' || status === 'error'
+    || (hurly && (status === 'thinking' || status === 'typing'));
   const out = {
     key: `${s.agent}:${s.id}`,
     agent: s.agent,
@@ -67,7 +73,7 @@ function view(s, now, { privacy }) {
     title: s.title,
     model: s.model,
     status,
-    activity: status === 'tool' || status === 'waiting' ? s.activity : null,
+    activity: showActivity ? s.activity : null,
     prompt: s.prompt,
     reply: s.reply,
     error: s.error,

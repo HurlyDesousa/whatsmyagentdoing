@@ -1308,8 +1308,8 @@ function narrative(s) {
 const unNeed = (t) => String(t || '').replace(/\s*·\s*needs you$/i, '').trim();
 function statusLine(s) {
   if (s.status === 'waiting') { const a = unNeed(s.activity); return (a && !/^paused$/i.test(a) ? a : '') || s.title || s.reply || 'Waiting for you'; }
-  if (s.status === 'error') return s.error || s.activity || 'Error';
-  if (ACTIVE.has(s.status)) return s.activity || (s.status === 'thinking' ? 'Thinking…' : s.title || L[s.status]);
+  if (s.status === 'error') return s.error || s.activity || s.title || 'Error';
+  if (ACTIVE.has(s.status)) return s.activity || s.title || (s.status === 'thinking' ? 'Thinking…' : L[s.status]);
   if (s.status === 'done') return s.reply || s.title || 'Finished — free for a new task';
   return s.title || 'Idle';
 }

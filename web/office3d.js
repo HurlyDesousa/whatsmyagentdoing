@@ -2140,7 +2140,6 @@ export class Office3D extends window.Office {
       return lines.map((l) => { while (c.measureText(l).width > maxW && l.length > 2) l = l.slice(0, -2) + '…'; return l; });
     };
     const rr = (x, y, w, h, r) => { c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, r) : c.rect(x, y, w, h); };
-    const clean = (v) => String(v || '').replace(/\s*·\s*needs you$/i, '').trim();
     const items = [];
     for (const [p, at] of heads) {
       const s = p.s || {};
@@ -2154,8 +2153,9 @@ export class Office3D extends window.Office {
       const showTag = sel || hov || needs || atDesk || this.showAll;
       let bubble = null;
       if (match && (needs || sel || (this.showAll && working))) {
-        const text = needs ? (clean(s.activity) && !/^paused$/i.test(clean(s.activity)) ? clean(s.activity) : (s.title || clean(s.activity) || 'Waiting for you'))
-          : (s.activity || s.title || s.reply || (kind === 'thinking' ? 'Thinking…' : ''));
+        // speechLine reads the session object on every frame, so an SSE or
+        // /api/sessions patch shows up without a reload.
+        const text = needs ? (this.speechLine(s) || 'Waiting for you') : this.speechLine(s);
         if (text) bubble = { needs, err: kind === 'error', text, step: s.step, steps: s.steps };
       }
       items.push({ p, at, s, kind, sel, hov, match, showTag, bubble, prio: sel ? 3 : needs ? 2 : 1 });
