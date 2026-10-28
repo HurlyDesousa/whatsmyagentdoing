@@ -62,8 +62,8 @@
   // ---- 2D Grok blobs (SWA-2995). Mirrors web/grokblobs.js so the 2D floor
   // shows the same jellyblob crew as the 3D office: same silhouette + colour
   // per agent (keep CREW_LOOKS / NAME_KEYS / SHAPES / RESERVED / EXTRA_COLORS
-  // and blobLook() in sync with web/grokblobs.js), black eyes with a white
-  // glint by default, ?eyes=white for the glowing demo eyes.
+  // and blobLook() in sync with web/grokblobs.js). Drawn plain like the Grok
+  // Bot avatar picker: flat solid fill + two black slanted dash eyes.
   const BLOB_LOOKS = {
     chief: { shape: 'wedge', color: 0x8b5cf6 },       // Chief Master — violet wedge
     monitor: { shape: 'squircle', color: 0xff7417 },   // Monitor — orange squircle
@@ -1293,12 +1293,8 @@
       const bob = moving ? Math.abs(step) * 3 : 0;
 
       const fb = this.iso(p.x, p.y, 0);
-      // Soft coloured glow + shadow under the blob.
+      // Plain flat shadow under the blob (no coloured glow).
       c.save();
-      const g = c.createRadialGradient(fb.x, fb.y, 0, fb.x, fb.y, 15);
-      g.addColorStop(0, col + '88'); g.addColorStop(1, col + '00');
-      c.fillStyle = g;
-      c.beginPath(); c.ellipse(fb.x, fb.y, 15, 7.5, 0, 0, Math.PI * 2); c.fill();
       c.fillStyle = this.pal.shadow;
       c.beginPath(); c.ellipse(fb.x, fb.y, 9 - hover * 0.4, 4.5 - hover * 0.2, 0, 0, Math.PI * 2); c.fill();
       c.restore();
@@ -1331,36 +1327,30 @@
       c.rotate(lean);
       c.scale(sx * k, -sy * k); // unit space, y up
 
-      // Body: colour with a soft top-left highlight and darker underside.
+      // Body: one flat solid colour, like the Grok Bot avatar picker (no
+      // gradient, outline or sheen).
       blobPath(c, look.shape);
-      const grad = c.createLinearGradient(-0.3, top, 0.3, 0);
-      grad.addColorStop(0, this.shade(col, 55));
-      grad.addColorStop(0.45, col);
-      grad.addColorStop(1, this.shade(col, -45));
-      c.fillStyle = grad;
+      c.fillStyle = col;
       c.fill('nonzero');
-      c.lineWidth = 1.1 / k;
-      c.strokeStyle = this.shade(col, -60);
-      if (look.shape !== 'cloud') { c.globalAlpha = 0.55; c.stroke(); c.globalAlpha = 1; }
-      // Specular sheen.
-      c.save();
-      blobPath(c, look.shape); c.clip();
-      c.fillStyle = 'rgba(255,255,255,0.28)';
-      c.beginPath(); c.ellipse(-0.12, top * 0.8, 0.16, 0.07, -0.5, 0, Math.PI * 2); c.fill();
-      c.restore();
 
-      // Eyes: black vertical ovals + white glint by default; ?eyes=white = glowing white.
+      // Eyes: two plain black slanted dashes (picker style). Closed/sleepy =
+      // short flat dashes. ?eyes=white swaps the ink to white.
       if (front) {
         const sleepy = s.status === 'idle' || napping;
         const blink = Math.sin(t * 0.7 + p.phase * 3) > 0.985;
-        const ery = sleepy || blink ? 0.018 : 0.1;
+        const closed = sleepy || blink;
+        c.strokeStyle = BLOB_WHITE_EYES ? '#ffffff' : '#111114';
+        c.lineCap = 'round';
+        c.lineWidth = 0.062;
+        const tilt = 0.22; // lean the dashes slightly, like the picker eyes
         for (const [ex, ey] of BLOB_EYES[look.shape] || BLOB_EYES.oval) {
-          c.fillStyle = BLOB_WHITE_EYES ? '#ffffff' : '#111114';
-          c.beginPath(); c.ellipse(ex, ey, 0.055, ery, 0, 0, Math.PI * 2); c.fill();
-          if (!sleepy && !blink && !BLOB_WHITE_EYES) {
-            c.fillStyle = '#ffffff';
-            c.beginPath(); c.arc(ex + 0.017, ey + 0.045, 0.021, 0, Math.PI * 2); c.fill();
+          c.beginPath();
+          if (closed) { c.moveTo(ex - 0.045, ey); c.lineTo(ex + 0.045, ey); }
+          else {
+            const hl = 0.06, dx = Math.sin(tilt) * hl, dy = Math.cos(tilt) * hl;
+            c.moveTo(ex - dx, ey - dy); c.lineTo(ex + dx, ey + dy);
           }
+          c.stroke();
         }
         if (s.status === 'error' && p.mode === 'work') {
           const [[ax], [bx]] = BLOB_EYES[look.shape] || BLOB_EYES.oval;
