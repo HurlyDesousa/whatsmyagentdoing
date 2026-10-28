@@ -182,7 +182,27 @@ function createServer(watcher, opts, { onShutdown, onRestart, auth = createAuth(
       return;
     }
 
-    if (STATIC[url.pathname]) {
+    if (url.pathname === '/office-bgm.mp3') {
+      // SWA-2995: office background music; supports Range so <audio loop> can seek/restart.
+      const file = path.join(PUBLIC, 'office-bgm.mp3');
+      let size;
+      try { size = fs.statSync(file).size; } catch { res.writeHead(404).end(); return; }
+      const base = { 'content-type': 'audio/mpeg', 'accept-ranges': 'bytes', 'cache-control': 'private, max-age=3600' };
+      const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+      if (m && (m[1] || m[2])) {
+        let start = m[1] ? parseInt(m[1], 10) : size - parseInt(m[2], 10);
+        let end = m[1] && m[2] ? Math.min(parseInt(m[2], 10), size - 1) : size - 1;
+        if (start < 0) start = 0;
+        if (start >= size || start > end) { res.writeHead(416, { 'content-range': `bytes */${size}` }).end(); return; }
+        res.writeHead(206, { ...base, 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': end - start + 1 });
+        if (req.method === 'HEAD') { res.end(); return; }
+        fs.createReadStream(file, { start, end }).pipe(res);
+      } else {
+        res.writeHead(200, { ...base, 'content-length': size });
+        if (req.method === 'HEAD') { res.end(); return; }
+        fs.createReadStream(file).pipe(res);
+      }
+    } else if (STATIC[url.pathname]) {
       const [file, type] = STATIC[url.pathname];
       res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
       fs.createReadStream(path.join(PUBLIC, file)).pipe(res);

@@ -72,6 +72,9 @@
   label.tog { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none; }
   .btn { border: 1px solid var(--line); background: var(--panel); color: var(--muted); padding: 5px 11px; border-radius: 8px; font: inherit; font-size: 12.5px; cursor: pointer; }
   .btn:hover { color: var(--ink); border-color: var(--faint); }
+  .controls > .btn.icon-btn { width: 32px; min-height: 32px; height: 32px; padding: 0; justify-content: center; }
+  .icon-btn svg { width: 16px; height: 16px; display: block; }
+  .icon-btn[aria-pressed="false"] { color: var(--ink); }
   button:focus-visible, select:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid var(--tool); outline-offset: 3px; }
   .toolbar-space { flex: 1; }
   .controls > .btn, .settings > summary { min-height: 36px; display: inline-flex; align-items: center; white-space: nowrap; }
@@ -401,8 +404,10 @@
           </div>
         </div>
       </details>
+      <button class="btn icon-btn" id="bgmBtn" type="button" aria-label="Unmute music" title="Unmute music" aria-pressed="true"></button>
     </div>
   </header>
+  <audio id="officeBgm" src="/office-bgm.mp3" loop preload="auto" hidden></audio>
   <p class="pip-error" id="pipError" role="alert" hidden></p>
   <div class="pip-preview" id="pipPreview" hidden>
     <p data-t="pipVideoHint"></p>
@@ -436,6 +441,66 @@
 <script src="/i18n.js"></script>
 <script src="/office.js"></script>
 <script src="/popout.js"></script>
+<script>
+  // SWA-2995: looping office background music + top-right mute toggle.
+  // Preference persists in localStorage.officeBgmMuted ('1' muted / '0' on). Default: on.
+  // If the browser blocks autoplay with sound, we stay muted until the first user gesture.
+  (function () {
+    const KEY = 'officeBgmMuted';
+    const audio = document.getElementById('officeBgm');
+    const btn = document.getElementById('bgmBtn');
+    if (!audio || !btn) return;
+    const ICON_ON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>';
+    const ICON_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg>';
+    let pref = null;
+    try { pref = localStorage.getItem(KEY); } catch {}
+    let userMuted = pref === '1';
+    audio.loop = true; // continuous seamless loop
+    audio.volume = 0.4;
+    // Belt-and-braces: if 'ended' ever fires (loop unsupported), restart immediately.
+    audio.addEventListener('ended', () => { audio.currentTime = 0; audio.play().catch(() => {}); });
+    function render() {
+      const muted = audio.muted || audio.paused;
+      btn.innerHTML = muted ? ICON_OFF : ICON_ON;
+      const label = muted ? 'Unmute music' : 'Mute music';
+      btn.setAttribute('aria-label', label);
+      btn.title = label;
+      btn.setAttribute('aria-pressed', String(muted));
+    }
+    function save() { try { localStorage.setItem(KEY, userMuted ? '1' : '0'); } catch {} }
+    function start() {
+      audio.muted = userMuted;
+      return audio.play().then(render, () => {
+        // Autoplay with sound blocked: keep it muted (try muted playback) and wait for a gesture.
+        audio.muted = true;
+        audio.play().catch(() => {}).finally(render);
+        armGesture();
+      });
+    }
+    let armed = false;
+    function onGesture(e) {
+      if (e && e.target && btn.contains(e.target)) return; // the button handles itself
+      disarm();
+      if (!userMuted) { audio.muted = false; audio.play().catch(() => {}).finally(render); }
+    }
+    const EVENTS = ['pointerdown', 'keydown', 'touchstart'];
+    function armGesture() { if (armed) return; armed = true; EVENTS.forEach((t) => document.addEventListener(t, onGesture, { capture: true })); }
+    function disarm() { armed = false; EVENTS.forEach((t) => document.removeEventListener(t, onGesture, { capture: true })); }
+    btn.addEventListener('click', () => {
+      disarm();
+      const nowMuted = !(audio.muted || audio.paused);
+      userMuted = nowMuted;
+      save();
+      audio.muted = nowMuted;
+      if (!nowMuted) audio.play().catch(() => {}).finally(render); else render();
+    });
+    audio.addEventListener('play', render);
+    audio.addEventListener('pause', render);
+    audio.addEventListener('volumechange', render);
+    render();
+    start();
+  })();
+</script>
 <script>
   // SWA-2995: show "Sign out" only when the login gate is on.
   (function () {
