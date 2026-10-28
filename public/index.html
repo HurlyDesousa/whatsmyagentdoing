@@ -560,7 +560,7 @@ const store = (() => {
   return { get, set };
 })();
 
-const PREF_DEFAULTS = { view: 'office', quality: 'mid', scene: 'office', agent: 'all', showSub: false, showIdle: true, showAgent: true, lang: 'auto', light: 'now', showAll: false };
+const PREF_DEFAULTS = { view: 'office', quality: 'high', scene: 'office', agent: 'all', showSub: false, showIdle: true, showAgent: true, lang: 'auto', light: 'now', showAll: false };
 function validPreference(k, v) {
   if (!Object.hasOwn(PREF_DEFAULTS, k)) return false;
   if (typeof PREF_DEFAULTS[k] === 'boolean') return typeof v === 'boolean';
