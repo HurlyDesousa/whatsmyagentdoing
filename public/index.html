@@ -489,7 +489,7 @@ const store = (() => {
   return { get, set };
 })();
 
-const PREF_DEFAULTS = { view: 'office', quality: 'mid', scene: 'office', agent: 'all', showSub: false, showIdle: false, showAgent: true, lang: 'auto', light: 'now', showAll: false };
+const PREF_DEFAULTS = { view: 'office', quality: 'mid', scene: 'office', agent: 'all', showSub: false, showIdle: true, showAgent: true, lang: 'auto', light: 'now', showAll: false };
 function validPreference(k, v) {
   if (!Object.hasOwn(PREF_DEFAULTS, k)) return false;
   if (typeof PREF_DEFAULTS[k] === 'boolean') return typeof v === 'boolean';
@@ -652,10 +652,11 @@ function render() {
   // all walking in through the door.
   if (office && state.loaded) {
     office.showAgent = state.showAgent;
+    // "Show idle" (default on) puts the whole crew on the floor, not just 7 wanderers.
+    office.maxWanderers = state.showIdle ? Infinity : 7;
     office.setVisible(officeMode && !poppedOut);
     office.update(officeList);
   }
-  document.getElementById('idleToggle').style.display = officeMode ? 'none' : '';
   if (poppedOut) {
     document.getElementById('officeWrap').style.display = 'none';
     main.innerHTML = `<div class="empty">${esc(L.pipOn)}</div>`;
@@ -663,8 +664,9 @@ function render() {
     return;
   }
   if (officeMode) {
-    main.innerHTML = officeList.length ? '' : `<div class="empty">${esc(L.empty)}</div>`;
-    document.getElementById('officeWrap').style.display = officeList.length ? '' : 'none';
+    // Always show the floor (empty desks are fine); the Team panel says when nobody's in.
+    main.innerHTML = '';
+    document.getElementById('officeWrap').style.display = '';
     refreshTip();
     return;
   }

@@ -213,6 +213,7 @@
       this.people = new Map();
       this.deskOf = new Map();
       this.offDuty = 0;
+      this.maxWanderers = MAX_WANDERERS; // the page lifts this to show the whole crew
       this.first = true;
       this.visible = true;
       this.hit = [];
@@ -484,7 +485,7 @@
       const off = sessions
         .filter((s) => !WORKING.has(s.status))
         .sort((a, b) => (b.lastEventAt || 0) - (a.lastEventAt || 0));
-      const wanderers = off.slice(0, MAX_WANDERERS);
+      const wanderers = off.slice(0, this.maxWanderers);
       this.offDuty = off.length - wanderers.length;
 
       const cap = this.plan.desks.length;

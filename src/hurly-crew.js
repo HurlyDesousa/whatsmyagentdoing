@@ -14,7 +14,7 @@
 // UI statuses: thinking | tool | typing  -> at a desk (working)
 //              waiting                    -> at a desk, waving (needs you)
 //              done                       -> off duty, wanders the office
-//              idle                       -> off the floor (hidden unless "show idle")
+//              idle                       -> asleep on the floor (office shows everyone by default)
 
 const fs = require('fs');
 const path = require('path');
@@ -79,7 +79,11 @@ class HurlyCrew extends EventEmitter {
     this.overrides = {};
     this.overridesMtime = 0;
     const now = Date.now();
-    this.list = CREW.map((c, i) => ({
+    this.list = CREW.map((c, i) => this.entry(c, i, now));
+  }
+
+  entry(c, i, now = Date.now()) {
+    return {
       ...c,
       id: c.key,
       file: null,
@@ -99,7 +103,7 @@ class HurlyCrew extends EventEmitter {
       offset: (i * 5.3) % 17,
       source: 'seed',
       baseRole: c.role || null,
-    }));
+    };
   }
 
   start() {
@@ -134,18 +138,37 @@ class HurlyCrew extends EventEmitter {
       const byId = new Map((Array.isArray(agents) ? agents : []).map((a) => [a.id, a]));
       const issueOf = new Map();
       for (const x of Array.isArray(issues) ? issues : []) if (x.assigneeAgentId && !issueOf.has(x.assigneeAgentId)) issueOf.set(x.assigneeAgentId, x);
+      // Paperclip agents that aren't in the seed (new hires, stand-ins) join
+      // the office too, so the floor always shows the full Paperclip crew.
+      const known = new Set(this.list.map((s) => s.pc).filter(Boolean));
+      const names = new Set(this.list.map((s) => s.name));
+      for (const a of byId.values()) {
+        if (!a || !a.id || known.has(a.id)) continue;
+        const nm = a.name || `Agent ${String(a.id).slice(0, 8)}`;
+        const name = names.has(nm) ? `${nm} (Paperclip)` : nm;
+        names.add(name);
+        this.list.push(this.entry({ key: `pc-${a.id}`, role: a.title || a.role || null, name, agent: 'paperclip', pc: a.id, status: a.status || 'idle', task: a.title || 'Paperclip agent' }, this.list.length));
+        known.add(a.id);
+      }
       for (const s of this.list) {
         if (!s.pc || !byId.has(s.pc)) continue;
         const a = byId.get(s.pc);
         const iss = issueOf.get(s.pc);
         s.live = { role: a.title || a.role || null, status: a.status, heartbeat: a.lastHeartbeatAt, task: iss ? `${iss.identifier} ${iss.title}` : null };
       }
+      if (this.liveError) console.error('paperclip poll recovered');
       this.liveError = null;
       this.liveAt = Date.now();
     } catch (e) {
-      this.liveError = String(e.message || e);
+      const msg = String(e.message || e);
+      if (msg !== this.liveError) console.error(`paperclip poll failed: ${msg} (showing seed/crew.json)`);
+      this.liveError = msg;
     }
-    this.key = null; // force a re-emit
+    return this.finishPoll();
+  }
+
+  finishPoll() {
+    for (const s of this.list) s.sig = null; // force a re-emit
   }
 
   tick() {
@@ -154,7 +177,7 @@ class HurlyCrew extends EventEmitter {
     const now = Date.now();
     let changed = false;
     for (const s of this.list) {
-      const ov = this.overrides[s.key] || {};
+      const ov = this.overrides[s.id] || {};
       let crew = s.crewStatus;
       let task = s.task;
       let source = 'seed';
@@ -189,8 +212,8 @@ class HurlyCrew extends EventEmitter {
       const key = `${crew}|${status}|${stepKey}|${task}|${activity}`;
       // keep lastEventAt fresh so server.view() doesn't decay states
       s.lastEventAt = now;
-      if (key === s.key) continue;
-      s.key = key;
+      if (key === s.sig) continue;
+      s.sig = key;
       changed = true;
       s.crew = crew;
       s.source = source;

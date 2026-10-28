@@ -71,6 +71,10 @@ function parseArgs(argv) {
     else if (a === '--remove-scene') o.removeScene = argv[++i];
     else { console.error(`Unknown option: ${a}\n\n${HELP}`); process.exit(1); }
   }
+  // Container deploys (office.s-w.art): WMAD_HURLY=1, or just a Paperclip board
+  // token, turns on the Hurly crew even if the image CMD forgot `--hurly`
+  // (otherwise the generic watcher scans an empty ~/.claude and shows 0 sessions).
+  if (!o.hurly && !o.demo && (process.env.WMAD_HURLY === '1' || (process.env.PAPERCLIP_CHIEF_BOARD_TOKEN && process.env.WMAD_HURLY !== '0'))) o.hurly = true;
   if (!Number.isFinite(o.port) || !Number.isFinite(o.hours)) { console.error(HELP); process.exit(1); }
   return o;
 }
