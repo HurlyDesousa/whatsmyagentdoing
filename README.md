@@ -1,4 +1,29 @@
-# 👀 whatsmyagentdoing
+# 👀 Hurly ops office (`whatsmyagentdoing` fork)
+
+**3D ops floor for Hurly’s Paperclip crew.** Same isometric office as [Charonyuu/whatsmyagentdoing](https://github.com/Charonyuu/whatsmyagentdoing), adapted so desks are real Paperclip agents (Grok teammates + Cursor/process seats) with working / idle / needs-you states from heartbeats + open issues.
+
+Upstream local-session skill still works (`--local` / `--demo`). This fork’s default, when `PAPERCLIP_*` env is present, is `--paperclip`.
+
+```bash
+git clone https://github.com/HurlyDesousa/whatsmyagentdoing
+cd whatsmyagentdoing
+# needs PAPERCLIP_API_URL, PAPERCLIP_API_KEY, PAPERCLIP_COMPANY_ID
+node bin/cli.js --paperclip --no-open
+# open http://localhost:4545/?view=office&quality=high
+```
+
+Status mapping (read-only; no Grok Bot OAuth, no in-office Auto-review approve):
+
+| Office state | Paperclip signal |
+|---|---|
+| Working (`tool` / `thinking`) | Agent `running`, or open `in_progress` with an active run |
+| Needs you (`waiting`) | `in_review`, blocker attention, human-owned open issue, or blocked queue |
+| Idle / off-duty (`done` / `idle`) | Agent idle/paused with a recent heartbeat and no attention queue |
+| Error | Agent `errorReason` |
+
+---
+
+# Upstream: whatsmyagentdoing
 
 **A Claude Code / Codex skill: type `/myoffice` and see what every Claude Code, Codex, Gemini CLI and OMP (oh-my-pi) agent on your machine is doing — live, in a little office.**
 
