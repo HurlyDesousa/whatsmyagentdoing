@@ -795,38 +795,124 @@ function onData(data) {
   render();
 }
 
-// Live data comes over SSE (/events). SWA-2995: if a proxy buffers/blocks the
-// stream or it 401s (EventSource then gives up for good), poll /api/sessions
-// so the Team panel and desks still fill in; stop polling once SSE delivers.
+// Live data comes over SSE (/events). Proxies in front of the office
+// (Cloudflare ~100s, Kemp/nginx often ~60s) cut a quiet stream. The server
+// sends a padded comment plus a named `ping` every 15s: the bytes keep the
+// proxy idle timer reset, and `ping` lets us see a black-holed socket
+// (SSE comments never reach JS).
+// EventSource stops retrying when readyState is CLOSED (401, or a proxy
+// 502/504 HTML page). Polling /api/sessions kept the floor live, but the
+// red pill only cleared on an SSE message, so it stayed on. A successful
+// poll or a reopened stream clears it.
 const POLL_MS = 5000;
-let sseLive = false, pollTimer = 0;
+const SSE_STALE_MS = 45000;
+const DISCONNECT_GRACE_MS = 4000;
+const ES_CONNECTING = 0, ES_OPEN = 1, ES_CLOSED = 2;
+let sseLive = false, pollTimer = 0, pollGen = 0, pollInFlight = false;
+let reconnectTimer = 0, reconnectAttempt = 0, disconnectTimer = 0;
+let es = null, lastBeat = 0;
+function showDisconnected(stuck) {
+  const conn = document.getElementById('conn');
+  if (!conn) return;
+  if (!stuck) {
+    clearTimeout(disconnectTimer);
+    disconnectTimer = 0;
+    conn.classList.remove('on');
+    return;
+  }
+  // A native retry (retry: 2000) or one poll usually lands inside this
+  // window; don't flash the badge for a blip that already recovered.
+  if (conn.classList.contains('on') || disconnectTimer) return;
+  disconnectTimer = setTimeout(() => {
+    disconnectTimer = 0;
+    if (!sseLive) conn.classList.add('on');
+  }, DISCONNECT_GRACE_MS);
+}
+function noteBeat() {
+  lastBeat = Date.now();
+  sseLive = true;
+  reconnectAttempt = 0;
+  pollGen++;
+  clearTimeout(pollTimer);
+  pollTimer = 0;
+  showDisconnected(false);
+}
 function pollSessions() {
   clearTimeout(pollTimer);
-  if (sseLive) return;
+  pollTimer = 0;
+  if (sseLive || pollInFlight) return;
+  const gen = ++pollGen;
+  pollInFlight = true;
   fetch('/api/sessions', { credentials: 'same-origin', cache: 'no-store' }).then((r) => {
     if (r.status === 401) { location.href = '/login'; return null; }
     return r.ok ? r.json() : null;
-  }).then((d) => { if (d && !sseLive && Array.isArray(d.sessions)) onData(d); }).catch(() => {})
-    .finally(() => { if (!sseLive) pollTimer = setTimeout(pollSessions, POLL_MS); });
+  }).then((d) => {
+    if (gen !== pollGen || sseLive) return;
+    if (d && Array.isArray(d.sessions)) { onData(d); showDisconnected(false); }
+    else showDisconnected(true);
+  }).catch(() => { if (gen === pollGen && !sseLive) showDisconnected(true); })
+    .finally(() => {
+      pollInFlight = false;
+      if (!sseLive && gen === pollGen) pollTimer = setTimeout(pollSessions, POLL_MS);
+    });
+}
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  const delay = Math.min(15000, 1000 * (2 ** Math.min(reconnectAttempt, 4)));
+  reconnectAttempt++;
+  reconnectTimer = setTimeout(() => { reconnectTimer = 0; connect(); }, delay);
 }
 function connect() {
-  const conn = document.getElementById('conn');
-  let es;
-  try { es = new EventSource('/events'); } catch (e) { console.error(e); conn.classList.add('on'); pollSessions(); return; }
+  clearTimeout(reconnectTimer);
+  reconnectTimer = 0;
+  pollGen++;
+  clearTimeout(pollTimer);
+  pollTimer = 0;
+  sseLive = false;
+  if (es) {
+    es.onopen = es.onmessage = es.onerror = null;
+    try { es.close(); } catch (e) { console.error(e); }
+    es = null;
+  }
+  try { es = new EventSource('/events'); }
+  catch (e) {
+    console.error(e);
+    showDisconnected(true);
+    pollSessions();
+    scheduleReconnect();
+    return;
+  }
+  lastBeat = Date.now();
+  // The UI test stubs EventSource without addEventListener; pings are optional.
+  if (typeof es.addEventListener === 'function') es.addEventListener('ping', () => noteBeat());
+  es.onopen = () => { lastBeat = Date.now(); };
   es.onmessage = (e) => {
     let d;
     try { d = JSON.parse(e.data); } catch (err) { console.error('bad /events payload', err); return; }
-    sseLive = true; clearTimeout(pollTimer);
-    conn.classList.remove('on');
+    if (!d || !Array.isArray(d.sessions)) return;
+    noteBeat();
     onData(d);
   };
   es.onerror = () => {
-    conn.classList.add('on');
-    if (es.readyState === EventSource.CLOSED) { sseLive = false; pollSessions(); }
+    sseLive = false;
+    showDisconnected(true);
+    pollSessions();
+    // CLOSED: the browser will not retry. CONNECTING: native retry is in flight.
+    if (es && es.readyState === ES_CLOSED) scheduleReconnect();
   };
   // Nothing on the stream yet (buffering proxy?): start polling meanwhile.
   pollTimer = setTimeout(() => { if (!sseLive) pollSessions(); }, POLL_MS);
 }
+// readyState stays OPEN when a proxy black-holes the socket without a TCP close.
+function watchSse() {
+  if (!es || (es.readyState !== ES_OPEN && es.readyState !== ES_CONNECTING)) return;
+  if (!lastBeat || Date.now() - lastBeat < SSE_STALE_MS) return;
+  console.warn('SSE silent; reopening');
+  connect();
+  showDisconnected(true);
+  pollSessions();
+}
+setInterval(watchSse, 5000);
 
 // Native disclosure keeps settings keyboard-accessible without a modal focus trap.
 const settingsMenu = document.getElementById('settingsMenu');
