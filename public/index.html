@@ -580,6 +580,14 @@ function readPreferences() {
 const PIP = new URLSearchParams(location.search).get('pip') === '1';
 if (PIP) document.body.classList.add('pip');
 
+// SWA-2995: 1679b7f saved quality='mid' every time 3D timed out, pinning the
+// browser to the (then endless) 2D loader. Forget that auto-saved value once
+// so 3D gets a fresh try; an explicit ?quality= below still wins.
+if (!PIP && store.get('q3dRetry', null) !== 2995) {
+  if (store.get('quality', null) === 'mid') store.set('quality', PREF_DEFAULTS.quality);
+  store.set('q3dRetry', 2995);
+}
+
 // ?view=office&quality=high&scene=pirate (what `--scene` opens) sets the prefs.
 {
   const q = new URLSearchParams(location.search);
@@ -780,15 +788,42 @@ function onData(data) {
   logChanges(data.sessions, first);
   state.data = data;
   state.loaded = true;
+  markDataReady();
   applyLang(chooseLang(data.lang));
   render();
 }
 
+// Live data comes over SSE (/events). SWA-2995: if a proxy buffers/blocks the
+// stream or it 401s (EventSource then gives up for good), poll /api/sessions
+// so the Team panel and desks still fill in; stop polling once SSE delivers.
+const POLL_MS = 5000;
+let sseLive = false, pollTimer = 0;
+function pollSessions() {
+  clearTimeout(pollTimer);
+  if (sseLive) return;
+  fetch('/api/sessions', { credentials: 'same-origin', cache: 'no-store' }).then((r) => {
+    if (r.status === 401) { location.href = '/login'; return null; }
+    return r.ok ? r.json() : null;
+  }).then((d) => { if (d && !sseLive && Array.isArray(d.sessions)) onData(d); }).catch(() => {})
+    .finally(() => { if (!sseLive) pollTimer = setTimeout(pollSessions, POLL_MS); });
+}
 function connect() {
-  const es = new EventSource('/events');
   const conn = document.getElementById('conn');
-  es.onmessage = (e) => { conn.classList.remove('on'); onData(JSON.parse(e.data)); };
-  es.onerror = () => conn.classList.add('on');
+  let es;
+  try { es = new EventSource('/events'); } catch (e) { console.error(e); conn.classList.add('on'); pollSessions(); return; }
+  es.onmessage = (e) => {
+    let d;
+    try { d = JSON.parse(e.data); } catch (err) { console.error('bad /events payload', err); return; }
+    sseLive = true; clearTimeout(pollTimer);
+    conn.classList.remove('on');
+    onData(d);
+  };
+  es.onerror = () => {
+    conn.classList.add('on');
+    if (es.readyState === EventSource.CLOSED) { sseLive = false; pollSessions(); }
+  };
+  // Nothing on the stream yet (buffering proxy?): start polling meanwhile.
+  pollTimer = setTimeout(() => { if (!sseLive) pollSessions(); }, POLL_MS);
 }
 
 // Native disclosure keeps settings keyboard-accessible without a modal focus trap.
@@ -893,14 +928,31 @@ let officeKind = null;
 // Until the new office has drawn a settled frame, show a loader instead of a
 // half-built scene.
 const officeEl = document.getElementById('office');
+// SWA-2995: the loader must never spin forever. Every setLoading(true) arms a
+// hard watchdog; if nothing hides the loader by then, hide it anyway (the
+// office canvas underneath is already drawing the floor).
+const LOADER_HARD_MAX_MS = 20000;
+let loaderWatchdog = 0;
 function setLoading(on, text) {
   officeEl.classList.toggle('loading', on);
   if (text) document.getElementById('loaderText').textContent = text;
+  clearTimeout(loaderWatchdog);
+  if (on) loaderWatchdog = setTimeout(() => {
+    console.warn(`office loader still up after ${LOADER_HARD_MAX_MS} ms; hiding it`);
+    officeEl.classList.remove('loading');
+  }, LOADER_HARD_MAX_MS);
 }
 // SWA-2995: hard budget for bringing up the 3D office (module import + scene
 // pack manifest + GLB loads + settled frames). If it doesn't report ready in
 // time we fail soft to the 2D office instead of spinning forever.
 const OFFICE3D_TIMEOUT_MS = 14000;
+// The 2D office is local canvas drawing: if it hasn't settled in this long
+// (e.g. no session snapshot yet), show it anyway.
+const OFFICE2D_TIMEOUT_MS = 3000;
+// office.ready only resolves after the first session snapshot (so people start
+// at their desks). If /events is slow, blocked or 401s, don't let that hold the
+// office hostage: after this grace, settle on an empty floor.
+const DATA_GRACE_MS = 4000;
 const TIMED_OUT = Symbol('timeout');
 function withDeadline(p, deadline) {
   const ms = Math.max(0, deadline - performance.now());
@@ -910,9 +962,13 @@ function withDeadline(p, deadline) {
     new Promise((res) => { t = setTimeout(() => res(TIMED_OUT), ms); }),
   ]);
 }
+let markDataReady;
+const dataReady = new Promise((ok) => (markDataReady = ok));
+// Automatic fallback is for this page load only: don't save 'mid' (a slow
+// network once would otherwise pin the browser to 2D for good).
 function fallbackTo2D() {
   setLoading(true, L.failed3d);
-  state.quality = 'mid'; store.set('quality', 'mid'); syncControls();
+  state.quality = 'mid'; syncControls();
   setTimeout(() => makeOffice(), 1200);
 }
 async function makeOffice() {
@@ -922,7 +978,7 @@ async function makeOffice() {
   if (kind === officeKind) return;
   officeKind = kind;
   setLoading(true, high ? L.loading3d : L.loading2d);
-  const deadline = performance.now() + OFFICE3D_TIMEOUT_MS;
+  const deadline = performance.now() + (high ? OFFICE3D_TIMEOUT_MS : OFFICE2D_TIMEOUT_MS);
   let Cls = window.Office;
   const opts = { ...officeOpts, showAgent: state.showAgent };
   if (high) {
@@ -940,21 +996,33 @@ async function makeOffice() {
     if (officeKind !== kind) return;
     if (failed) { fallbackTo2D(); return; }
   }
-  if (office) office.destroy();
+  if (office) { try { office.destroy(); } catch (e) { console.error(e); } office = null; }
   let mine;
   try {
     mine = new Cls(officeEl, opts);
   } catch (e) {
     console.error(e);
-    mine = new window.Office(officeEl, officeOpts);
-    if (high) { state.quality = 'mid'; store.set('quality', 'mid'); officeKind = 'mid'; syncControls(); }
+    if (high) { state.quality = 'mid'; officeKind = 'mid'; syncControls(); }
+    try { mine = new window.Office(officeEl, officeOpts); } catch (e2) { console.error(e2); setLoading(false); return; }
   }
   office = mine;
   office.offDutyLabel = L.wentHome;
   render();
-  let ok = high ? await withDeadline(mine.ready, deadline) : await mine.ready;
+  // No snapshot yet? Give it a moment, then settle on the empty floor so the
+  // office (3D or 2D) can report ready; real data still flows in later.
+  if (!state.loaded) {
+    withDeadline(dataReady, performance.now() + DATA_GRACE_MS).then(() => {
+      if (office !== mine || state.loaded) return;
+      console.warn(`no session snapshot after ${DATA_GRACE_MS} ms; showing an empty office`);
+      try { mine.update([]); } catch (e) { console.error(e); }
+    });
+  }
+  let ok = await withDeadline(mine.ready || true, deadline);
   if (office !== mine) return;
-  if (ok === TIMED_OUT) { console.warn(`3D office not ready after ${OFFICE3D_TIMEOUT_MS} ms; falling back to 2D`); ok = false; }
+  if (ok === TIMED_OUT) {
+    console.warn(`${high ? '3D' : '2D'} office not ready after ${high ? OFFICE3D_TIMEOUT_MS : OFFICE2D_TIMEOUT_MS} ms`);
+    ok = !high; // 2D: it's already drawing the floor, just show it
+  }
   if (!ok && high) {
     // 3D failed or hung (no WebGL, missing/slow files…): fall back to the 2D office.
     fallbackTo2D();

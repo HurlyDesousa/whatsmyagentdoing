@@ -239,7 +239,7 @@ function createServer(watcher, opts, { onShutdown, onRestart, auth = createAuth(
         (e) => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: String(e.message || e) })); },
       );
     } else if (url.pathname === '/api/sessions') {
-      res.writeHead(200, { 'content-type': 'application/json' });
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(snapshot(watcher, opts)));
     } else if (url.pathname === '/api/shutdown' && req.method === 'POST') {
       // Only our CLI sends this header; a web page can't add a custom header
@@ -275,9 +275,12 @@ function createServer(watcher, opts, { onShutdown, onRestart, auth = createAuth(
     } else if (url.pathname === '/events') {
       res.writeHead(200, {
         'content-type': 'text/event-stream',
-        'cache-control': 'no-store',
+        'cache-control': 'no-store, no-transform',
         connection: 'keep-alive',
+        // SWA-2995: tell nginx/Cloudflare-style proxies not to buffer the stream.
+        'x-accel-buffering': 'no',
       });
+      res.flushHeaders?.();
       res.write(`data: ${JSON.stringify(snapshot(watcher, opts))}\n\n`);
       clients.add(res);
       req.on('close', () => clients.delete(res));
