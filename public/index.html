@@ -168,6 +168,8 @@
   [data-s="idle"] .ind::before { content: "–"; color: var(--s); }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 
+  .office-stage { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 280px); gap: 12px; align-items: stretch; }
+  @media (max-width: 860px) { .office-stage { grid-template-columns: 1fr; } }
   .office { position: relative; height: min(74vh, 820px); min-height: 380px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--panel); }
   .office-canvas { display: block; }
   .office canvas { transition: opacity .35s; }
@@ -177,6 +179,22 @@
   .office-loader .spin { width: 26px; height: 26px; border: 3px solid var(--line); border-top-color: var(--tool); border-radius: 50%; animation: spin .8s linear infinite; }
   .office-gl, .office-overlay { position: absolute; inset: 0; }
   .office-overlay { touch-action: none; }
+  .status-rail { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .status-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .status-panel h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+  .team-list { display: flex; flex-direction: column; gap: 8px; overflow: auto; max-height: min(36vh, 360px); }
+  .team-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; }
+  .team-row .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .team-row .meta { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; flex: none; }
+  .team-row .role { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42%; }
+  .activity-feed { display: flex; flex-direction: column; gap: 8px; overflow: auto; max-height: min(28vh, 280px); flex: 1; }
+  .activity-item { display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--bg) 70%, var(--panel)); border: 1px solid var(--line); }
+  .activity-item .who { font-size: 12px; font-weight: 600; color: var(--ink); display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .activity-item .what { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .activity-item .when { font-size: 11px; color: var(--faint); }
+  .activity-empty { color: var(--faint); font-size: 12.5px; padding: 8px 2px; }
+  body.pip .office-stage { display: block; }
+  body.pip .status-rail, body.pip #lightSeg { display: none !important; }
   .tip { position: fixed; z-index: 10; width: 320px; max-width: calc(100vw - 24px); pointer-events: none; display: none; }
   .tip.pinned { pointer-events: auto; }
   .tip .card { box-shadow: 0 8px 30px rgba(0,0,0,.18); }
@@ -232,6 +250,12 @@
         <button data-v="mid" data-t="qMid"></button>
         <button data-v="high" data-t="qHigh"></button>
       </div>
+      <div class="seg" id="lightSeg" role="group" aria-label="Lighting">
+        <button data-v="now" data-t="lightNow"></button>
+        <button data-v="day" data-t="lightDay"></button>
+        <button data-v="evening" data-t="lightEvening"></button>
+        <button data-v="night" data-t="lightNight"></button>
+      </div>
       <span class="toolbar-space" aria-hidden="true"></span>
       <button class="btn" id="pipBtn" hidden></button>
       <details class="settings" id="settingsMenu">
@@ -276,7 +300,19 @@
     <button class="btn" id="closePreview" data-t="pipStop"></button>
   </div>
   <div id="officeWrap">
-    <div class="office loading" id="office"><div class="office-loader"><div class="spin"></div><span id="loaderText"></span></div></div>
+    <div class="office-stage">
+      <div class="office loading" id="office"><div class="office-loader"><div class="spin"></div><span id="loaderText"></span></div></div>
+      <aside class="status-rail" id="statusRail" aria-label="Team and activity">
+        <section class="status-panel" id="teamPanel">
+          <h3 data-t="team"></h3>
+          <div class="team-list" id="teamOverview"></div>
+        </section>
+        <section class="status-panel" id="activityPanel">
+          <h3 data-t="activity"></h3>
+          <div class="activity-feed" id="activityCard"></div>
+        </section>
+      </aside>
+    </div>
     <div class="legend" id="legend"></div>
     <div class="legend" id="agentLegend"></div>
   </div>
@@ -327,12 +363,13 @@ const store = (() => {
   return { get, set };
 })();
 
-const PREF_DEFAULTS = { view: 'office', quality: 'mid', scene: 'office', agent: 'all', showSub: false, showIdle: false, showAgent: true, lang: 'auto' };
+const PREF_DEFAULTS = { view: 'office', quality: 'mid', scene: 'office', agent: 'all', showSub: false, showIdle: false, showAgent: true, lang: 'auto', light: 'now' };
 function validPreference(k, v) {
   if (!Object.hasOwn(PREF_DEFAULTS, k)) return false;
   if (typeof PREF_DEFAULTS[k] === 'boolean') return typeof v === 'boolean';
   if (k === 'view') return ['office', 'list'].includes(v);
   if (k === 'quality') return ['mid', 'high'].includes(v);
+  if (k === 'light') return ['now', 'day', 'evening', 'night'].includes(v);
   if (k === 'agent') return ['all', ...Object.keys(OFFICE_AGENT_BADGES)].includes(v);
   if (k === 'lang') return v === 'auto' || Object.hasOwn(I18N, v);
   return typeof v === 'string' && /^[a-z0-9-]+$/.test(v);
@@ -452,6 +489,52 @@ function visible() {
     (state.showIdle || s.status !== 'idle'));
 }
 
+function statusLabel(s) {
+  return L[s] || s;
+}
+
+function renderStatusPanels(all, now) {
+  const teamEl = document.getElementById('teamOverview');
+  const actEl = document.getElementById('activityCard');
+  if (!teamEl || !actEl) return;
+  const roster = all
+    .filter((s) => !s.subagent)
+    .slice()
+    .sort((a, b) => {
+      const rank = (s) => (s.status === 'waiting' || s.status === 'error' ? 0 : ACTIVE.has(s.status) ? 1 : s.status === 'idle' ? 3 : 2);
+      return rank(a) - rank(b) || String(a.project || a.agent).localeCompare(String(b.project || b.agent));
+    });
+  teamEl.innerHTML = roster.length
+    ? roster.map((s) => {
+      const name = s.project || AGENT_NAME[s.agent] || s.agent;
+      return `<div class="team-row" data-s="${esc(s.status)}">
+        <span class="dot" style="color:var(--s)"></span>
+        ${agentLogo(s.agent)}
+        <span class="name" title="${esc(name)}">${esc(name)}</span>
+        <span class="role">${esc(AGENT_NAME[s.agent] || s.agent)}</span>
+        <span class="meta">${esc(statusLabel(s.status))}</span>
+      </div>`;
+    }).join('')
+    : `<div class="activity-empty">${esc(L.empty)}</div>`;
+
+  const feed = all
+    .filter((s) => s.activity || ACTIVE.has(s.status) || s.status === 'waiting' || s.status === 'error')
+    .slice()
+    .sort((a, b) => (b.lastEventAt || 0) - (a.lastEventAt || 0))
+    .slice(0, 8);
+  actEl.innerHTML = feed.length
+    ? feed.map((s) => {
+      const what = s.activity || s.title || statusLabel(s.status);
+      const who = s.project || AGENT_NAME[s.agent] || s.agent;
+      return `<div class="activity-item" data-s="${esc(s.status)}">
+        <div class="who">${agentLogo(s.agent)}<span title="${esc(who)}">${esc(who)}</span></div>
+        <div class="what" title="${esc(what)}">${esc(what)}</div>
+        <div class="when">${esc(timeLabel(s, now) || statusLabel(s.status))}</div>
+      </div>`;
+    }).join('')
+    : `<div class="activity-empty">${esc(L.noActivity)}</div>`;
+}
+
 function render() {
   const now = Date.now() - state.skew;
   const list = visible();
@@ -478,6 +561,7 @@ function render() {
   // all walking in through the door.
   if (office && state.loaded) {
     office.showAgent = state.showAgent;
+    if (typeof office.setLightMode === 'function') office.setLightMode(state.light);
     office.setVisible(officeMode && !poppedOut);
     office.update(officeList);
   }
@@ -491,6 +575,7 @@ function render() {
   if (officeMode) {
     main.innerHTML = officeList.length ? '' : `<div class="empty">${esc(L.empty)}</div>`;
     document.getElementById('officeWrap').style.display = officeList.length ? '' : 'none';
+    renderStatusPanels(officeList, now);
     refreshTip();
     return;
   }
@@ -560,6 +645,11 @@ document.getElementById('qualSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   state.quality = b.dataset.v; store.set('quality', state.quality); hideTip(); syncControls(); makeOffice();
 });
+document.getElementById('lightSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.light = b.dataset.v; store.set('light', state.light); hideTip(); syncControls();
+  if (office && typeof office.setLightMode === 'function') office.setLightMode(state.light);
+});
 document.getElementById('viewSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   state.view = b.dataset.v; store.set('view', state.view); hideTip(); syncControls(); render();
@@ -580,7 +670,9 @@ function syncControls() {
   document.querySelectorAll('#agentSeg button').forEach((b) => b.classList.toggle('on', b.dataset.v === state.agent));
   document.querySelectorAll('#viewSeg button').forEach((b) => b.classList.toggle('on', b.dataset.v === state.view));
   document.querySelectorAll('#qualSeg button').forEach((b) => b.classList.toggle('on', b.dataset.v === state.quality));
+  document.querySelectorAll('#lightSeg button').forEach((b) => b.classList.toggle('on', b.dataset.v === state.light));
   document.getElementById('qualSeg').style.display = state.view === 'office' ? '' : 'none';
+  document.getElementById('lightSeg').style.display = state.view === 'office' ? '' : 'none';
   document.getElementById('sceneGroup').hidden = state.view !== 'office' || state.quality !== 'high';
   const activeFilter = document.getElementById('activeFilter');
   activeFilter.hidden = state.agent === 'all';
@@ -656,7 +748,7 @@ async function makeOffice() {
   officeKind = kind;
   setLoading(true, high ? L.loading3d : L.loading2d);
   let Cls = window.Office;
-  const opts = { ...officeOpts, showAgent: state.showAgent };
+  const opts = { ...officeOpts, showAgent: state.showAgent, lightMode: state.light };
   if (high) {
     try {
       Cls = (await import('/office3d.js')).Office3D;
@@ -678,6 +770,7 @@ async function makeOffice() {
   }
   office = mine;
   office.offDutyLabel = L.wentHome;
+  if (typeof office.setLightMode === 'function') office.setLightMode(state.light);
   render();
   const ok = await mine.ready;
   if (office !== mine) return;
