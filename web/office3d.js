@@ -6,10 +6,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-
-const CHARACTERS = ['male-a', 'male-b', 'male-c', 'male-d', 'male-e', 'male-f',
-  'female-a', 'female-b', 'female-c', 'female-d', 'female-e', 'female-f'];
+import { buildBlob, blobLookFor } from './grokblobs.js';
 const FURNITURE = ['desk', 'chairDesk', 'computerScreen', 'computerKeyboard', 'computerMouse', 'laptop',
   'pottedPlant', 'plantSmall1', 'plantSmall2', 'plantSmall3', 'kitchenCabinet', 'kitchenCoffeeMachine',
   'kitchenSink', 'kitchenFridgeLarge', 'kitchenMicrowave', 'stoolBar', 'tableRound', 'table',
@@ -20,9 +17,11 @@ const FURNITURE = ['desk', 'chairDesk', 'computerScreen', 'computerKeyboard', 'c
 const STATUS_COLOR = {
   thinking: 0x8b6be6, tool: 0x3b8ee0, typing: 0x22a874, waiting: 0xe09412, error: 0xde4b40,
 };
-const CHAR_HEIGHT = 0.92; // world units (≈ tiles)
+const CHAR_HEIGHT = 1.02; // world units (≈ tiles)
 const WALL_H = 2.4;
 const SIT_FORWARD = 0.16;
+
+const dark3 = (o) => !!(o.pal && o.pal.dark);
 
 // Turn a scene manifest into the floor plan the shared simulation uses:
 // stations play the part of desks, pois are where off-duty agents hang out.
@@ -98,7 +97,7 @@ export class Office3D extends window.Office {
     this.controls.screenSpacePanning = true;
     this.controls.zoomToCursor = true;
 
-    this.hemi = new THREE.HemisphereLight(0xfff8ee, 0x8a7a66, 1.0);
+    this.hemi = new THREE.HemisphereLight(0xfff4e2, 0x9a8468, 1.05);
     this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff1dc, 1.6);
     this.sun.castShadow = true;
@@ -107,7 +106,7 @@ export class Office3D extends window.Office {
     this.sun.shadow.normalBias = 0.02;
     this.scene.add(this.sun, this.sun.target);
 
-    this.actors = new Map();     // person key -> { obj, mixer, actions, current, head, cup }
+    this.actors = new Map();     // person key -> { obj, blob, look, prop, cup, book }
     this.screens = new Map();    // desk -> emissive screen mesh
     this.blinkers = [];
     this.loaded = false;
@@ -139,11 +138,8 @@ export class Office3D extends window.Office {
     const loader = new GLTFLoader();
     loader.setMeshoptDecoder(MeshoptDecoder);
     const get = (url) => new Promise((ok, fail) => loader.load(url, ok, undefined, fail));
-    const [chars, furn] = await Promise.all([
-      Promise.all(CHARACTERS.map((c) => get(`/assets/kenney/characters/character-${c}.glb`))),
-      Promise.all(FURNITURE.map((f) => get(`/assets/kenney/furniture/${f}.glb`).then((g) => [f, g.scene]))),
-    ]);
-    this.chars = chars;
+    // Workers are procedural Grok blobs (grokblobs.js); only furniture is loaded.
+    const furn = await Promise.all(FURNITURE.map((f) => get(`/assets/kenney/furniture/${f}.glb`).then((g) => [f, g.scene])));
     this.models = Object.fromEntries(furn);
     if (this.sceneDef) {
       const extra = [...new Set(this.sceneDef.props.filter((p) => p.f && !this.models[p.f]).map((p) => p.f))];
@@ -239,10 +235,11 @@ export class Office3D extends window.Office {
       this.room.add(m);
     };
     const planks = this.patternTexture((c, s) => {
-      c.fillStyle = dark ? '#4a3f35' : '#e3cfb0'; c.fillRect(0, 0, s, s);
-      c.strokeStyle = dark ? 'rgba(0,0,0,.25)' : 'rgba(120,90,50,.18)'; c.lineWidth = 2;
-      for (let i = 0; i <= 4; i++) { c.beginPath(); c.moveTo(0, i * s / 4); c.lineTo(s, i * s / 4); c.stroke(); }
-      for (let i = 0; i < 4; i++) { const x = ((i * 37) % 4 + 0.5) * s / 4; c.beginPath(); c.moveTo(x, i * s / 4); c.lineTo(x, (i + 1) * s / 4); c.stroke(); }
+      // light tan floor tiles (Grok Bot Office look)
+      c.fillStyle = dark ? '#5a4a3a' : '#e9d2a6'; c.fillRect(0, 0, s, s);
+      c.fillStyle = dark ? '#544536' : '#e2c999'; c.fillRect(0, 0, s / 2, s / 2); c.fillRect(s / 2, s / 2, s / 2, s / 2);
+      c.strokeStyle = dark ? 'rgba(0,0,0,.28)' : 'rgba(150,110,60,.22)'; c.lineWidth = 2;
+      for (let i = 0; i <= 2; i++) { c.beginPath(); c.moveTo(0, i * s / 2); c.lineTo(s, i * s / 2); c.stroke(); c.beginPath(); c.moveTo(i * s / 2, 0); c.lineTo(i * s / 2, s); c.stroke(); }
     });
     const tiles = this.patternTexture((c, s) => {
       c.fillStyle = dark ? '#3d4044' : '#f4f4f1'; c.fillRect(0, 0, s, s);
@@ -261,8 +258,8 @@ export class Office3D extends window.Office {
     this.room.add(mat);
 
     // walls: back (z=0) with windows, left (x=0) with a door
-    const wallCol = dark ? 0x4a4640 : 0xf4efe6;
-    const wallMat = new THREE.MeshStandardMaterial({ color: wallCol, roughness: 0.95 });
+    const wallCol = dark ? 0x3e4655 : 0x9aa5b4; // slate gray
+    const wallMat = new THREE.MeshStandardMaterial({ color: wallCol, roughness: 1 });
     const T = 0.12;
     let cx = -T;
     const sky = skyNow();
@@ -285,6 +282,13 @@ export class Office3D extends window.Office {
     this.boxMesh(-T, dy - 0.6, 1.8, T, 1.2, WALL_H - 1.8, 0, { mat: wallMat });
     this.boxMesh(-T + 0.02, dy - 0.55, 0, 0.06, 1.1, 1.78, dark ? 0x5c4431 : 0xa8825a);
     this.boxMesh(0, dy - 0.6, 0, 0.9, 1.2, 0.01, dark ? 0x5a3b2e : 0xb9654a, { shadow: false });
+    // magenta doorway glow (demo look)
+    const doorGlow = new THREE.PointLight(0xff3fb4, 3.2, 5.5, 1.6);
+    doorGlow.position.set(0.6, 1.9, dy);
+    this.room.add(doorGlow);
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 2.6), new THREE.MeshBasicMaterial({ map: this.glowTexture('255,63,180'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    halo.rotation.y = Math.PI / 2; halo.position.set(0.02, 1.2, dy);
+    this.room.add(halo);
     // posters + whiteboard
     for (const ps of plan.posters) {
       const m = this.textPlane(ps.text, ps.color, 0.9, 1.0);
@@ -304,6 +308,39 @@ export class Office3D extends window.Office {
 
     for (const p of plan.props) this.buildProp(p);
     this.fitCamera3D(true);
+  }
+
+  // Swap Kenney material colours by material name (clones, so other copies keep theirs).
+  recolor(m, colors, glow = {}) {
+    if (!m) return m;
+    m.traverse((o) => {
+      if (!o.isMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      const out = mats.map((mt) => {
+        if (colors[mt.name] == null) return mt;
+        const c = mt.clone(); c.color.setHex(colors[mt.name]);
+        if (glow[mt.name] != null) { c.emissive = new THREE.Color(glow[mt.name]); c.emissiveIntensity = 0.7; }
+        return c;
+      });
+      o.material = Array.isArray(o.material) ? out : out[0];
+    });
+    return m;
+  }
+
+  potted(name, x, y, w, d, opts) {
+    return this.recolor(this.place(name, x, y, w, d, opts), { wood: 0xc8643c, woodDark: 0xa84f2e, plant: 0x3fae6a });
+  }
+
+  glowTexture(rgb) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 128;
+    const c = cv.getContext('2d');
+    const g = c.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0, `rgba(${rgb},0.55)`); g.addColorStop(1, `rgba(${rgb},0)`);
+    c.fillStyle = g; c.fillRect(0, 0, 128, 128);
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
   }
 
   patternTexture(paint) {
@@ -334,7 +371,9 @@ export class Office3D extends window.Office {
 
   buildDesk(dk) {
     const { x, y } = dk;
-    this.place('desk', x, y, 1.4, 0.8, { h: 0.75, rot: dk.side === 's' ? 0 : Math.PI });
+    this.recolor(this.place('desk', x, y, 1.4, 0.8, { h: 0.75, rot: dk.side === 's' ? 0 : Math.PI }), { wood: dark3(this) ? 0x8b8f98 : 0xf1eee8 });
+    // low divider on the far edge, so facing pairs read as pods
+    this.boxMesh(x + 0.02, dk.side === 's' ? y - 0.02 : y + 0.78, 0.75, 1.36, 0.04, 0.28, dark3(this) ? 0x56606e : 0xc9d1db, { rough: 1 });
     const top = 0.75;
     const back = dk.side === 's' ? y + 0.12 : y + 0.48;
     const rot = dk.side === 's' ? 0 : Math.PI;
@@ -343,7 +382,7 @@ export class Office3D extends window.Office {
     this.place('computerKeyboard', x + 0.45, kb, 0.5, 0.15, { y0: top, rot });
     this.place('computerMouse', x + 1.0, kb, 0.08, 0.12, { y0: top, rot });
     const h = (Math.round(x * 10) * 31 + Math.round(y * 10) * 17) >>> 0;
-    if (h % 3 === 0) this.place('plantSmall' + (1 + (h % 3)), x + 0.05, y + 0.3, 0.25, 0.25, { y0: top, h: 0.3 });
+    if (h % 3 === 0) this.potted('plantSmall' + (1 + (h % 3)), x + 0.05, y + 0.3, 0.25, 0.25, { y0: top, h: 0.3 });
     if (h % 4 === 1) this.place('lampSquareTable', x + 1.1, back, 0.25, 0.25, { y0: top, h: 0.35 });
     // chair, facing the desk
     const seat = dk.seat;
@@ -383,7 +422,7 @@ export class Office3D extends window.Office {
         this.place('cardboardBoxClosed', p.x - 0.7, p.y + 0.05, 0.5, 0.5, { h: 0.35 });
         break;
       case 'plant':
-        this.place('pottedPlant', p.x - 0.3, p.y - 0.3, 0.6, 0.6, { h: 1.0 });
+        this.potted( p.x - 0.3, p.y - 0.3, 0.6, 0.6, { h: 1.0 });
         break;
       case 'pingpong': {
         const { x, y } = p;
@@ -514,7 +553,7 @@ export class Office3D extends window.Office {
         break;
       }
       case 'couch':
-        this.place('loungeSofa', p.x - 0.1, p.y - 0.15, p.w + 0.2, p.d + 0.2, { h: 0.8, stretch: true });
+        this.recolor(this.place('loungeSofa', p.x - 0.1, p.y - 0.15, p.w + 0.2, p.d + 0.2, { h: 0.8, stretch: true }), { carpet: 0x2aa39a });
         break;
       case 'coffeeTable':
         this.place('tableCoffee', p.x, p.y, p.w, p.d, { h: 0.35 });
@@ -537,13 +576,13 @@ export class Office3D extends window.Office {
         break;
       }
       case 'lamp':
-        this.place('lampRoundFloor', p.x - 0.25, p.y - 0.25, 0.5, 0.5, { h: 1.7 });
-        this.lampLight = new THREE.PointLight(0xffd9a0, 0, 4);
+        this.recolor(this.place('lampRoundFloor', p.x - 0.25, p.y - 0.25, 0.5, 0.5, { h: 1.7 }), { lamp: 0xffd34d }, { lamp: 0xffc933 });
+        this.lampLight = new THREE.PointLight(0xffc96a, 0, 4.5);
         this.lampLight.position.set(p.x, 1.6, p.y);
         this.room.add(this.lampLight);
         break;
       case 'rug':
-        this.place('rugRectangle', p.x, p.y, p.w, p.d, { y0: 0.004 });
+        this.recolor(this.place('rugRectangle', p.x, p.y, p.w, p.d, { y0: 0.004 }), { carpet: 0x3a5aa6, carpetDarker: 0x2a447f });
         break;
     }
   }
@@ -986,35 +1025,57 @@ export class Office3D extends window.Office {
   actorFor(p) {
     let a = this.actors.get(p.key);
     if (a) return a;
-    const gltf = this.chars[p.h % this.chars.length];
-    const obj = cloneSkinned(gltf.scene);
-    obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    const box = new THREE.Box3().setFromObject(obj);
-    const s = CHAR_HEIGHT * (p.s && p.s.subagent ? 0.8 : 1) / (box.max.y - box.min.y);
-    obj.scale.setScalar(s);
-    const mixer = new THREE.AnimationMixer(obj);
-    const actions = {};
-    for (const clip of gltf.animations) actions[clip.name] = mixer.clipAction(clip);
-    let head = null, armR = null;
-    obj.traverse((o) => { if (o.name === 'head') head = o; if (o.name === 'arm-right') armR = o; });
+    const look = blobLookFor(p);
+    const blob = buildBlob(look, CHAR_HEIGHT * 0.84 * (p.s && p.s.subagent ? 0.8 : 1));
+    const obj = blob.root;
     const prop = new THREE.Group();
     const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.1, 10), new THREE.MeshStandardMaterial({ color: 0xffffff }));
     const book = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, 0.04), new THREE.MeshStandardMaterial({ color: 0xc96442 }));
     prop.add(cup, book);
     this.scene.add(obj, prop);
-    a = { obj, mixer, actions, current: null, head, headRest: head ? head.rotation.x : 0, armR, prop, cup, book, yaw: 0, last: { x: p.x, y: p.y } };
+    a = { obj, blob, look, prop, cup, book, yaw: 0, last: { x: p.x, y: p.y }, hop: 0 };
     this.actors.set(p.key, a);
     return a;
   }
 
-  play(a, name) {
-    if (a.current === name) return;
-    const next = a.actions[name] || a.actions.idle;
-    if (!next) return;
-    next.reset().setEffectiveWeight(1).fadeIn(0.25).play();
-    if (a.current && a.actions[a.current]) a.actions[a.current].fadeOut(0.25);
-    a.current = name;
+  // Blobs have no skeleton: walk / sit / wave / nap are simple transforms
+  // on the hover group (float height, bob, lean, squash) plus eye blinks.
+  animateBlob(a, p, st, t, dt) {
+    const { hover, eyes, height } = a.blob;
+    const k = t + p.phase;
+    let y = 0.12 + Math.sin(k * 2.1) * 0.025, lean = 0, roll = 0, sq = 1;
+    const act = st.act;
+    if (st.pose === 'walk') {
+      y = 0.14 + Math.abs(Math.sin(k * 8)) * 0.07;
+      lean = 0.2; sq = 1 + Math.sin(k * 16) * 0.05;
+    } else if (act === 'wave') {
+      y = 0.12 + Math.abs(Math.sin(k * 5)) * 0.2;
+      roll = Math.sin(k * 10) * 0.18; sq = 1 + Math.sin(k * 10 + 1) * 0.06;
+    } else if (act === 'nap') {
+      y = 0.03; roll = 0.32; sq = 0.86;
+    } else if (st.pose === 'sit') {
+      // hover just above the seat
+      y = 0.04 + Math.sin(k * 1.6) * 0.02;
+      if (act === 'think') roll = Math.sin(k * 1.4) * 0.09;
+      else if (act === 'type') { y += Math.abs(Math.sin(k * 11)) * 0.025; lean = 0.12; }
+    } else if (act === 'station') {
+      if (p.s.status === 'thinking') roll = Math.sin(k * 1.4) * 0.09;
+      else { y += Math.abs(Math.sin(k * 11)) * 0.03; lean = 0.12; }
+    } else if (act && act !== 'idle') {
+      y += Math.abs(Math.sin(k * 4)) * 0.05; lean = 0.08;
+    }
+    hover.position.y = y;
+    hover.rotation.x += (lean - hover.rotation.x) * Math.min(1, dt * 8);
+    hover.rotation.z += (roll - hover.rotation.z) * Math.min(1, dt * 8);
+    hover.scale.set(1 / Math.sqrt(sq), sq, 1 / Math.sqrt(sq));
+    // blink every few seconds; closed while napping
+    const blink = act === 'nap' ? 0.12 : ((k * 0.31) % 1 < 0.035 ? 0.15 : 1);
+    for (const e of eyes) e.scale.y = blink;
+    a.blob.glow.material.opacity = 0.35 + 0.2 * (1 - Math.min(1, y / 0.35));
+    return height;
   }
+
+  play() {}
 
   facing(p, st) {
     if (st.pose === 'walk') return null;
@@ -1041,17 +1102,6 @@ export class Office3D extends window.Office {
       const a = this.actorFor(p);
       const st = this.stateOf(p);
       p.pose = st.pose;
-      const anim = {
-        walk: 'walk', wave: 'emote-yes', coffee: 'holding-right', water: 'holding-right', read: 'holding-both',
-        phone: 'holding-right', arcade: 'interact-right', whiteboard: 'interact-right', foosball: 'interact-left',
-        pingpong: 'interact-right', vending: 'interact-right', fridge: 'interact-left', sink: 'interact-right',
-      }[st.pose === 'walk' ? 'walk' : st.act] || (st.pose === 'sit' ? 'sit' : 'idle');
-      let chosen = anim;
-      if (st.act === 'station') chosen = p.s.status === 'thinking' ? 'idle' : (p.desk.anim || 'interact-right');
-      else if (st.pose !== 'walk' && p.poi && p.poi.anim) chosen = p.poi.anim;
-      this.play(a, chosen);
-      a.mixer.update(dt);
-
       // position + facing
       const dx = p.x - a.last.x, dy = p.y - a.last.y;
       let want = st.pose !== 'walk' && p.poi && p.poi.float ? null : this.facing(p, st);
@@ -1067,7 +1117,7 @@ export class Office3D extends window.Office {
         : this.plan.terrain ? this.groundHeight(p.x, p.y) : 0;
       // The sit pose's torso leans back past its origin; slide the body
       // forward so the back rests against the backrest instead of in it.
-      const fwd = st.pose === 'sit' ? SIT_FORWARD : 0;
+      const fwd = st.pose === 'sit' ? SIT_FORWARD * 0.4 : 0;
       let lift = 0;
       if (st.pose !== 'walk' && p.poi && p.poi.float) {
         // zero gravity: drift up and down, slowly turning
@@ -1076,17 +1126,14 @@ export class Office3D extends window.Office {
         a.yaw += dt * 0.35;
       }
       a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift, p.y + Math.cos(a.yaw) * fwd);
-      if (a.head) {
-        if (st.act === 'nap') { a.head.rotation.x = a.headRest + 0.55; a.napped = true; }
-        else if (a.napped) { a.head.rotation.x = a.headRest; a.napped = false; }
-      }
-      // hand-held props
+      this.animateBlob(a, p, st, this.t / 1000, dt);
+      // hand-held props float beside the blob
       a.cup.visible = st.act === 'coffee' || st.act === 'water' || (st.pose !== 'walk' && p.poi && p.poi.prop === 'cup');
       a.book.visible = st.act === 'read';
-      if (a.armR && (a.cup.visible || a.book.visible)) {
+      if (a.cup.visible || a.book.visible) {
         a.obj.updateMatrixWorld(true);
-        const hand = new THREE.Vector3(0, -0.4, 0.15);
-        a.armR.localToWorld(hand);
+        const hand = new THREE.Vector3(0.3, a.blob.height * 0.45 + a.blob.hover.position.y, 0.18);
+        a.obj.localToWorld(hand);
         a.prop.position.copy(hand);
         a.prop.rotation.y = a.yaw;
         a.cup.material.color.set(st.act === 'water' ? 0x9fd3ff : 0xffffff);
@@ -1172,7 +1219,7 @@ export class Office3D extends window.Office {
       this.windowMat.emissive.setHex(sky.sky);
     }
     if (this.plan.scene) this.animateScene(t, sky);
-    if (this.lampLight) this.lampLight.intensity = sky.night ? 2.2 : 0;
+    if (this.lampLight) this.lampLight.intensity = sky.night ? 2.6 : 0.9;
 
     // screens show who is working and on what
     const occupant = new Map();
