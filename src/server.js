@@ -13,12 +13,23 @@ const STATIC = {
   '/i18n.js': ['i18n.js', 'text/javascript; charset=utf-8'],
   '/popout.js': ['popout.js', 'text/javascript; charset=utf-8'],
 };
+const LOGIN_HTML = path.join(PUBLIC, 'login.html');
+
+function readJsonBody(req, limit = 8192) {
+  return new Promise((resolve) => {
+    let size = 0; const chunks = [];
+    req.on('data', (c) => { size += c.length; if (size > limit) { req.destroy(); resolve(null); } else chunks.push(c); });
+    req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); } catch { resolve(null); } });
+    req.on('error', () => resolve(null));
+  });
+}
 const TYPES = { '.js': 'text/javascript; charset=utf-8', '.glb': 'model/gltf-binary', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json' };
 // 3D models, served as-is (3D view only).
 const MOUNTS = { '/assets/': path.join(__dirname, '..', 'assets') };
 const scenes = require('./scenes');
 const updater = require('./update');
 const { ompResumeCommand } = require('./omp');
+const { createAuth } = require('./auth');
 
 function serveFile(res, root, rel) {
   const file = path.normalize(path.join(root, rel));
@@ -100,7 +111,7 @@ function snapshot(watcher, opts) {
   return { now, lang: opts.demo || opts.hurly ? null : promptLanguage(raw), sessions };
 }
 
-function createServer(watcher, opts, { onShutdown, onRestart } = {}) {
+function createServer(watcher, opts, { onShutdown, onRestart, auth = createAuth() } = {}) {
   const clients = new Set();
   let last = '';
 
@@ -126,13 +137,51 @@ function createServer(watcher, opts, { onShutdown, onRestart } = {}) {
   const server = http.createServer((req, res) => {
     // Refuse anything not addressed to loopback (blocks DNS-rebinding pages
     // from reading your prompts through this server).
-    // Extra hosts (e.g. behind Cloudflare Access + reverse proxy) via TRUSTED_HOSTS.
+    // Extra hosts (e.g. office.s-w.art behind a reverse proxy) via TRUSTED_HOSTS.
     const host = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
     if (!TRUSTED_HOSTS.has(host)) {
       res.writeHead(403, { 'content-type': 'text/plain' }).end('Forbidden');
       return;
     }
     const url = new URL(req.url, 'http://localhost');
+    const json = (code, obj, headers = {}) => {
+      res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers });
+      res.end(JSON.stringify(obj));
+    };
+
+    // ---- login gate (SWA-2995) ----
+    if (url.pathname === '/login' && req.method === 'GET') {
+      if (auth.enabled && auth.session(req)) { res.writeHead(302, { location: '/' }).end(); return; }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      fs.createReadStream(LOGIN_HTML).pipe(res);
+      return;
+    }
+    if (url.pathname === '/api/login' && req.method === 'POST') {
+      if (!auth.enabled) { json(200, { ok: true, open: true }); return; }
+      readJsonBody(req).then(async (body) => {
+        const email = body && await auth.verify(body.email, body.password);
+        if (!email) { json(401, { error: 'Invalid email or password' }); return; }
+        json(200, { ok: true }, { 'set-cookie': auth.loginCookie(req, email) });
+      });
+      return;
+    }
+    if (url.pathname === '/api/logout' && req.method === 'POST') {
+      json(200, { ok: true }, auth.enabled ? { 'set-cookie': auth.logoutCookie(req) } : {});
+      return;
+    }
+    if (url.pathname === '/api/me') {
+      const s = auth.session(req);
+      if (!s) { json(401, { error: 'unauthorized' }); return; }
+      json(200, { auth: auth.enabled, email: s.e || null });
+      return;
+    }
+    const isShutdown = url.pathname === '/api/shutdown' && req.method === 'POST' && auth.checkStopToken(req.headers['x-office-stop-token']);
+    if (auth.enabled && url.pathname !== '/api/ping' && !isShutdown && !auth.session(req)) {
+      if (url.pathname.startsWith('/api/') || url.pathname === '/events') json(401, { error: 'unauthorized' });
+      else res.writeHead(302, { location: '/login', 'cache-control': 'no-store' }).end();
+      return;
+    }
+
     if (STATIC[url.pathname]) {
       const [file, type] = STATIC[url.pathname];
       res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });

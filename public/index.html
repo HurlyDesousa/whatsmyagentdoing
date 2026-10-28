@@ -367,6 +367,7 @@
       </div>
       <span class="toolbar-space" aria-hidden="true"></span>
       <button class="btn" id="pipBtn" hidden></button>
+      <button class="btn" id="signOutBtn" type="button" hidden title="Sign out">Sign out</button>
       <details class="settings" id="settingsMenu">
         <summary class="btn" aria-controls="settingsPanel"><span data-t="settings"></span><span class="filter-active" id="activeFilter" hidden></span></summary>
         <div class="settings-panel" id="settingsPanel">
@@ -435,6 +436,20 @@
 <script src="/i18n.js"></script>
 <script src="/office.js"></script>
 <script src="/popout.js"></script>
+<script>
+  // SWA-2995: show "Sign out" only when the login gate is on.
+  (function () {
+    const b = document.getElementById('signOutBtn');
+    fetch('/api/me', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((me) => {
+      if (!me || !me.auth) return;
+      if (me.email) b.title = 'Sign out ' + me.email;
+      b.hidden = false;
+    }).catch(() => {});
+    b.addEventListener('click', () => {
+      fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).finally(() => location.replace('/login'));
+    });
+  })();
+</script>
 
 <script>
 // Language: your pick in the 🌐 menu, else the language of your prompts

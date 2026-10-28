@@ -100,7 +100,7 @@ function alreadyRunning(port) {
 function stopAt(port) {
   return new Promise((resolve) => {
     const req = http.request({ host: '127.0.0.1', port, path: '/api/shutdown', method: 'POST', timeout: 1500,
-      headers: { 'x-whatsmyagentdoing': 'stop' } }, (res) => { res.resume(); resolve(res.statusCode === 200); });
+      headers: { 'x-whatsmyagentdoing': 'stop', 'x-office-stop-token': require('../src/auth').stopTokenFromEnv() } }, (res) => { res.resume(); resolve(res.statusCode === 200); });
     req.on('error', () => resolve(false));
     req.on('timeout', () => { req.destroy(); resolve(false); });
     req.end();
@@ -218,7 +218,8 @@ async function main() {
       if (err.code === 'EADDRINUSE' && tries > 0) listen(port + 1, tries - 1);
       else { console.error(err.message); process.exit(1); }
     });
-    server.listen(port, '127.0.0.1', () => {
+    // LISTEN_HOST=0.0.0.0 for Docker bridge → reverse proxy (no published host port); default loopback.
+    server.listen(port, process.env.LISTEN_HOST || '127.0.0.1', () => {
       const url = `http://localhost:${port}`;
       const n = watcher.sessions().length;
       const openUrl = url + query;
