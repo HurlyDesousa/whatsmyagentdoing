@@ -46,7 +46,7 @@
     try {
       const r = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin',
         body: JSON.stringify({ email: f.email.value, password: f.password.value }) });
-      if (r.ok) { location.replace('/'); return; }
+      if (r.ok) { try { sessionStorage.setItem('officeBgmUnlock', '1'); } catch {} location.replace('/'); return; }
       err.textContent = 'Invalid email or password';
       f.password.value = ''; f.password.focus();
     } catch { err.textContent = 'Network error — try again'; }

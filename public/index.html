@@ -444,6 +444,7 @@
 <script>
   // SWA-2995: looping office background music + top-right mute toggle.
   // Preference persists in localStorage.officeBgmMuted ('1' muted / '0' on). Default: on.
+  // After a fresh login (sessionStorage.officeBgmUnlock) it is forced on.
   // If the browser blocks autoplay with sound, we stay muted until the first user gesture.
   (function () {
     const KEY = 'officeBgmMuted';
@@ -455,6 +456,11 @@
     let pref = null;
     try { pref = localStorage.getItem(KEY); } catch {}
     let userMuted = pref === '1';
+    // Just logged in (login.html sets this before redirecting): the click's user
+    // activation doesn't survive the redirect, so force music on and try now.
+    let unlock = null;
+    try { unlock = sessionStorage.getItem('officeBgmUnlock'); sessionStorage.removeItem('officeBgmUnlock'); } catch {}
+    if (unlock === '1') userMuted = false;
     audio.loop = true; // continuous seamless loop
     audio.volume = 0.4;
     // Belt-and-braces: if 'ended' ever fires (loop unsupported), restart immediately.
@@ -891,6 +897,24 @@ function setLoading(on, text) {
   officeEl.classList.toggle('loading', on);
   if (text) document.getElementById('loaderText').textContent = text;
 }
+// SWA-2995: hard budget for bringing up the 3D office (module import + scene
+// pack manifest + GLB loads + settled frames). If it doesn't report ready in
+// time we fail soft to the 2D office instead of spinning forever.
+const OFFICE3D_TIMEOUT_MS = 14000;
+const TIMED_OUT = Symbol('timeout');
+function withDeadline(p, deadline) {
+  const ms = Math.max(0, deadline - performance.now());
+  let t;
+  return Promise.race([
+    Promise.resolve(p).finally(() => clearTimeout(t)),
+    new Promise((res) => { t = setTimeout(() => res(TIMED_OUT), ms); }),
+  ]);
+}
+function fallbackTo2D() {
+  setLoading(true, L.failed3d);
+  state.quality = 'mid'; store.set('quality', 'mid'); syncControls();
+  setTimeout(() => makeOffice(), 1200);
+}
 async function makeOffice() {
   const high = state.quality === 'high';
   const scene = high && state.scene !== 'office' && state.scenes.some((x) => x.id === state.scene) ? state.scene : 'office';
@@ -898,17 +922,23 @@ async function makeOffice() {
   if (kind === officeKind) return;
   officeKind = kind;
   setLoading(true, high ? L.loading3d : L.loading2d);
+  const deadline = performance.now() + OFFICE3D_TIMEOUT_MS;
   let Cls = window.Office;
   const opts = { ...officeOpts, showAgent: state.showAgent };
   if (high) {
+    let failed = false;
     try {
-      Cls = (await import('/office3d.js')).Office3D;
+      const mod = await withDeadline(import('/office3d.js'), deadline);
+      if (mod === TIMED_OUT) throw new Error('office3d.js import timed out');
+      Cls = mod.Office3D;
       if (scene !== 'office') {
-        const m = await fetch(`/scenes/${scene}/manifest.json`).then((r) => r.json());
+        const m = await withDeadline(fetch(`/scenes/${scene}/manifest.json`).then((r) => r.json()), deadline);
+        if (m === TIMED_OUT) throw new Error('scene manifest timed out');
         opts.scene = { ...m, base: `/scenes/${scene}/` };
       }
-    } catch (e) { console.error(e); Cls = window.Office; }
+    } catch (e) { console.error(e); failed = true; }
     if (officeKind !== kind) return;
+    if (failed) { fallbackTo2D(); return; }
   }
   if (office) office.destroy();
   let mine;
@@ -922,13 +952,12 @@ async function makeOffice() {
   office = mine;
   office.offDutyLabel = L.wentHome;
   render();
-  const ok = await mine.ready;
+  let ok = high ? await withDeadline(mine.ready, deadline) : await mine.ready;
   if (office !== mine) return;
+  if (ok === TIMED_OUT) { console.warn(`3D office not ready after ${OFFICE3D_TIMEOUT_MS} ms; falling back to 2D`); ok = false; }
   if (!ok && high) {
-    // 3D failed (no WebGL, missing files…): fall back to the 2D office.
-    setLoading(true, L.failed3d);
-    state.quality = 'mid'; store.set('quality', 'mid'); syncControls();
-    setTimeout(() => makeOffice(), 1200);
+    // 3D failed or hung (no WebGL, missing/slow files…): fall back to the 2D office.
+    fallbackTo2D();
     return;
   }
   setLoading(false);
