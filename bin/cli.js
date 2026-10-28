@@ -5,15 +5,16 @@ const http = require('http');
 const { spawn } = require('child_process');
 const { Watcher, CLAUDE_DIR, CODEX_DIR, GEMINI_DIR, ompDirs } = require('../src/watcher');
 const { DemoWatcher } = require('../src/demo');
+const { PaperclipWatcher } = require('../src/paperclip');
 const scenes = require('../src/scenes');
 const updater = require('../src/update');
 const { createServer, snapshot } = require('../src/server');
 const pkg = require('../package.json');
 
-const HELP = `whatsmyagentdoing ${pkg.version}
-See what every Claude Code, Codex, Gemini CLI and OMP agent on this machine is doing, live.
+const HELP = `whatsmyagentdoing ${pkg.version} (Hurly ops office)
+Live isometric office for Paperclip / Hurly bots, or local Claude/Codex/Gemini/OMP sessions.
 
-Usage: node bin/cli.js [options]   (or /myoffice as a skill)
+Usage: node bin/cli.js [options]
 
 Options:
   -p, --port <n>    Port to serve on (default 4545)
@@ -22,6 +23,7 @@ Options:
   --no-open         Don't open the browser
   --private         Hide prompts, replies and titles; show status only
   --json            Print one snapshot as JSON and exit
+  --paperclip       Drive desks from Paperclip agents + open issues (Hurly crew)
   --demo            Show a made-up team instead of your sessions
   --stop            Stop a running dashboard
   --update          Update to the latest version (git pull) and restart a running dashboard
@@ -30,7 +32,10 @@ Options:
   --remove-scene <id>  Delete a downloaded scene
   -h, --help        Show this help
 
-Reads (never writes):
+Paperclip mode needs PAPERCLIP_API_URL, PAPERCLIP_API_KEY, PAPERCLIP_COMPANY_ID.
+If those are set and neither --demo nor a local-log mode is forced, --paperclip is the default.
+
+Reads (never writes) for local-log mode:
   ${CLAUDE_DIR}
   ${CODEX_DIR}
   ${GEMINI_DIR}
@@ -40,7 +45,7 @@ Override with CLAUDE_CONFIG_DIR / CODEX_HOME / GEMINI_CLI_HOME /
 OMP profiles under ~/.omp/profiles are discovered automatically.`;
 
 function parseArgs(argv) {
-  const o = { port: 4545, hours: 24, open: true, privacy: false, json: false, demo: false, stop: false, scenes: false, scene: null, removeScene: null, update: false };
+  const o = { port: 4545, hours: 24, open: true, privacy: false, json: false, demo: false, paperclip: false, localLogs: false, stop: false, scenes: false, scene: null, removeScene: null, update: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h' || a === '--help') { console.log(HELP); process.exit(0); }
@@ -52,12 +57,15 @@ function parseArgs(argv) {
     else if (a === '--omp-dir') {
       if (!argv[i + 1] || argv[i + 1].startsWith('--')) { console.error('--omp-dir requires a path'); process.exit(1); }
       o.ompDir = argv[++i];
+      o.localLogs = true;
     }
-    else if (a.startsWith('--omp-dir=')) o.ompDir = a.slice(10);
+    else if (a.startsWith('--omp-dir=')) { o.ompDir = a.slice(10); o.localLogs = true; }
     else if (a === '--no-open') o.open = false;
     else if (a === '--private') o.privacy = true;
     else if (a === '--json') o.json = true;
     else if (a === '--demo') o.demo = true;
+    else if (a === '--paperclip') o.paperclip = true;
+    else if (a === '--local' || a === '--logs') o.localLogs = true;
     else if (a === '--stop') o.stop = true;
     else if (a === '--update') o.update = true;
     else if (a === '--scenes') o.scenes = true;
@@ -67,6 +75,8 @@ function parseArgs(argv) {
     else { console.error(`Unknown option: ${a}\n\n${HELP}`); process.exit(1); }
   }
   if (!Number.isFinite(o.port) || !Number.isFinite(o.hours)) { console.error(HELP); process.exit(1); }
+  const paperclipEnv = !!(process.env.PAPERCLIP_API_URL && process.env.PAPERCLIP_API_KEY && process.env.PAPERCLIP_COMPANY_ID);
+  if (!o.demo && !o.localLogs && (o.paperclip || paperclipEnv)) o.paperclip = true;
   return o;
 }
 
@@ -168,6 +178,12 @@ async function main() {
   }
 
   if (o.json) {
+    if (o.paperclip) {
+      const w = new PaperclipWatcher();
+      await w.tick();
+      console.log(JSON.stringify(snapshot(w, o).sessions, null, 2));
+      return;
+    }
     const w = new Watcher({ hours: o.hours, ompDir: o.ompDir });
     w.tick();
     w.lastScan = 0;
@@ -185,7 +201,11 @@ async function main() {
     return;
   }
 
-  const watcher = (o.demo ? new DemoWatcher() : new Watcher({ hours: o.hours, ompDir: o.ompDir })).start();
+  const watcher = (
+    o.demo ? new DemoWatcher()
+      : o.paperclip ? new PaperclipWatcher()
+        : new Watcher({ hours: o.hours, ompDir: o.ompDir })
+  ).start();
   const server = createServer(watcher, o, {
     onShutdown: () => { watcher.stop(); server.close(); process.exit(0); },
     // after an update from the page: start the new code on the same port
@@ -209,9 +229,11 @@ async function main() {
       const url = `http://localhost:${port}`;
       const n = watcher.sessions().length;
       const openUrl = url + query;
-      const what = o.demo ? 'demo team' : `${n} session${n === 1 ? '' : 's'} in the last ${o.hours}h`;
-      console.log(`whatsmyagentdoing v${updater.localVersion()} → ${url}  (${what}, Ctrl+C to stop)`);
-      printUpdateHint();
+      const what = o.demo ? 'demo team'
+        : o.paperclip ? `${n} Paperclip agent${n === 1 ? '' : 's'}`
+          : `${n} session${n === 1 ? '' : 's'} in the last ${o.hours}h`;
+      console.log(`hurly-ops-office v${updater.localVersion()} → ${url}  (${what}, Ctrl+C to stop)`);
+      if (!o.paperclip) printUpdateHint();
       if (o.open) openBrowser(openUrl);
     });
   };

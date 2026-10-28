@@ -18,6 +18,7 @@
     codex: ['#10a37f', '#2bb38f', '#0d8a6b', '#4cc3a0'],
     gemini: ['#4f7cf0', '#6b8ff5', '#3d66d6', '#8aa6f8'],
     omp: ['#a96926', '#c78942', '#8d531e', '#dca45c'],
+    paperclip: ['#1f6feb', '#3d82f6', '#1554c0', '#58a6ff'],
   };
   // Official product icons, shared by both renderers and the page UI (OMP: a neutral monogram).
   // Load once per page from the same origin so video capture stays readable.
@@ -27,6 +28,7 @@
     codex: { label: 'Codex', short: 'Cx', color: '#10a37f', logo: '/assets/agents/codex.png' },
     gemini: { label: 'Gemini', short: 'G', color: '#4f7cf0', logo: '/assets/agents/gemini.png' },
     omp: { label: 'OMP', short: 'OMP', color: '#a96926', logo: '/assets/agents/omp.svg' },
+    paperclip: { label: 'Hurly', short: 'Hy', color: '#1f6feb', logo: '/assets/agents/paperclip.svg' },
   };
   for (const badge of Object.values(AGENT_BADGES)) {
     badge.image = new Image();

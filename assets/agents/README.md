@@ -3,6 +3,9 @@
 `omp.svg` is a neutral OMP monogram made for this interface. It is not an
 official oh-my-pi logo and contains no external resources.
 
+`paperclip.svg` is a Hurly/Paperclip ops-office badge drawn for this fork. It is
+not an official Paperclip product mark.
+
 These official product icons identify the providers of sessions. They are served
 locally so offline use and canvas/video capture do not depend on a third party.
 Brand marks belong to their respective owners; this project is not endorsed by

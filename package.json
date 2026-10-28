@@ -1,9 +1,10 @@
 {
   "name": "whatsmyagentdoing",
-  "version": "0.3.1",
-  "description": "Live office for Claude Code, Codex, Gemini CLI and OMP sessions.",
+  "version": "0.3.2",
+  "description": "Hurly ops office: Paperclip/Hurly bot avatars in the whatsmyagentdoing isometric office, plus local Claude/Codex/Gemini/OMP sessions.",
   "bin": {
-    "whatsmyagentdoing": "bin/cli.js"
+    "whatsmyagentdoing": "bin/cli.js",
+    "hurly-ops-office": "bin/cli.js"
   },
   "files": [
     "bin",
@@ -26,11 +27,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Charonyuu/whatsmyagentdoing.git"
+    "url": "git+https://github.com/HurlyDesousa/whatsmyagentdoing.git"
   },
-  "homepage": "https://github.com/Charonyuu/whatsmyagentdoing#readme",
+  "homepage": "https://github.com/HurlyDesousa/whatsmyagentdoing#readme",
   "bugs": {
-    "url": "https://github.com/Charonyuu/whatsmyagentdoing/issues"
+    "url": "https://github.com/HurlyDesousa/whatsmyagentdoing/issues"
   },
   "author": "cheoyu",
   "devDependencies": {
@@ -42,7 +43,8 @@
     "build": "esbuild web/office3d.js --bundle --format=esm --minify --target=es2020 --outfile=public/office3d.js --legal-comments=eof",
     "start": "node bin/cli.js",
     "test:ui": "node tests/ui.cjs",
-    "test:watcher": "node --test tests/watcher.cjs tests/omp.cjs",
-    "test:server": "node --test tests/server.cjs"
+    "test:watcher": "node --test tests/watcher.cjs tests/omp.cjs tests/paperclip.cjs",
+    "test:server": "node --test tests/server.cjs",
+    "test:paperclip": "node --test tests/paperclip.cjs"
   }
 }

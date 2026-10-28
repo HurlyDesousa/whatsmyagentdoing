@@ -52,7 +52,8 @@ function view(s, now, { privacy }) {
     parentId: s.parentId,
     subagent: s.subagent,
     cwd: s.cwd,
-    project: s.cwd ? path.basename(s.cwd) : null,
+    // Paperclip crew: show the bot name on the desk, not the synthetic cwd slug.
+    project: s.agent === 'paperclip' && s.title ? s.title : (s.cwd ? path.basename(s.cwd) : null),
     title: s.title,
     model: s.model,
     status,
