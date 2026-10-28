@@ -6,8 +6,10 @@
 // Sources, in priority order:
 //   1. Paperclip live feed when PAPERCLIP_CHIEF_BOARD_TOKEN is set:
 //      agents, open issues, and live heartbeat runs. Polled every few seconds
-//      and pushed on the existing SSE `/events` stream. Grok teammates with
-//      no paperclip id are linked by name when the roster has them.
+//      and pushed on the existing SSE `/events` stream. Grok teammates use a
+//      board stand-in `pc` id when known, else link by name / alias (e.g.
+//      "Chief Master" → roster "Chief"). After a successful roster poll,
+//      unbound Grok rows go idle/offline — seed never sticks forever.
 //   2. Override file (HURLY_CREW_FILE, default ../crew.json next to the repo):
 //      { "<key>": { "status": "...", "task": "...", "activity": "..." } }
 //      Re-read on change; an override pins that field over the live value.
@@ -30,13 +32,15 @@ const CREW_FILE = process.env.HURLY_CREW_FILE || path.join(__dirname, '..', '..'
 const POLL_MS = 5_000;
 
 // key, display name, agent badge, paperclip agent id (live), seed status, task, activity
+// Grok Bot specialists are Paperclip process/bridge stand-ins — pin their `pc`
+// so popouts follow board heartbeats/issues (roster name may be shorter, e.g. Chief).
 const CREW = [
-  // Grok Bot teammates
-  { key: 'chief', role: 'Ops lead', name: 'Chief Master', agent: 'grokbot', status: 'active', task: 'Ops coordination · SWA-2978 3D office spike', activity: 'Planning next dispatch' },
-  { key: 'monitor', role: 'Monitoring', name: 'Monitor Master', agent: 'grokbot', status: 'watching', task: 'Charting mem watch', activity: 'Watching memory charts' },
+  // Grok Bot teammates (board stand-ins)
+  { key: 'chief', role: 'Ops lead', name: 'Chief Master', agent: 'grokbot', pc: '2842a7bf-9527-42c1-aa86-ba5b599c8878', status: 'active', task: 'Ops coordination · SWA-2978 3D office spike', activity: 'Planning next dispatch' },
+  { key: 'monitor', role: 'Monitoring', name: 'Monitor Master', agent: 'grokbot', pc: '4f2ddf7b-26ee-4beb-8424-beddd98a0247', status: 'watching', task: 'Charting mem watch', activity: 'Watching memory charts' },
   { key: 'proxmox', role: 'Proxmox infra', name: 'Proxmox Master', agent: 'grokbot', status: 'idle', task: 'Proxmox cluster (pve*)' },
-  { key: 'dockhand', role: 'Docker hosts', name: 'Dockhand Master', agent: 'grokbot', status: 'idle', task: 'Docker hosts' },
-  { key: 'truenas', role: 'Storage', name: 'TrueNAS Master', agent: 'grokbot', status: 'idle', task: 'TrueNAS storage' },
+  { key: 'dockhand', role: 'Docker hosts', name: 'Dockhand Master', agent: 'grokbot', pc: 'e679f570-38bb-4de0-b754-89425d98d398', status: 'idle', task: 'Docker hosts' },
+  { key: 'truenas', role: 'Storage', name: 'TrueNAS Master', agent: 'grokbot', pc: '9082e6f0-9eae-472e-b0ef-81a423e4cfff', status: 'idle', task: 'TrueNAS storage' },
   { key: 'doc', role: 'Docs', name: 'Doc Master', agent: 'grokbot', status: 'offline', task: 'Docs (off the floor)' },
   // Paperclip agents
   { key: 'cm2', role: 'Code', name: 'Code Master 2', agent: 'paperclip', pc: 'eb8ecca2-c2cd-4fc9-ac22-0c63b25d2e4b', status: 'running', task: 'Charting batch SWA-2971', activity: 'Bash: npm run build' },
@@ -67,6 +71,41 @@ function clip(v, n = 90) {
 
 function normName(v) {
   return String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// Roster names are often shorter than office labels ("Chief" vs "Chief Master").
+// Exact match first; then drop a trailing " master" / first token when unique.
+function nameAliases(v) {
+  const n = normName(v);
+  if (!n) return [];
+  const out = [n];
+  const push = (x) => { if (x && !out.includes(x)) out.push(x); };
+  if (n.endsWith(' master')) push(n.slice(0, -7).trim());
+  const first = n.split(' ')[0];
+  if (first && first !== n) push(first);
+  return out;
+}
+
+function resolveAgent(session, byId, byName, used) {
+  if (session.pc && byId.has(session.pc) && !used.has(session.pc)) return byId.get(session.pc);
+  for (const key of nameAliases(session.name)) {
+    const a = byName.get(key);
+    if (a && !used.has(a.id)) return a;
+  }
+  return null;
+}
+
+function unboundLive(session) {
+  const offline = String(session.crewStatus || '').toLowerCase() === 'offline';
+  return {
+    role: session.baseRole || null,
+    status: offline ? 'offline' : 'idle',
+    heartbeat: null,
+    task: null,
+    activity: null,
+    tool: false,
+    error: null,
+  };
 }
 
 // Paperclip list routes have returned both a bare array and a wrapped page.
@@ -266,17 +305,18 @@ class HurlyCrew extends EventEmitter {
     const byId = new Map(agentList.map((a) => [a.id, a]));
     const byName = new Map();
     for (const a of agentList) {
-      const n = normName(a.name);
-      if (n && !byName.has(n)) byName.set(n, a);
+      for (const key of nameAliases(a.name)) {
+        if (key && !byName.has(key)) byName.set(key, a);
+      }
     }
-    // Keep a crew avatar on the Paperclip agent with the same name when the
-    // seed id is missing or no longer on the roster. Otherwise that avatar
-    // stays on seed text and a second " (Paperclip)" copy appears beside it.
-    const used = new Set(this.list.filter((s) => s.pc && byId.has(s.pc)).map((s) => s.pc));
+    // Keep a crew avatar on the matching Paperclip stand-in (pc id, exact name,
+    // or alias). Otherwise that avatar stays on seed and a duplicate appears.
+    const used = new Set();
     for (const s of this.list) {
-      if (s.pc && byId.has(s.pc)) continue;
-      const a = byName.get(normName(s.name));
-      if (a && !used.has(a.id)) { s.pc = a.id; used.add(a.id); }
+      const a = resolveAgent(s, byId, byName, used);
+      if (!a) continue;
+      s.pc = a.id;
+      used.add(a.id);
     }
     const known = new Set(this.list.map((s) => s.pc).filter(Boolean));
     const names = new Set(this.list.map((s) => s.name));
@@ -300,8 +340,13 @@ class HurlyCrew extends EventEmitter {
     const runList = unwrapList(runs);
     for (const s of this.list) {
       if (!s.pc || !byId.has(s.pc)) {
-        // A linked agent that disappeared from the roster is idle, not stuck on seed.
-        if (s.pc && s.live) s.live = { status: 'idle', task: null, activity: null, tool: false, error: null, heartbeat: s.live.heartbeat, role: s.live.role || null };
+        // Linked-then-gone: idle with last heartbeat. Never-linked after a
+        // successful roster poll: honest idle/offline so seed (SWA-2978…) dies.
+        if (s.pc && s.live) {
+          s.live = { status: 'idle', task: null, activity: null, tool: false, error: null, heartbeat: s.live.heartbeat, role: s.live.role || null };
+        } else {
+          s.live = unboundLive(s);
+        }
         continue;
       }
       const a = byId.get(s.pc);
@@ -395,4 +440,4 @@ class HurlyCrew extends EventEmitter {
   sessions() { return this.list; }
 }
 
-module.exports = { HurlyCrew, CREW, unwrapList, liveActivity, pickIssue, pickRun, normName };
+module.exports = { HurlyCrew, CREW, unwrapList, liveActivity, pickIssue, pickRun, normName, nameAliases, resolveAgent };
