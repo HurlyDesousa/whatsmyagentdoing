@@ -318,7 +318,7 @@
       solid(rx, 0.2, 0.7, 0.6);
       add(OW - 2.3 + 0.3 + 0.5, () => this.printer(OW - 2.3, 0.25));
       solid(OW - 2.3, 0.25, 0.75, 0.55);
-      for (const [x, y] of [[0.45, 0.45], [0.45, OD - 0.2]]) { add(x + y, () => this.plant(x, y)); prop('plant', { x, y }); solid(x - 0.2, y - 0.2, 0.4, 0.4); }
+      for (const [x, y] of [[0.45, 0.45]]) { add(x + y, () => this.plant(x, y)); prop('plant', { x, y }); solid(x - 0.2, y - 0.2, 0.4, 0.4); }
       const windows = [];
       for (let x = 1.0; x < OW - 2.6; x += 2.4) {
         windows.push(x);
@@ -1316,14 +1316,29 @@
           const tool = (s.activity || 'tool').split(/[:\s]/)[0];
           top = pill('⚙ ' + tool, '#fff', col, y - 12);
         } else if (st === 'waiting' || st === 'error') {
-          const jump = Math.abs(Math.sin(t * 4)) * 4;
-          c.fillStyle = col;
-          c.beginPath(); c.arc(x, y - 12 - jump, 9, 0, Math.PI * 2); c.fill();
-          c.fillStyle = '#fff';
-          c.font = font(800, 12);
-          c.fillText('!', x, y - 11.5 - jump);
+          // Speech bubble for Needs-you (demo parity) — short prompt / status text.
+          const jump = Math.abs(Math.sin(t * 4)) * 3;
+          const raw = (s.prompt || s.activity || (st === 'error' ? 'error' : 'needs you')).replace(/\s+/g, ' ').trim();
+          let tx = raw.length > 28 ? raw.slice(0, 26) + '…' : raw;
+          c.font = font(600, 11);
+          const bw = Math.min(160, Math.max(56, c.measureText(tx).width + 16));
+          const bh = 22;
+          const by = y - 18 - jump;
+          c.fillStyle = pal.bubble;
+          this.roundRect(x - bw / 2, by - bh, bw, bh, 10, pal.bubble);
+          c.beginPath();
+          c.moveTo(x - 5, by); c.lineTo(x, by + 7); c.lineTo(x + 5, by);
+          c.closePath(); c.fill();
+          c.fillStyle = st === 'error' ? (STATUS_COLOR.error || '#d1453b') : pal.bubbleInk;
+          c.fillText(tx, x, by - bh / 2);
           c.font = font(600, 10);
-          top = y - 22 - jump;
+          // Status ping
+          c.fillStyle = col;
+          c.beginPath(); c.arc(x + bw / 2 - 2, by - bh + 2, 5, 0, Math.PI * 2); c.fill();
+          c.fillStyle = '#fff'; c.font = font(800, 9);
+          c.fillText(st === 'error' ? '!' : '?', x + bw / 2 - 2, by - bh + 2.5);
+          c.font = font(600, 10);
+          top = by - bh;
         }
       } else if (p.mode === 'wander') {
         const justDone = st === 'done' && Date.now() - (s.lastEventAt || 0) < 3 * 60_000;

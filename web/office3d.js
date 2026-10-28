@@ -96,13 +96,18 @@ function makeBlobBody(def) {
   return mesh;
 }
 
+const BLACK_EYES = typeof location !== 'undefined' && new URLSearchParams(location.search).get('eyes') === 'black';
+
 function createGrokBlob(index) {
   const def = GROK_BLOBS[((index % GROK_BLOBS.length) + GROK_BLOBS.length) % GROK_BLOBS.length];
   const root = new THREE.Group();
   const body = makeBlobBody(def);
   root.add(body);
 
-  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.35 });
+  // Demo default: soft white glowing eyes (`?eyes=black` for the old look).
+  const eyeMat = new THREE.MeshStandardMaterial(BLACK_EYES
+    ? { color: 0x1a1a1a, roughness: 0.35 }
+    : { color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.85, roughness: 0.25 });
   const eyeGeo = new THREE.SphereGeometry(0.075, 14, 12);
   eyeGeo.scale(0.72, 1.2, 0.55);
   const left = new THREE.Mesh(eyeGeo, eyeMat);
@@ -269,9 +274,12 @@ export class Office3D extends window.Office {
     this.scene.add(this.sun, this.sun.target);
 
     this.lightMode = (opts && opts.lightMode) || 'now';
+    this.selectedKey = (opts && opts.selectedKey) || null;
     this.actors = new Map();     // person key -> { obj, mixer, actions, current, head, cup }
     this.screens = new Map();    // desk -> emissive screen mesh
     this.blinkers = [];
+    this.ceilingLights = [];
+    this.starWindow = null;
     this.loaded = false;
     this.clock = new THREE.Clock();
     this.load().catch((e) => {
@@ -284,6 +292,30 @@ export class Office3D extends window.Office {
 
   setLightMode(mode) {
     this.lightMode = mode || 'now';
+  }
+
+  setSelectedKey(key) {
+    this.selectedKey = key || null;
+  }
+
+  makeStarWindowTexture() {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 256;
+    const c = cv.getContext('2d');
+    c.fillStyle = '#152038';
+    c.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 80; i++) {
+      const x = (Math.sin(i * 12.9898) * 43758.5453) % 1;
+      const y = (Math.sin(i * 78.233) * 12345.678) % 1;
+      const a = 0.35 + ((i * 17) % 7) / 10;
+      c.fillStyle = `rgba(255,255,255,${a})`;
+      c.beginPath();
+      c.arc(Math.abs(x) * 256, Math.abs(y) * 256, 0.6 + (i % 3) * 0.4, 0, Math.PI * 2);
+      c.fill();
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
   }
 
   destroy() {
@@ -342,7 +374,9 @@ export class Office3D extends window.Office {
       const turned = Math.abs(Math.sin(rot)) > 0.5;
       m.scale.set((turned ? d : w) / (turned ? size.z : size.x), h / size.y, (turned ? w : d) / (turned ? size.x : size.z));
     } else {
-      m.scale.setScalar(h ? h / size.y : Math.min(w / size.x, d / size.z));
+      // Slightly chunkier toy scale so furniture reads denser / softer like the demo.
+      const s = (h ? h / size.y : Math.min(w / size.x, d / size.z)) * 1.06;
+      m.scale.setScalar(s);
     }
     m.updateMatrixWorld(true);
     box = new THREE.Box3().setFromObject(m);
@@ -446,7 +480,13 @@ export class Office3D extends window.Office {
     const T = 0.12;
     let cx = -T;
     const sky = skyFor(this.lightMode);
+    this.starTex = this.starTex || this.makeStarWindowTexture();
     this.windowMat = new THREE.MeshStandardMaterial({ color: sky.sky, emissive: sky.sky, emissiveIntensity: 0.6 });
+    this.windowNightMat = new THREE.MeshStandardMaterial({
+      map: this.starTex, color: 0xffffff, emissive: 0x334466, emissiveIntensity: 0.55, roughness: 0.9,
+    });
+    this.windowPanes = [];
+    this.ceilingLights = [];
     for (const wx of plan.windows) {
       this.boxMesh(cx, -T, 0, wx - cx, T, WALL_H, 0, { mat: wallMat });
       this.boxMesh(wx, -T, 0, 1.5, T, 0.85, 0, { mat: wallMat });
@@ -454,6 +494,12 @@ export class Office3D extends window.Office {
       const glass = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.15), this.windowMat);
       glass.position.set(wx + 0.75, 1.425, -T / 2);
       this.room.add(glass);
+      this.windowPanes.push(glass);
+      // Soft night ceiling puck above each window bay.
+      const ceil = new THREE.PointLight(0xffe6c8, 0, 4.5);
+      ceil.position.set(wx + 0.75, WALL_H - 0.15, 1.2);
+      this.room.add(ceil);
+      this.ceilingLights.push(ceil);
       this.boxMesh(wx + 0.73, -0.02, 0.85, 0.04, 0.04, 1.15, dark ? 0x2b2926 : 0xcfc5b3);
       this.boxMesh(wx, -0.02, 0.83, 1.5, 0.1, 0.04, dark ? 0x2b2926 : 0xcfc5b3);
       cx = wx + 1.5;
@@ -465,6 +511,10 @@ export class Office3D extends window.Office {
     this.boxMesh(-T, dy - 0.6, 1.8, T, 1.2, WALL_H - 1.8, 0, { mat: wallMat });
     this.boxMesh(-T + 0.02, dy - 0.55, 0, 0.06, 1.1, 1.78, dark ? 0x5c4431 : 0xa8825a);
     this.boxMesh(0, dy - 0.6, 0, 0.9, 1.2, 0.01, dark ? 0x5a3b2e : 0xb9654a, { shadow: false });
+    // Soft magenta door neon (demo accent); intensity follows night/evening.
+    this.doorGlow = new THREE.PointLight(0xff66cc, 0.35, 3.2);
+    this.doorGlow.position.set(0.35, 1.0, dy);
+    this.room.add(this.doorGlow);
     // posters + whiteboard
     for (const ps of plan.posters) {
       const m = this.textPlane(ps.text, ps.color, 0.9, 1.0);
@@ -718,9 +768,12 @@ export class Office3D extends window.Office {
       }
       case 'lamp':
         this.place('lampRoundFloor', p.x - 0.25, p.y - 0.25, 0.5, 0.5, { h: 1.7 });
-        this.lampLight = new THREE.PointLight(0xffd9a0, 0, 4);
+        this.lampLight = new THREE.PointLight(0xffe08a, 0, 5);
         this.lampLight.position.set(p.x, 1.6, p.y);
         this.room.add(this.lampLight);
+        this.lampAccent = new THREE.PointLight(0xfff2c4, 0, 2.2);
+        this.lampAccent.position.set(p.x, 1.35, p.y);
+        this.room.add(this.lampAccent);
         break;
       case 'rug':
         this.place('rugRectangle', p.x, p.y, p.w, p.d, { y0: 0.004 });
@@ -1175,11 +1228,20 @@ export class Office3D extends window.Office {
     const book = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, 0.04), new THREE.MeshStandardMaterial({ color: 0xc96442 }));
     prop.add(cup, book);
     this.scene.add(obj, prop);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.28, 0.36, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.02;
+    ring.visible = false;
+    obj.add(ring);
     a = {
       obj, body: blob.body, eyes: blob.eyes, leftEye: blob.leftEye, rightEye: blob.rightEye,
       mixer: null, actions: {}, current: 'idle',
-      head: blob.eyes, headRest: 0, armR: null, prop, cup, book,
+      head: blob.eyes, headRest: 0, armR: null, prop, cup, book, ring,
       yaw: 0, last: { x: p.x, y: p.y }, baseScale: targetH / blob.nativeH, tiltX: 0, tiltZ: 0,
+      blobColor: blob.color,
     };
     this.actors.set(p.key, a);
     return a;
@@ -1281,6 +1343,13 @@ export class Office3D extends window.Office {
       a.obj.scale.set(sx, sy, sz);
       a.obj.rotation.set(tiltX, a.yaw, tiltZ);
       a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift + bob, p.y + Math.cos(a.yaw) * fwd);
+      if (a.ring) {
+        a.ring.visible = this.selectedKey === p.key;
+        if (a.ring.visible) {
+          a.ring.material.color.setHex(a.blobColor || 0xffffff);
+          a.ring.scale.setScalar(1 + 0.06 * Math.sin(t * 3));
+        }
+      }
 
       // hand-held props float beside the blob
       a.cup.visible = st.act === 'coffee' || st.act === 'water' || (st.pose !== 'walk' && p.poi && p.poi.prop === 'cup');
@@ -1375,12 +1444,20 @@ export class Office3D extends window.Office {
     this.hemi.color.setHex(sky.night ? 0x9aa8d8 : 0xffeaf5);
     this.hemi.groundColor.setHex(sky.night ? 0x2a2438 : 0xb09a88);
     this.gl.toneMappingExposure = sky.night ? 1.05 : sky.label === 'evening' ? 1.18 : 1.28;
-    if (this.windowMat) {
+    if (this.windowPanes) {
+      for (const pane of this.windowPanes) {
+        pane.material = sky.night ? this.windowNightMat : this.windowMat;
+      }
+    }
+    if (this.windowMat && !sky.night) {
       this.windowMat.color.setHex(sky.sky);
       this.windowMat.emissive.setHex(sky.sky);
     }
     if (this.plan.scene) this.animateScene(t, sky);
-    if (this.lampLight) this.lampLight.intensity = sky.night ? 2.2 : 0;
+    if (this.lampLight) this.lampLight.intensity = sky.night ? 2.4 : sky.label === 'evening' ? 1.1 : 0.15;
+    if (this.lampAccent) this.lampAccent.intensity = sky.night ? 1.4 : sky.label === 'evening' ? 0.55 : 0.05;
+    if (this.doorGlow) this.doorGlow.intensity = sky.night ? 0.85 : sky.label === 'evening' ? 0.45 : 0.22;
+    for (const cl of this.ceilingLights || []) cl.intensity = sky.night ? 0.9 : 0;
 
     // screens show who is working and on what
     const occupant = new Map();
