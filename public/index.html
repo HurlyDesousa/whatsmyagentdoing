@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>What's my agent doing</title>
+<title>Office · Swart Ops</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👀</text></svg>">
 <style>
   :root {
@@ -356,7 +356,7 @@
 <body class="dash">
 <div class="wrap">
   <header>
-    <h1><span class="logo" aria-hidden="true"><i style="background:#8b5cf6"></i><i style="background:#ff7417"></i><i style="background:#ff4fa3"></i></span><span>Grok Bot Office</span><small style="color:var(--faint);font-weight:500;font-size:12px">Hurly ops</small></h1>
+    <h1><span class="logo" aria-hidden="true"><i style="background:#8b5cf6"></i><i style="background:#ff7417"></i><i style="background:#ff4fa3"></i></span><span>Office</span><small style="color:var(--faint);font-weight:500;font-size:12px">Swart Ops</small></h1>
     <div class="summary" id="summary"></div>
     <button class="newver" id="newVer" hidden></button>
     <div class="controls">
@@ -701,7 +701,7 @@ function render() {
 
   const working = count((s) => ACTIVE.has(s));
   const needs = count(GROUPS[0].match);
-  document.title = (needs ? `(${needs}!) ` : working ? `(${working}) ` : '') + L.title;
+  document.title = (needs ? `(${needs}!) ` : working ? `(${working}) ` : '') + 'Office · Swart Ops';
 
   const main = document.getElementById('main');
   const officeMode = state.view === 'office';
