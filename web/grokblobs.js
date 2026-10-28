@@ -168,10 +168,9 @@ export function buildBlob(look, height) {
   for (const m of parts) { m.castShadow = true; m.receiveShadow = false; body.add(m); }
   body.updateMatrixWorld(true);
 
-  // Eyes: two glowing white vertical ovals (Grok Bot Office demo look), with a
-  // faint coloured rim from the body tint. ?eyes=black brings back the
-  // sidebar-style black ovals with a white glint.
-  const blackEyes = typeof location !== 'undefined' && /[?&]eyes=black\b/.test(location.search);
+  // Eyes: black vertical ovals with a white glint (Grok bot look, default).
+  // ?eyes=white brings back the glowing white demo-style eyes.
+  const blackEyes = !(typeof location !== 'undefined' && /[?&]eyes=white\b/.test(location.search));
   const eyeMat = blackEyes
     ? new THREE.MeshStandardMaterial({ color: 0x111114, roughness: 0.25 })
     : new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
