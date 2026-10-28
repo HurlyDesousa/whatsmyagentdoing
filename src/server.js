@@ -115,6 +115,19 @@ function createServer(watcher, opts, { onShutdown, onRestart, auth = createAuth(
   const clients = new Set();
   let last = '';
 
+  // A dead socket stays in the set until 'close' if a write throws, and one
+  // throw used to skip every client after it for that tick.
+  const sseWrite = (res, chunk) => {
+    if (!res || res.writableEnded || res.destroyed || res.closed) { clients.delete(res); return false; }
+    try {
+      res.write(chunk);
+      return true;
+    } catch {
+      clients.delete(res);
+      return false;
+    }
+  };
+
   const push = (force) => {
     let body;
     try { body = JSON.stringify(snapshot(watcher, opts)); } catch (e) { console.error('snapshot failed:', e.message); return; }
@@ -122,12 +135,20 @@ function createServer(watcher, opts, { onShutdown, onRestart, auth = createAuth(
     const sig = body.replace(/^\{"now":\d+,/, '{');
     if (!force && sig === last) return;
     last = sig;
-    for (const res of clients) res.write(`data: ${body}\n\n`);
+    for (const res of clients) sseWrite(res, `data: ${body}\n\n`);
   };
   watcher.on('change', () => push(false));
   // Status can flip with no new log lines (see view()), so re-check on a clock.
   setInterval(() => push(false), 5000).unref();
-  setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 20000).unref();
+  // Cloudflare idles out a quiet stream at ~100s; Kemp/nginx often at ~60s.
+  // An 8-byte ": ping" every 20s sits in those buffers and never counts as
+  // forwarded bytes. A named event (comments never reach EventSource) plus
+  // an 8KB comment, every 15s, flushes the buffer and lets the page notice
+  // a black-holed socket.
+  const SSE_HEARTBEAT_MS = 15000;
+  const SSE_PAD = `:${' '.repeat(8192)}\n\n`;
+  const heartbeat = (res) => sseWrite(res, `${SSE_PAD}event: ping\ndata: ${Date.now()}\n\n`);
+  setInterval(() => { for (const res of clients) heartbeat(res); }, SSE_HEARTBEAT_MS).unref();
 
   const TRUSTED_HOSTS = new Set(
     ['localhost', '127.0.0.1', '[::1]',
@@ -273,17 +294,28 @@ function createServer(watcher, opts, { onShutdown, onRestart, auth = createAuth(
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ app: 'whatsmyagentdoing' }));
     } else if (url.pathname === '/events') {
+      req.socket?.setTimeout(0);
+      req.socket?.setNoDelay(true);
+      req.socket?.setKeepAlive(true, 10000);
       res.writeHead(200, {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-store, no-transform',
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache, no-store, no-transform',
         connection: 'keep-alive',
         // SWA-2995: tell nginx/Cloudflare-style proxies not to buffer the stream.
         'x-accel-buffering': 'no',
       });
       res.flushHeaders?.();
-      res.write(`data: ${JSON.stringify(snapshot(watcher, opts))}\n\n`);
+      // retry: browser reopen delay after a proxy idle-close. The padded ping
+      // rides in the same write as the snapshot so a buffering proxy flushes
+      // the first event instead of holding a small chunk until it times out.
+      const snap = JSON.stringify(snapshot(watcher, opts));
+      sseWrite(res, `retry: 2000\ndata: ${snap}\n\n${SSE_PAD}event: ping\ndata: ${Date.now()}\n\n`);
       clients.add(res);
-      req.on('close', () => clients.delete(res));
+      const drop = () => clients.delete(res);
+      req.on('close', drop);
+      req.on('error', drop);
+      res.on('error', drop);
+      req.socket?.on('error', drop);
     } else {
       res.writeHead(404).end();
     }

@@ -43,6 +43,6 @@
     "start": "node bin/cli.js",
     "test:ui": "node tests/ui.cjs",
     "test:watcher": "node --test tests/watcher.cjs tests/omp.cjs",
-    "test:server": "node --test tests/server.cjs"
+    "test:server": "node --test tests/server.cjs tests/sse.cjs"
   }
 }
