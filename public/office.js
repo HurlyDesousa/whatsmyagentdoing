@@ -742,6 +742,26 @@
       else for (const k of ['zoom', 'ox', 'oy']) this.cam[k] += (want[k] - this.cam[k]) * 0.1;
     }
 
+    // Short line for speech / thought bubbles. Live activity wins, then the
+    // current issue title. Idle has no working line; done shows the idle note
+    // (the previous task is already gone).
+    speechLine(s) {
+      s = s || {};
+      const clean = (v) => String(v || '').replace(/\s*·\s*needs you$/i, '').replace(/\s+/g, ' ').trim();
+      const clip = (v) => { const t = clean(v); return t.length > 180 ? t.slice(0, 179) + '…' : t; };
+      const activity = clip(s.activity);
+      const title = clip(s.title);
+      const reply = clip(s.reply);
+      if (s.status === 'error') return activity || clip(s.error) || title || 'Error';
+      if (s.status === 'waiting') {
+        if (activity && !/^paused$/i.test(activity)) return activity;
+        return title || activity || reply || 'Waiting for you';
+      }
+      if (s.status === 'idle') return '';
+      if (s.status === 'done' || s.status === 'interrupted') return reply || title || '';
+      return activity || title || reply || (s.status === 'thinking' ? 'Thinking…' : '');
+    }
+
     pointer(e, click) {
       const r = this.canvas.getBoundingClientRect();
       const mx = e.clientX - r.left, my = e.clientY - r.top;
@@ -1428,6 +1448,8 @@
       };
 
       let top = y;
+      const spoken = this.speechLine(s);
+      const caption = spoken && !/^thinking…$/i.test(spoken) ? spoken : '';
       if (p.mode === 'work' && !p.path.length) {
         const col = STATUS_COLOR[st] || '#888';
         if (st === 'thinking') {
@@ -1450,8 +1472,7 @@
           for (let i = 0; i < n; i++) { c.beginPath(); c.arc(x + 7 + i * 8, y - 16, 2, 0, Math.PI * 2); c.fill(); }
           top = y - 24;
         } else if (st === 'tool') {
-          const tool = (s.activity || 'tool').split(/[:\s]/)[0];
-          top = pill('⚙ ' + tool, '#fff', col, y - 12);
+          top = pill('⚙ ' + (caption || (s.activity || 'tool').split(/[:\s]/)[0]), '#fff', col, y - 12);
         } else if (st === 'waiting' || st === 'error') {
           const jump = Math.abs(Math.sin(t * 4)) * 4;
           c.fillStyle = col;
@@ -1462,6 +1483,7 @@
           c.font = font(600, 10);
           top = y - 22 - jump;
         }
+        if (caption && st !== 'tool') top = pill(caption, pal.bubbleInk, pal.bubble, top - 14);
       } else if (p.mode === 'wander') {
         const justDone = st === 'done' && Date.now() - (s.lastEventAt || 0) < 3 * 60_000;
         const dozing = at.act === 'nap' || (st === 'idle' && (at.act === 'couch' || at.act === 'beanbag' || (p.poi && p.poi.sleepy)));
