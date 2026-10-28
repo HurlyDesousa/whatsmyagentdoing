@@ -52,6 +52,62 @@ test('a named Grok teammate picks up Paperclip issues and drops seed copy', () =
   assert.doesNotMatch(`${view.title} ${view.activity}`, /SWA-2978|Planning next dispatch/);
 });
 
+test('Chief Master links to roster name Chief (alias) and drops SWA-2978 seed when idle', () => {
+  const w = crew();
+  // Simulate a stale/wrong seed pc so alias matching must win (live board name is "Chief").
+  const chief = w.sessions().find((s) => s.id === 'chief');
+  chief.pc = 'stale-not-on-roster';
+  w.ingestLive({
+    agents: [agent('2842a7bf-9527-42c1-aa86-ba5b599c8878', 'Chief', 'idle', { role: 'Ops lead', heartbeat: '2026-10-28T18:00:00.000Z' })],
+    issues: [],
+    runs: [],
+  });
+  w.tick();
+  assert.equal(chief.pc, '2842a7bf-9527-42c1-aa86-ba5b599c8878');
+  assert.equal(chief.source, 'paperclip');
+  assert.equal(chief.status, 'done');
+  assert.match(chief.title, /^Idle/);
+  assert.equal(chief.activity, null);
+  assert.doesNotMatch(`${chief.title} ${chief.activity || ''} ${chief.model}`, /SWA-2978|active \(seed\)|Planning next dispatch/);
+  assert.equal(w.sessions().filter((s) => /Chief/.test(s.name)).length, 1);
+});
+
+test('Chief Master pinned pc follows a live run like Paperclip bubbles', () => {
+  const w = crew();
+  const chiefId = '2842a7bf-9527-42c1-aa86-ba5b599c8878';
+  w.ingestLive({
+    agents: [agent(chiefId, 'Chief', 'running', { role: 'Ops lead' })],
+    issues: [{ id: 'iss-3009', identifier: 'SWA-3009', title: 'Grok live feed', status: 'in_progress', assigneeAgentId: chiefId, updatedAt: '2026-10-28T18:50:00.000Z' }],
+    runs: [{ id: 'run-c', agentId: chiefId, status: 'running', issueId: 'iss-3009', currentStatusMessage: 'Routing Code Master 1', startedAt: '2026-10-28T18:57:00.000Z' }],
+  });
+  w.tick();
+  const chief = w.sessions().find((s) => s.id === 'chief');
+  assert.equal(chief.pc, chiefId);
+  assert.equal(chief.source, 'paperclip');
+  assert.equal(chief.title, 'SWA-3009 Grok live feed');
+  assert.equal(chief.activity, 'Routing Code Master 1');
+  assert.doesNotMatch(`${chief.title} ${chief.activity}`, /SWA-2978/);
+});
+
+test('Grok teammate with no board stand-in goes idle after roster poll (no forever seed)', () => {
+  const w = crew();
+  w.ingestLive({
+    agents: [agent('someone', 'Newbie', 'idle')],
+    issues: [],
+    runs: [],
+  });
+  w.tick();
+  const proxmox = w.sessions().find((s) => s.id === 'proxmox');
+  assert.equal(proxmox.source, 'paperclip');
+  assert.equal(proxmox.status, 'done');
+  assert.match(proxmox.title, /^Idle/);
+  assert.notEqual(proxmox.title, 'Proxmox cluster (pve*)');
+  const doc = w.sessions().find((s) => s.id === 'doc');
+  assert.equal(doc.source, 'paperclip');
+  assert.equal(doc.status, 'idle');
+  assert.equal(doc.title, 'Off the floor');
+});
+
 test('a later run replaces the bubble line without keeping the previous task', () => {
   const w = crew();
   const agents = [agent('pc-cm2', 'Code Master 2', 'running')];
