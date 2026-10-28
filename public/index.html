@@ -213,7 +213,9 @@
     padding: 16px 18px 18px;
     background: radial-gradient(1200px 700px at 30% 20%, #171a26 0%, #0d0e12 60%);
   }
-  body.dash .wrap { max-width: 1680px; }
+  /* Full-bleed: office chrome spans the whole viewport width (no centered gutters). */
+  body.dash .wrap { max-width: none; width: 100%; margin: 0; }
+  @media (min-width: 1800px) { .dashgrid { grid-template-columns: minmax(0, 1fr) 380px; } }
   body.dash header { margin-bottom: 12px; gap: 10px 18px; }
   body.dash h1 { font-size: 20px; font-weight: 800; display: flex; align-items: center; gap: 10px; }
   body.dash h1 .logo { display: inline-flex; gap: 2px; }
