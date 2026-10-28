@@ -22,6 +22,7 @@ const STATUS_COLOR = {
 const CHAR_HEIGHT = 1.02; // world units (≈ tiles)
 const WALL_H = 2.4;
 const SIT_FORWARD = 0.16;
+const FLOOR_T = 0.42; // thickness of the office floor slab (it used to be a paper-thin plane)
 
 // Pastel room in both page themes; the Now/Day/Evening/Night lighting does the mood.
 const dark3 = () => false;
@@ -157,6 +158,7 @@ export class Office3D extends window.Office {
     this.controls.maxZoom = 4;
     this.controls.screenSpacePanning = true;
     this.controls.zoomToCursor = true;
+    this.canvas.addEventListener('pointerdown', (e) => { this._down = { x: e.clientX, y: e.clientY }; });
 
     this.hemi = new THREE.HemisphereLight(0xfff4e2, 0x9a8468, 1.05);
     this.scene.add(this.hemi);
@@ -306,8 +308,15 @@ export class Office3D extends window.Office {
     this.blinkers = [];
     this.glows = [];       // localized lights + additive halos, scaled by sky.glow
     this.screenGlows = []; // per-desk monitor halos, tinted by the worker's status
-    const { W, D, OW, MR, PY } = plan;
+    this.initInteractive();
+    const { W, D, OW, MR, PY, RW } = plan;
     const dark = false; // pastel room in both page themes
+
+    // A solid two-tone slab under the floor so the room reads as a chunky
+    // diorama block instead of a sheet of paper.
+    this.boxMesh(-0.12, -0.12, -0.16, W + 0.12, D + 0.12, 0.158, 0xf1dcc0, { rough: 0.9, shadow: false });
+    this.boxMesh(-0.09, -0.09, -FLOOR_T, W + 0.06, D + 0.06, FLOOR_T - 0.15, 0xcbc1dd, { rough: 0.95, shadow: false });
+    this.boxMesh(-0.1, -0.1, -0.175, W + 0.08, D + 0.08, 0.025, 0xf6b9c4, { rough: 0.9, shadow: false, round: false });
 
     // floors
     const floor = (x, y, w, d, color, tex) => {
@@ -341,6 +350,7 @@ export class Office3D extends window.Office {
     const mat = new THREE.Mesh(new THREE.PlaneGeometry(pp.x1 - pp.x0 + 1.2, 2.7), new THREE.MeshStandardMaterial({ color: dark ? 0x2f4a3a : 0xcde6d4, roughness: 1 }));
     mat.rotation.x = -Math.PI / 2; mat.position.set((pp.x0 + pp.x1) / 2, 0.005, pp.y - 0.05); mat.receiveShadow = true;
     this.room.add(mat);
+    this.buildCarpets();
 
     // walls: back (z=0) with windows, left (x=0) with a door
     const wallCol = dark ? 0x3e4655 : 0xc3bfd6; // muted lavender-gray
@@ -359,6 +369,7 @@ export class Office3D extends window.Office {
       this.room.add(glass);
       this.boxMesh(wx + 0.73, -0.02, 0.85, 0.04, 0.04, 1.15, dark ? 0x2b2926 : 0xf2e8da);
       this.boxMesh(wx, -0.02, 0.83, 1.5, 0.1, 0.04, dark ? 0x2b2926 : 0xf2e8da);
+      this.addBlind(wx);
       cx = wx + 1.5;
     }
     this.boxMesh(cx, -T, 0, W - cx, T, WALL_H, 0, { mat: wallMat });
@@ -366,7 +377,19 @@ export class Office3D extends window.Office {
     this.boxMesh(-T, -T, 0, T, dy - 0.6 + T, WALL_H, 0, { mat: wallMat });
     this.boxMesh(-T, dy + 0.6, 0, T, D - dy - 0.6, WALL_H, 0, { mat: wallMat });
     this.boxMesh(-T, dy - 0.6, 1.8, T, 1.2, WALL_H - 1.8, 0, { mat: wallMat });
-    this.boxMesh(-T + 0.02, dy - 0.55, 0, 0.06, 1.1, 1.78, dark ? 0x5c4431 : 0xdcae8c);
+    {
+      // entrance door on a hinge: click to open / close, opens by itself for arrivals
+      const pv = new THREE.Group();
+      pv.position.set(-T / 2, 0, dy - 0.55);
+      this.boxMesh(-0.03, 0, 0, 0.06, 1.1, 1.78, 0xdcae8c, { group: pv });
+      this.boxMesh(-0.045, 0.12, 0.25, 0.09, 0.86, 0.5, 0xe9c2a4, { group: pv }); // panel inset
+      for (const sx of [-0.05, 0.05]) {
+        const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshStandardMaterial({ color: 0xf5d27a, roughness: 0.4, metalness: 0.2 }));
+        knob.position.set(sx, 0.95, 0.95); knob.castShadow = true; pv.add(knob);
+      }
+      this.room.add(pv);
+      this.addDoor(pv, 0.35, dy, 1.45);
+    }
     this.boxMesh(0, dy - 0.6, 0, 0.9, 1.2, 0.01, dark ? 0x5a3b2e : 0xe7a9a2, { shadow: false, round: false });
     // magenta doorway glow (demo look)
     const doorGlow = new THREE.PointLight(0xff5fc0, 2.2, 5.5, 1.6); // softer magenta; brighter at night
@@ -404,6 +427,19 @@ export class Office3D extends window.Office {
     for (const dk of plan.desks) this.buildDesk(dk);
 
     for (const p of plan.props) this.buildProp(p);
+    {
+      // glass swing door into the meeting room (the gap in the glass wall)
+      const pv = new THREE.Group();
+      pv.position.set(OW, 0, 3.62);
+      this.boxMesh(-0.025, 0, 0.02, 0.05, 0.96, 2.06, 0, { mat: this.glassMat(), shadow: false, group: pv });
+      this.boxMesh(-0.035, 0, 0, 0.07, 0.96, 0.1, 0xe6dccd, { group: pv });
+      this.boxMesh(-0.035, 0, 2.02, 0.07, 0.96, 0.06, 0xe6dccd, { group: pv });
+      this.boxMesh(-0.06, 0.82, 0.8, 0.12, 0.04, 0.45, 0xb7a6d2, { group: pv });
+      this.room.add(pv);
+      this.addDoor(pv, OW, 4.1, 1.5);
+    }
+    this.buildButterfly(OW + RW / 2, PY + (D - PY) / 2, RW / 2 - 1.1, (D - PY) / 2 - 0.9);
+    this.clicks.updateMatrixWorld(true);
     this.fitCamera3D(true);
   }
 
@@ -425,7 +461,9 @@ export class Office3D extends window.Office {
   }
 
   potted(name, x, y, w, d, opts) {
-    return this.recolor(this.place(name, x, y, w, d, opts), { wood: 0xf4a28f, woodDark: 0xe38f7d, plant: 0x86c99d }); // soft coral pots
+    const m = this.recolor(this.place(name, x, y, w, d, opts), { wood: 0xf4a28f, woodDark: 0xe38f7d, plant: 0x86c99d }); // soft coral pots
+    if (m && this.plants) this.addPlant(m);
+    return m;
   }
 
   glowTexture(rgb) {
@@ -520,15 +558,18 @@ export class Office3D extends window.Office {
     const h = (Math.round(x * 10) * 31 + Math.round(y * 10) * 17) >>> 0;
     if (h % 3 === 0) this.potted('plantSmall' + (1 + (h % 3)), x + 0.05, y + 0.3, 0.25, 0.25, { y0: top, h: 0.3 });
     if (h % 4 === 1) {
-      this.recolor(this.place('lampSquareTable', x + 1.1, back, 0.25, 0.25, { y0: top, h: 0.35 }), { lamp: 0xffe3a0 }, { lamp: 0xffcf70 });
+      const lm = this.recolor(this.place('lampSquareTable', x + 1.1, back, 0.25, 0.25, { y0: top, h: 0.35 }), { lamp: 0xffe3a0 }, { lamp: 0xffcf70 });
       const l = new THREE.PointLight(0xffc27a, 0, 2.6, 1.8);
       l.position.set(x + 1.22, top + 0.42, back + 0.12);
       this.room.add(l);
-      this.glows.push({ light: l, base: 1.6, sprite: this.haloSprite('255,200,120', x + 1.22, top + 0.4, back + 0.12, 1.1), sbase: 0.85 });
+      // click to switch; off by default in Day light (see animateInteractive)
+      const L = this.addLamp(lm, l, { base: 1.6, sprite: this.haloSprite('255,200,120', x + 1.22, top + 0.4, back + 0.12, 1.1), sbase: 0.85, at: [x + 1.22, top + 0.5, back + 0.12] });
+      this.clickBox(x + 1.0, back - 0.1, top, 0.45, 0.45, 0.5, () => this.toggleLamp(L));
     }
     // chair, facing the desk
     const seat = dk.seat;
-    this.recolor(this.place('chairDesk', seat.x - 0.3, seat.y - 0.3, 0.6, 0.6, { h: 0.9, rot: dk.side === 's' ? Math.PI : 0 }), { carpet: alt ? 0xa8dcc8 : 0xeab0b4, metalMedium: 0xb3b8c9 });
+    const chair = this.recolor(this.place('chairDesk', seat.x - 0.3, seat.y - 0.3, 0.6, 0.6, { h: 0.9, rot: dk.side === 's' ? Math.PI : 0 }), { carpet: alt ? 0xa8dcc8 : 0xeab0b4, metalMedium: 0xb3b8c9 });
+    if (chair) this.addChair(chair);
     // The monitor's own screen quad lights up in the worker's status colour.
     if (mon) {
       let quad = null;
@@ -586,6 +627,7 @@ export class Office3D extends window.Office {
         this.ball.castShadow = true;
         this.ball.visible = false;
         this.room.add(this.ball);
+        this.clickBox(x, y, 0, 2.6, 1.4, 0.8, () => { this.until.rally = this.t / 1000 + 7; this.spawnFx('spark', x + 1.3, 1.0, y + 0.7, { n: 5, spread: 0.6 }); });
         break;
       }
       case 'vending': {
@@ -626,6 +668,7 @@ export class Office3D extends window.Office {
           this.room.add(rod);
           this.rods.push(rod);
         }
+        this.clickBox(x, y, 0, 1.6, 0.8, 0.85, () => { this.until.fb = this.t / 1000 + 5; this.spawnFx('spark', x + 0.8, 1.0, y + 0.4, { n: 4, spread: 0.5 }); });
         break;
       }
       case 'booth': {
@@ -669,9 +712,11 @@ export class Office3D extends window.Office {
       }
       case 'coffee':
         this.place('kitchenCoffeeMachine', p.x, p.y, 0.45, 0.4, { y0: 0.9, h: 0.5 });
+        this.buildMug(p.x + 0.225, p.y + 0.36);
+        this.clickBox(p.x - 0.05, p.y - 0.05, 0.9, 0.55, 0.6, 0.6, () => this.brew());
         break;
       case 'fridge':
-        this.place('kitchenFridgeLarge', p.x, p.y, 0.85, 0.75, { h: 1.95, stretch: true });
+        this.buildFridge(p.x, p.y);
         break;
       case 'cooler': {
         this.boxMesh(p.x, p.y, 0, 0.42, 0.42, 0.95, 0xe9eef2, { rough: 0.7 });
@@ -716,6 +761,11 @@ export class Office3D extends window.Office {
       case 'coffeeTable':
         this.place('tableCoffee', p.x, p.y, p.w, p.d, { h: 0.35 });
         this.place('radio', p.x + 1.0, p.y + 0.2, 0.3, 0.18, { y0: 0.35, h: 0.18 });
+        this.radioAt = [p.x + 1.15, 0.6, p.y + 0.29];
+        this.clickBox(p.x + 0.9, p.y + 0.1, 0.35, 0.5, 0.4, 0.35, () => {
+          const t = this.t / 1000;
+          this.until.notes = this.until.notes > t ? 0 : t + 8;
+        });
         break;
       case 'beanbag': {
         const m = new THREE.Mesh(new THREE.SphereGeometry(0.42, 24, 16), new THREE.MeshStandardMaterial({ color: soft(p.color), roughness: 0.95 }));
@@ -723,6 +773,9 @@ export class Office3D extends window.Office {
         m.position.set(p.x, 0.2, p.y);
         m.castShadow = m.receiveShadow = true;
         this.room.add(m);
+        const bean = { m, x: p.x, y: p.y, sy: 0.5, wob: 0 };
+        this.beans.push(bean);
+        this.clickBox(p.x - 0.45, p.y - 0.45, 0, 0.9, 0.9, 0.45, () => { bean.wob = 1; this.spawnFx('puff', p.x, 0.35, p.y, { n: 4, spread: 0.6, up: 0.25, life: 1, size: 0.25, grow: 1 }); });
         break;
       }
       case 'arcade': {
@@ -735,21 +788,574 @@ export class Office3D extends window.Office {
           const l = new THREE.PointLight(0xff5fc0, 0, 3, 1.6);
           l.position.set(x + 0.35, 1.3, y + 1.1);
           this.room.add(l);
-          this.glows.push({ light: l, base: 1.6, sprite: this.haloSprite('255,95,192', x + 0.35, 1.25, y + 0.75, 1.4), sbase: 0.6 });
+          this.arcadeGlow = { light: l, base: 1.6, sprite: this.haloSprite('255,95,192', x + 0.35, 1.25, y + 0.75, 1.4), sbase: 0.6 };
+          this.glows.push(this.arcadeGlow);
         }
+        this.arcadeAt = [x + 0.35, 1.3, y + 0.8];
+        this.clickBox(x, y, 0, 0.7, 0.95, 1.8, () => { this.until.arcade = this.t / 1000 + 4.5; this.spawnFx('spark', x + 0.35, 1.6, y + 0.8, { n: 7, spread: 0.5, up: 0.9 }); });
         break;
       }
       case 'lamp':
-        this.recolor(this.place('lampRoundFloor', p.x - 0.25, p.y - 0.25, 0.5, 0.5, { h: 1.7 }), { lamp: 0xffd34d }, { lamp: 0xffc933 });
-        this.lampLight = new THREE.PointLight(0xffc96a, 0, 4.5);
-        this.lampLight.position.set(p.x, 1.6, p.y);
-        this.room.add(this.lampLight);
-        this.glows.push({ sprite: this.haloSprite('255,201,106', p.x, 1.55, p.y, 2.4), sbase: 0.8 });
+      {
+        const lm = this.recolor(this.place('lampRoundFloor', p.x - 0.25, p.y - 0.25, 0.5, 0.5, { h: 1.7 }), { lamp: 0xffd34d }, { lamp: 0xffc933 });
+        const l = new THREE.PointLight(0xffc96a, 0, 4.5);
+        l.position.set(p.x, 1.6, p.y);
+        this.room.add(l);
+        const L = this.addLamp(lm, l, { base: 1.6, floor: true, sprite: this.haloSprite('255,201,106', p.x, 1.55, p.y, 2.4), sbase: 0.8, at: [p.x, 1.7, p.y] });
+        this.clickBox(p.x - 0.35, p.y - 0.35, 0, 0.7, 0.7, 1.8, () => this.toggleLamp(L));
         break;
+      }
       case 'rug':
         this.recolor(this.place('rugRectangle', p.x, p.y, p.w, p.d, { y0: 0.004 }), { carpet: 0x9eaad9, carpetDarker: 0x8592c6 }); // soft periwinkle rug
         break;
     }
+  }
+
+  // ------------------------------------------------------------ interactive props
+  // Lamps, doors, fridge, coffee, blinds, chairs, plants, beanbags, the cat and
+  // a butterfly. Built office only (scene packs keep their own behaviour).
+
+  initInteractive() {
+    this.clicks = new THREE.Group(); // invisible hit boxes, never rendered (not in the scene)
+    this.clickObjs = [];             // real meshes that are clickable themselves (doors, chairs, plants)
+    this.lamps = []; this.doors = []; this.plants = []; this.chairs = []; this.beans = []; this.blinds = [];
+    this.coffee = null; this.fridge = null; this.arcadeGlow = null; this.arcadeAt = null; this.radioAt = null; this.butterfly = null;
+    this.until = { rally: 0, fb: 0, arcade: 0, notes: 0, notesNext: 0 };
+    for (const f of this.fx || []) { this.scene.remove(f.sp); f.sp.material.dispose(); }
+    this.fx = [];
+    this._skyRef = null;
+    this._ray = this._ray || new THREE.Raycaster();
+    this._hitMat = this._hitMat || new THREE.MeshBasicMaterial({ visible: false });
+    this._hitGeo = this._hitGeo || new THREE.BoxGeometry(1, 1, 1);
+    if (!this.catObj) {
+      this.catObj = this.buildCat();
+      this.scene.add(this.catObj.root);
+    }
+  }
+
+  clickBox(x, y, z, w, d, h, fn) {
+    const m = new THREE.Mesh(this._hitGeo, this._hitMat);
+    m.scale.set(w, h, d);
+    m.position.set(x + w / 2, z + h / 2, y + d / 2);
+    m.userData.onClick = fn;
+    this.clicks.add(m);
+    return m;
+  }
+
+  clickable(obj, fn) {
+    obj.userData.onClick = fn;
+    this.clickObjs.push(obj);
+  }
+
+  pickInteractive(e) {
+    const r = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    this._ray.setFromCamera(ndc, this.camera);
+    const targets = [this.clicks, ...this.clickObjs];
+    if (this.catObj && this.catObj.root.visible) targets.push(this.catObj.root);
+    for (const h of this._ray.intersectObjects(targets, true)) {
+      let o = h.object;
+      while (o && !o.userData.onClick) o = o.parent;
+      if (o) return o;
+    }
+    return null;
+  }
+
+  // ---- lamps: click toggles; Day light switches them all off, Dawn/Eve/Night on
+  addLamp(model, light, opts) {
+    const mats = [];
+    if (model) model.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) if (m.emissive && m.emissiveIntensity > 0 && m.emissive.getHex()) mats.push(m);
+    });
+    const L = { model, light, mats, e0: mats.map((m) => m.emissiveIntensity), on: true, k: -1, ...opts };
+    this.lamps.push(L);
+    return L;
+  }
+
+  toggleLamp(L) {
+    L.on = !L.on;
+    if (L.on && L.at) this.spawnFx('spark', L.at[0], L.at[1], L.at[2], { n: 3, spread: 0.2, up: 0.4, size: 0.14 });
+  }
+
+  // ---- doors (entrance, meeting room, fridge): click to open / close
+  addDoor(pivot, cx, cy, max, extra = {}) {
+    const d = { pivot, cx, cy, max, open: false, a: 0, ...extra };
+    this.doors.push(d);
+    this.clickable(pivot, () => { d.open = !d.open; });
+    return d;
+  }
+
+  // ---- carpets: a patterned carpet in the meeting room and a round welcome mat
+  buildCarpets() {
+    const { OW } = this.plan;
+    const cv = document.createElement('canvas');
+    cv.width = 256; cv.height = 208;
+    const c = cv.getContext('2d');
+    c.fillStyle = '#f3c3cc'; c.fillRect(0, 0, 256, 208);
+    c.fillStyle = '#fbeee6'; c.fillRect(9, 9, 238, 190);
+    c.fillStyle = '#c4e5d8'; c.fillRect(18, 18, 220, 172);
+    c.fillStyle = 'rgba(255,255,255,.6)';
+    for (let y = 32, row = 0; y < 182; y += 16, row++) for (let x = 32 + (row % 2) * 8; x < 228; x += 16) { c.beginPath(); c.arc(x, y, 2.4, 0, Math.PI * 2); c.fill(); }
+    c.strokeStyle = '#f2b0bd'; c.lineWidth = 4; c.strokeRect(28, 28, 200, 152);
+    c.strokeStyle = '#fbeee6'; c.lineWidth = 2; c.strokeRect(36, 36, 184, 136);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    const side = new THREE.MeshStandardMaterial({ color: 0xeeb4bf, roughness: 1 });
+    const top = new THREE.MeshStandardMaterial({ map: tex, roughness: 1 });
+    const cw = 4.2, cd = 3.4, ch = 0.035;
+    const carpet = new THREE.Mesh(new THREE.BoxGeometry(cw, ch, cd), [side, side, top, side, side, side]);
+    carpet.position.set(OW + 0.9 + cw / 2, ch / 2, 0.9 + cd / 2);
+    carpet.receiveShadow = true;
+    this.room.add(carpet);
+    // round welcome rug inside the entrance door
+    const rc = document.createElement('canvas');
+    rc.width = rc.height = 128;
+    const r = rc.getContext('2d');
+    ['#f7c7a8', '#fbe8d6', '#cbbdf0', '#fbe8d6', '#f6b9c4'].forEach((col, i) => { r.fillStyle = col; r.beginPath(); r.arc(64, 64, 64 - i * 12, 0, Math.PI * 2); r.fill(); });
+    const rt = new THREE.CanvasTexture(rc);
+    rt.colorSpace = THREE.SRGBColorSpace;
+    const rug = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.03, 40), [new THREE.MeshStandardMaterial({ color: 0xf2b39a, roughness: 1 }), new THREE.MeshStandardMaterial({ map: rt, roughness: 1 }), side]);
+    rug.position.set(1.35, 0.015, this.plan.door.y);
+    rug.receiveShadow = true;
+    this.room.add(rug);
+  }
+
+  // ---- roller blinds on the back windows
+  addBlind(wx) {
+    if (!this._blindMat) {
+      const tex = this.patternTexture((c, s) => {
+        c.fillStyle = '#fbf1e6'; c.fillRect(0, 0, s, s);
+        c.fillStyle = '#f1d9c7';
+        for (let y = 0; y < s; y += 16) c.fillRect(0, y, s, 3);
+      });
+      tex.repeat.set(1, 5);
+      this._blindMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 1, side: THREE.DoubleSide });
+      this._blindGeo = new THREE.BoxGeometry(1.46, 1, 0.015);
+      this._blindGeo.translate(0, -0.5, 0);
+    }
+    const g = new THREE.Group();
+    g.position.set(wx + 0.75, 1.99, 0.04);
+    const m = new THREE.Mesh(this._blindGeo, this._blindMat);
+    m.castShadow = true;
+    g.add(m);
+    g.scale.y = 0.05;
+    this.room.add(g);
+    const roller = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.56, 10), new THREE.MeshStandardMaterial({ color: 0xe9c9b4, roughness: 0.8 }));
+    roller.rotation.z = Math.PI / 2;
+    roller.position.set(wx + 0.75, 2.02, 0.05);
+    this.room.add(roller);
+    const b = { g, down: false, k: 0.05 };
+    this.blinds.push(b);
+    this.clickBox(wx, -0.12, 0.84, 1.5, 0.32, 1.25, () => { b.down = !b.down; });
+  }
+
+  // ---- desk chairs: click to spin, they settle back facing the desk
+  addChair(m) {
+    const box = new THREE.Box3().setFromObject(m);
+    const c = box.getCenter(new THREE.Vector3());
+    const g = new THREE.Group();
+    g.position.set(c.x, 0, c.z);
+    (m.parent || this.room).add(g);
+    m.position.x -= c.x; m.position.z -= c.z;
+    g.add(m);
+    const ch = { g, a: 0, v: 0 };
+    this.chairs.push(ch);
+    this.clickable(g, () => { ch.v += (Math.random() < 0.5 ? -1 : 1) * (11 + Math.random() * 5); });
+  }
+
+  // ---- potted plants: gentle sway, click for a bounce and a burst of petals
+  addPlant(m) {
+    const box = new THREE.Box3().setFromObject(m);
+    const top = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+    const pl = { m, s0: m.scale.clone(), ph: top.x * 1.3 + top.z * 0.7, pop: 0, top };
+    this.plants.push(pl);
+    this.clickable(m, () => {
+      pl.pop = 1;
+      this.spawnFx('petal', top.x, top.y, top.z, { n: 7, spread: 0.45, up: 0.7, size: 0.16, life: 1.6 });
+    });
+  }
+
+  // ---- fridge: procedural body with shelves + snacks, two hinged doors
+  buildFridge(x, y) {
+    const w = 0.85, d = 0.75, h = 1.95;
+    const body = new THREE.MeshStandardMaterial({ color: 0xc7e7dc, roughness: 0.6 });
+    this.boxMesh(x, y, 0, w, 0.06, h, 0, { mat: body });
+    this.boxMesh(x, y, 0, 0.05, d - 0.06, h, 0, { mat: body });
+    this.boxMesh(x + w - 0.05, y, 0, 0.05, d - 0.06, h, 0, { mat: body });
+    this.boxMesh(x, y, 0, w, d - 0.06, 0.12, 0, { mat: body });
+    this.boxMesh(x, y, h - 0.06, w, d - 0.06, 0.06, 0, { mat: body });
+    this.boxMesh(x + 0.05, y + 0.06, 1.3, w - 0.1, d - 0.12, 0.05, 0, { mat: body });
+    const liner = new THREE.MeshStandardMaterial({ color: 0xf4f8fb, roughness: 0.7, emissive: 0xe6f6ff, emissiveIntensity: 0 });
+    this.boxMesh(x + 0.05, y + 0.06, 0.12, w - 0.1, 0.012, h - 0.18, 0, { mat: liner, round: false, shadow: false });
+    for (const z of [0.52, 0.92]) this.boxMesh(x + 0.06, y + 0.08, z, w - 0.12, d - 0.2, 0.015, 0xe4f1f8, { round: false });
+    // snacks
+    const cyl = (cx, cz, z, r, hh, col) => {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, hh, 10), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 }));
+      m.position.set(cx, z + hh / 2, cz); m.castShadow = true; this.room.add(m);
+    };
+    cyl(x + 0.22, y + 0.35, 0.12, 0.05, 0.3, 0xa6d8f0);
+    cyl(x + 0.36, y + 0.32, 0.12, 0.05, 0.26, 0xf7b7a3);
+    this.boxMesh(x + 0.52, y + 0.25, 0.12, 0.16, 0.16, 0.24, 0xfff6e8);
+    this.boxMesh(x + 0.15, y + 0.25, 0.535, 0.12, 0.1, 0.22, 0xfdfdfd);
+    this.boxMesh(x + 0.15, y + 0.25, 0.68, 0.12, 0.1, 0.06, 0x8fb7e8);
+    cyl(x + 0.5, y + 0.33, 0.535, 0.07, 0.12, 0xffd88a);
+    for (const [ax, col] of [[0.22, 0xf28b8b], [0.36, 0x9bd37b], [0.5, 0xf28b8b]]) {
+      const ap = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshStandardMaterial({ color: col, roughness: 0.5 }));
+      ap.position.set(x + ax, 0.985, y + 0.35); ap.castShadow = true; this.room.add(ap);
+    }
+    this.boxMesh(x + 0.62, y + 0.2, 0.935, 0.14, 0.2, 0.1, 0xf6c1d6); // cake slice box
+    this.boxMesh(x + 0.15, y + 0.15, 1.35, 0.25, 0.35, 0.08, 0xdff3ff);
+    this.boxMesh(x + 0.45, y + 0.15, 1.35, 0.25, 0.35, 0.12, 0xcfe0ff);
+    // doors hinge on the left front edge and swing out toward the camera side,
+    // so the lit shelves are on show while open
+    const door = (z0, hh, auto) => {
+      const pv = new THREE.Group();
+      pv.position.set(x, 0, y + d - 0.06);
+      this.boxMesh(0, 0, z0, w, 0.06, hh, 0xd6efe6, { group: pv, rough: 0.6 });
+      this.boxMesh(w - 0.095, 0.06, z0 + hh * 0.35, 0.035, 0.04, Math.min(0.5, hh * 0.45), 0xf6f1e8, { group: pv }); // handle
+      this.boxMesh(0.08, -0.07, z0 + hh * 0.3, w - 0.16, 0.07, 0.035, 0xe4f1f8, { group: pv, round: false }); // door bin
+      this.room.add(pv);
+      return this.addDoor(pv, null, null, 1.75, { auto, sign: -1 });
+    };
+    const main = door(0.12, 1.18, 'fridge');
+    door(1.32, 0.61, null);
+    const l = new THREE.PointLight(0xe8f6ff, 0, 2.4, 2);
+    l.position.set(x + w / 2, 1.0, y + d + 0.15);
+    this.room.add(l);
+    this.fridge = { main, light: l, liner };
+  }
+
+  // ---- coffee: click the machine (or a blob comes for coffee) → steam + mug fills
+  buildMug(x, z) {
+    const mug = new THREE.Group();
+    mug.position.set(x, 0.9, z);
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.042, 0.1, 14, 1, true), new THREE.MeshStandardMaterial({ color: 0xfff1ec, roughness: 0.6, side: THREE.DoubleSide }));
+    cup.position.y = 0.05;
+    const base = new THREE.Mesh(new THREE.CircleGeometry(0.042, 14), cup.material);
+    base.rotation.x = -Math.PI / 2; base.position.y = 0.002;
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.008, 6, 12), cup.material);
+    handle.position.set(0.055, 0.05, 0);
+    const lg = new THREE.CylinderGeometry(0.046, 0.042, 1, 14);
+    lg.translate(0, 0.5, 0);
+    const liquid = new THREE.Mesh(lg, new THREE.MeshStandardMaterial({ color: 0x8a5a3c, roughness: 0.3 }));
+    liquid.position.y = 0.006; liquid.scale.y = 0.001;
+    mug.add(cup, base, handle, liquid);
+    mug.visible = false;
+    this.room.add(mug);
+    this.coffee = { mug, liquid, x, z, t0: -99 };
+  }
+
+  brew() {
+    const c = this.coffee;
+    if (!c) return;
+    const t = this.t / 1000;
+    if (t - c.t0 < 4) return;
+    c.t0 = t;
+  }
+
+  // ---- butterfly over the lounge by day, a firefly by night
+  buildButterfly(cx, cz, rx, rz) {
+    const g = new THREE.Group();
+    const wings = [];
+    for (const [s, col] of [[1, 0xffb3d9], [-1, 0xb9a6ff]]) {
+      const geo = new THREE.PlaneGeometry(0.14, 0.11);
+      geo.rotateX(-Math.PI / 2);
+      geo.translate(s * 0.07, 0, 0);
+      const wing = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: col, side: THREE.DoubleSide, roughness: 0.8, emissive: col, emissiveIntensity: 0.15 }));
+      wing.raycast = () => {};
+      g.add(wing);
+      wings.push([wing, s]);
+    }
+    const bodyM = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.07, 3, 6), new THREE.MeshStandardMaterial({ color: 0x6b5a7a }));
+    bodyM.rotation.x = Math.PI / 2; bodyM.raycast = () => {};
+    g.add(bodyM);
+    this.room.add(g);
+    const fly = this.haloSprite('255,240,140', cx, 1.2, cz, 0.45);
+    this.butterfly = { g, wings, fly, cx, cz, rx: Math.max(0.6, rx), rz: Math.max(0.6, rz) };
+  }
+
+  // ---- the office cat (walks the shared floor-plan path from office.js)
+  buildCat() {
+    const root = new THREE.Group();
+    const body = new THREE.Group();
+    root.add(body);
+    const M = (c, r = 0.85) => new THREE.MeshStandardMaterial({ color: c, roughness: r });
+    const fur = M(0xf2b27c), cream = M(0xfbe9d6), pink = M(0xf4a7b4), ink = M(0x15151a, 0.4);
+    const add = (geo, mat, x, y, z, parent = body) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m; };
+    add(new THREE.SphereGeometry(0.1, 14, 10), fur, 0, 0.17, 0).scale.set(0.85, 0.8, 1.45);
+    add(new THREE.SphereGeometry(0.08, 12, 8), cream, 0, 0.14, 0.035).scale.set(0.8, 0.7, 1.25);
+    const head = new THREE.Group();
+    head.position.set(0, 0.27, 0.14);
+    body.add(head);
+    add(new THREE.SphereGeometry(0.085, 14, 10), fur, 0, 0, 0, head);
+    add(new THREE.SphereGeometry(0.045, 10, 8), cream, 0, -0.025, 0.055, head).scale.set(1.2, 0.8, 0.8);
+    for (const s of [-1, 1]) {
+      add(new THREE.ConeGeometry(0.032, 0.065, 4), fur, s * 0.048, 0.072, -0.005, head).rotation.z = -s * 0.25;
+      add(new THREE.ConeGeometry(0.018, 0.04, 4), pink, s * 0.048, 0.068, 0.008, head).rotation.z = -s * 0.25;
+      add(new THREE.SphereGeometry(0.014, 8, 6), ink, s * 0.033, 0.012, 0.075, head);
+    }
+    add(new THREE.SphereGeometry(0.011, 6, 4), pink, 0, -0.008, 0.088, head);
+    const legs = [];
+    for (const [lx, lz] of [[-0.05, 0.09], [0.05, 0.09], [-0.05, -0.08], [0.05, -0.08]]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(lx, 0.13, lz);
+      body.add(pivot);
+      add(new THREE.CylinderGeometry(0.022, 0.02, 0.13, 6), fur, 0, -0.065, 0, pivot);
+      add(new THREE.SphereGeometry(0.024, 6, 5), cream, 0, -0.125, 0.006, pivot);
+      legs.push(pivot);
+    }
+    const tail = new THREE.Group();
+    tail.position.set(0, 0.2, -0.13);
+    body.add(tail);
+    add(new THREE.CylinderGeometry(0.014, 0.022, 0.24, 6), fur, 0, 0.12, 0, tail);
+    const hit = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.5, 0.6), new THREE.MeshBasicMaterial({ visible: false }));
+    hit.position.y = 0.22;
+    root.add(hit);
+    root.scale.setScalar(1.35);
+    const cat = { root, body, head, legs, tail, yaw: 0, last: null, hop: 0, sit: 0 };
+    root.userData.onClick = () => {
+      cat.hop = 0.6;
+      const k = this.cat;
+      this.spawnFx('heart', k.x, 0.75, k.y, { n: 4, spread: 0.3, up: 0.6, size: 0.16 });
+      k.path = []; k.until = 0; // off it trots somewhere new
+    };
+    return cat;
+  }
+
+  animateCat(t, dt) {
+    const c = this.catObj, k = this.cat;
+    if (!c || !k) return;
+    c.root.visible = !this.plan.scene;
+    if (!c.root.visible) return;
+    const walking = k.path.length > 0;
+    if (c.last) {
+      const dx = k.x - c.last.x, dz = k.y - c.last.y;
+      if (Math.hypot(dx, dz) > 1e-4) {
+        let dd = Math.atan2(dx, dz) - c.yaw;
+        dd = Math.atan2(Math.sin(dd), Math.cos(dd));
+        c.yaw += dd * Math.min(1, dt * 10);
+      }
+    }
+    c.last = { x: k.x, y: k.y };
+    c.hop = Math.max(0, c.hop - dt);
+    const hopY = c.hop > 0 ? Math.sin((1 - c.hop / 0.6) * Math.PI) * 0.35 : 0;
+    c.root.position.set(k.x, hopY, k.y);
+    c.root.rotation.y = c.yaw;
+    c.sit += ((walking ? 0 : 1) - c.sit) * Math.min(1, dt * 4);
+    const sw = walking ? Math.sin(t * 14) * 0.6 : 0;
+    c.legs[0].rotation.x = sw; c.legs[1].rotation.x = -sw;
+    c.legs[2].rotation.x = -sw - 1.1 * c.sit; c.legs[3].rotation.x = sw - 1.1 * c.sit;
+    c.body.rotation.x = -0.32 * c.sit;
+    c.body.position.y = (walking ? Math.abs(Math.sin(t * 14)) * 0.012 : 0) - 0.035 * c.sit;
+    c.tail.rotation.x = -0.6 - 0.5 * c.sit;
+    c.tail.rotation.z = Math.sin(t * (walking ? 6 : 2.2)) * 0.5;
+    c.head.rotation.y = walking ? 0 : Math.sin(t * 0.7) * 0.45;
+    c.head.rotation.x = 0.32 * c.sit;
+  }
+
+  // ---- little sprite particles (steam, hearts, notes, petals, sparks)
+  fxTexture(kind) {
+    this._fxTex = this._fxTex || {};
+    if (this._fxTex[kind]) return this._fxTex[kind];
+    if (kind === 'puff') return (this._fxTex[kind] = this.glowTexture('255,255,255'));
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 64;
+    const c = cv.getContext('2d');
+    c.translate(32, 32);
+    if (kind === 'heart') {
+      c.fillStyle = '#ff7aa8';
+      c.beginPath(); c.moveTo(0, 20); c.bezierCurveTo(-34, -2, -16, -30, 0, -12); c.bezierCurveTo(16, -30, 34, -2, 0, 20); c.fill();
+    } else if (kind === 'note') {
+      c.fillStyle = '#ffffff';
+      c.beginPath(); c.ellipse(-6, 16, 11, 8, -0.4, 0, Math.PI * 2); c.fill();
+      c.fillRect(2, -24, 5, 40);
+      c.beginPath(); c.moveTo(7, -24); c.quadraticCurveTo(24, -14, 18, 2); c.quadraticCurveTo(17, -10, 7, -12); c.fill();
+    } else if (kind === 'petal') {
+      c.fillStyle = '#ffb3c7';
+      for (let i = 0; i < 5; i++) { c.save(); c.rotate((i * Math.PI * 2) / 5); c.beginPath(); c.ellipse(0, -13, 8, 13, 0, 0, Math.PI * 2); c.fill(); c.restore(); }
+      c.fillStyle = '#ffe27a'; c.beginPath(); c.arc(0, 0, 7, 0, Math.PI * 2); c.fill();
+    } else {
+      c.fillStyle = '#ffe27a';
+      c.beginPath();
+      for (let i = 0; i < 10; i++) { const r = i % 2 ? 10 : 28, a = (i * Math.PI) / 5 - Math.PI / 2; c.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+      c.closePath(); c.fill();
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return (this._fxTex[kind] = tex);
+  }
+
+  spawnFx(kind, x, y, z, { n = 6, spread = 0.25, up = 0.6, life = 1.4, size = 0.22, grow = 0, color = null, opacity = 1 } = {}) {
+    for (let i = 0; i < n && this.fx.length < 90; i++) {
+      const mat = new THREE.SpriteMaterial({ map: this.fxTexture(kind), transparent: true, depthWrite: false, opacity });
+      if (color != null) mat.color.setHex(color);
+      const sp = new THREE.Sprite(mat);
+      sp.raycast = () => {};
+      sp.position.set(x + (Math.random() - 0.5) * spread, y, z + (Math.random() - 0.5) * spread);
+      sp.scale.setScalar(size);
+      sp.renderOrder = 3;
+      this.scene.add(sp);
+      this.fx.push({
+        sp, life, max: life, size, grow, o0: opacity,
+        v: new THREE.Vector3((Math.random() - 0.5) * spread * 1.5, up * (0.7 + Math.random() * 0.6), (Math.random() - 0.5) * spread * 1.5),
+      });
+    }
+  }
+
+  updateFx(dt) {
+    for (let i = this.fx.length - 1; i >= 0; i--) {
+      const f = this.fx[i];
+      f.life -= dt;
+      if (f.life <= 0) { this.scene.remove(f.sp); f.sp.material.dispose(); this.fx.splice(i, 1); continue; }
+      f.sp.position.addScaledVector(f.v, dt);
+      f.v.multiplyScalar(1 - dt * 0.9);
+      const k = f.life / f.max;
+      f.sp.material.opacity = f.o0 * Math.min(1, k * 2);
+      f.sp.scale.setScalar(f.size * (1 + f.grow * (1 - k)));
+    }
+  }
+
+  // Per-frame motion for everything above.
+  animateInteractive(t, dt, sky) {
+    const ease = (rate) => Math.min(1, dt * rate);
+    const gk = sky.glow ?? 0.5;
+    const isDay = sky === LIGHTS.day;
+    // Which hangout spots are in use right now (blob arrived, not walking).
+    const acts = new Set();
+    for (const p of this.people.values()) if (p.poi && !p.path.length && p.mode !== 'work') acts.add(p.poi.act);
+
+    // lamps: a light-mode change resets them (Day → off, otherwise on)
+    if (this._skyRef !== sky) {
+      for (const L of this.lamps) L.on = !isDay;
+      this._skyRef = sky;
+    }
+    for (const L of this.lamps) {
+      const want = L.on ? 1 : 0;
+      L.k = L.k < 0 ? want : L.k + (want - L.k) * ease(8);
+      L.light.intensity = L.base * L.k * (L.floor ? Math.max(1, (sky.lamp || 1.6) / 1.6) : Math.max(0.8, gk));
+      if (L.sprite) L.sprite.material.opacity = L.k * L.sbase * (isDay ? 0.6 : 1);
+      L.mats.forEach((m, i) => { m.emissiveIntensity = L.e0[i] * L.k; });
+    }
+
+    // doors: manual toggle, plus auto-open when someone (or the cat) comes by
+    for (const d of this.doors) {
+      let near = false;
+      if (d.cx != null) {
+        for (const p of this.people.values()) if (Math.hypot(p.x - d.cx, p.y - d.cy) < 1.1) { near = true; break; }
+        if (!near && this.cat && Math.hypot(this.cat.x - d.cx, this.cat.y - d.cy) < 0.8) near = true;
+      }
+      const auto = d.auto && acts.has(d.auto);
+      const want = d.open || near || auto ? d.max : 0;
+      d.a += (want - d.a) * ease(5);
+      d.pivot.rotation.y = d.a * (d.sign || 1);
+    }
+    if (this.fridge) {
+      const o = this.fridge.main.a / this.fridge.main.max;
+      this.fridge.light.intensity = 1.6 * o;
+      this.fridge.liner.emissiveIntensity = 0.7 * o;
+    }
+
+    // coffee
+    const cf = this.coffee;
+    if (cf) {
+      if (acts.has('coffee') && t - cf.t0 > 15) this.brew();
+      const e = t - cf.t0;
+      cf.mug.visible = e >= 0 && e < 14;
+      if (cf.mug.visible) {
+        cf.liquid.scale.y = Math.max(0.001, Math.min(1, Math.max(0, e - 0.5) / 3) * 0.085);
+        if (e < 3.8 && Math.random() < dt * 9) this.spawnFx('puff', cf.x, 1.32, cf.z - 0.12, { n: 1, spread: 0.06, up: 0.35, life: 1.6, size: 0.12, grow: 1.8, opacity: 0.55 });
+        if (e > 3.5 && e < 12 && Math.random() < dt * 3) this.spawnFx('puff', cf.x, 1.02, cf.z, { n: 1, spread: 0.03, up: 0.25, life: 1.4, size: 0.08, grow: 1.5, opacity: 0.45 });
+      }
+    }
+
+    // arcade "coin": fast rainbow flashing + a brighter glow
+    if (this.arcadeScreen) {
+      const on = t < this.until.arcade;
+      if (on) {
+        this.arcadeScreen.material.emissive.setHSL((t * 1.5) % 1, 0.9, 0.55);
+        this.arcadeScreen.material.emissiveIntensity = 1.5 + Math.sin(t * 30) * 0.5;
+        if (this.arcadeGlow) this.arcadeGlow.light.intensity *= 2.5;
+        if (this.arcadeAt && Math.random() < dt * 4) this.spawnFx('spark', this.arcadeAt[0], this.arcadeAt[1] + 0.3, this.arcadeAt[2], { n: 1, spread: 0.4, up: 0.7, size: 0.12 });
+      } else this.arcadeScreen.material.emissiveIntensity = 1;
+    }
+
+    // radio: music notes while it's "playing"
+    if (this.radioAt && t < this.until.notes && t > this.until.notesNext) {
+      this.until.notesNext = t + 0.45;
+      const cols = [0x8b6be6, 0x3b8ee0, 0xff7aa8, 0x22a874];
+      this.spawnFx('note', this.radioAt[0], this.radioAt[1], this.radioAt[2], { n: 1, spread: 0.15, up: 0.5, life: 1.8, size: 0.16, color: cols[Math.floor(Math.random() * cols.length)] });
+    }
+
+    // blinds
+    for (const b of this.blinds) {
+      b.k += ((b.down ? 1.12 : 0.05) - b.k) * ease(4);
+      b.g.scale.y = b.k;
+    }
+
+    // chairs spin and settle back
+    for (const ch of this.chairs) {
+      if (Math.abs(ch.v) > 0.5) {
+        ch.a += ch.v * dt;
+        ch.v *= Math.exp(-dt * 1.4);
+      } else if (ch.a !== 0) {
+        ch.v = 0;
+        const target = Math.round(ch.a / (Math.PI * 2)) * Math.PI * 2;
+        ch.a += (target - ch.a) * ease(4);
+        if (Math.abs(target - ch.a) < 0.002) ch.a = 0;
+      }
+      ch.g.rotation.y = ch.a;
+    }
+
+    // plants sway; click pop
+    for (const pl of this.plants) {
+      pl.m.rotation.z = Math.sin(t * 1.3 + pl.ph) * 0.03;
+      pl.m.rotation.x = Math.sin(t * 1.05 + pl.ph * 1.7) * 0.02;
+      if (pl.pop > 0) {
+        pl.pop = Math.max(0, pl.pop - dt * 1.3);
+        const s = 1 + Math.sin((1 - pl.pop) * Math.PI * 3) * 0.14 * pl.pop;
+        pl.m.scale.set(pl.s0.x * s, pl.s0.y * (2 - s), pl.s0.z * s);
+      } else pl.m.scale.copy(pl.s0);
+    }
+
+    // beanbags dent when a blob sits; wobble when poked
+    for (const bn of this.beans) {
+      let occ = false;
+      for (const p of this.people.values()) if (p.poi && p.poi.act === 'beanbag' && !p.path.length && Math.hypot(p.x - bn.x, p.y - bn.y) < 0.3) { occ = true; break; }
+      bn.sy += ((occ ? 0.44 : 0.5) - bn.sy) * ease(5);
+      bn.wob = Math.max(0, bn.wob - dt * 1.2);
+      const w = Math.sin(t * 18) * 0.07 * bn.wob;
+      const spread = 1 + (0.5 - bn.sy) * 1.2 - w * 0.6;
+      bn.m.scale.set(spread, bn.sy + w, spread);
+    }
+
+    // butterfly by day, firefly by night
+    const bf = this.butterfly;
+    if (bf) {
+      const u = t * 0.32;
+      const x = bf.cx + Math.sin(u) * bf.rx, z = bf.cz + Math.sin(u * 2) * bf.rz;
+      const y = 1.15 + Math.sin(t * 1.7) * 0.25;
+      const night = !!sky.night;
+      bf.g.visible = !night;
+      if (!night) {
+        bf.g.position.set(x, y, z);
+        bf.g.rotation.y = Math.atan2(Math.cos(u) * bf.rx, 2 * Math.cos(u * 2) * bf.rz);
+        const flap = 0.15 + Math.abs(Math.sin(t * 16)) * 1.1;
+        for (const [wing, s] of bf.wings) wing.rotation.z = s * flap;
+      }
+      bf.fly.position.set(x, y, z);
+      bf.fly.material.opacity = night ? 0.55 + 0.45 * Math.sin(t * 3.1) : 0;
+    }
+
+    // night: the ceiling lights now and then flicker for a moment
+    if (sky.night && (t % 23) < 0.45) {
+      const f = Math.sin(t * 70) > 0 ? 0.35 : 1;
+      for (const l of this.ceilLights || []) l.intensity *= f;
+    }
+
+    this.animateCat(t, dt);
+    this.updateFx(dt);
   }
 
   // ------------------------------------------------------------ scene packs
@@ -1155,7 +1761,7 @@ export class Office3D extends window.Office {
     // Fit the room's corners into the view.
     const inv = this.camera.matrixWorldInverse;
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const x of [0, W]) for (const y of [0, this.plan.viewH || WALL_H]) for (const z of [0, D]) {
+    for (const x of [0, W]) for (const y of [this.plan.scene ? 0 : -FLOOR_T, this.plan.viewH || WALL_H]) for (const z of [0, D]) {
       const v = new THREE.Vector3(x, y, z).applyMatrix4(inv);
       minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x); minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
     }
@@ -1434,7 +2040,6 @@ export class Office3D extends window.Office {
       if (g.m) g.m.material.emissiveIntensity = g.ei * (0.5 + 0.5 * gk);
     }
     if (this.plan.scene) this.animateScene(t, sky);
-    if (this.lampLight) this.lampLight.intensity = sky.lamp;
     if (this.doorGlow) this.doorGlow.intensity = sky.door * (0.92 + 0.08 * Math.sin(t * 1.3));
     if (this.doorHalo) this.doorHalo.material.opacity = sky.halo;
     for (const l of this.ceilLights || []) l.intensity = sky.ceil;
@@ -1459,14 +2064,20 @@ export class Office3D extends window.Office {
       if (col) { g.sprite.material.color.setHex(col); g.sprite.material.opacity = Math.min(1, 0.22 + 0.45 * gk) * (this.filter && !filterMatch(p.s, this.filter) ? 0.25 : 1); }
       else g.sprite.material.opacity = 0;
     }
+    // rack LEDs blink faster the more agents are busy
+    let busy = 0;
+    for (const p of this.people.values()) if (p.mode === 'work' && WORKING_ST.has(p.s && p.s.status)) busy++;
+    this.ledClock = (this.ledClock || 0) + dt * 1000 * (1 + Math.min(3, busy * 0.45));
     for (const b of this.blinkers) {
-      const on = Math.sin(this.t / (180 + b.r * 37 + b.k * 53) + b.r * b.k) > 0.2 && (b.r * 4 + b.k) < Math.max(4, this.deskOf.size * 3);
+      const on = Math.sin(this.ledClock / (180 + b.r * 37 + b.k * 53) + b.r * b.k) > 0.2 && (b.r * 4 + b.k) < Math.max(4, this.deskOf.size * 3);
       b.m.material.emissiveIntensity = on ? 1.2 : 0.05;
     }
     if (this.arcadeScreen) this.arcadeScreen.material.emissive.setHSL((t * 0.05) % 1, 0.7, 0.5);
-    const fbPlaying = this.plan.pois.filter((q) => q.pair === 'fb' && q.taken).length === 2;
+    const fbPlaying = this.plan.pois.filter((q) => q.pair === 'fb' && q.taken).length === 2 || (this.until && t < this.until.fb);
     if (this.rods) this.rods.forEach((r, k) => { r.position.z = this.plan.props.find((q) => q.t === 'foosball').y + 0.4 + (fbPlaying ? Math.sin(t * 8 + k) * 0.06 : 0); r.rotation.z = fbPlaying ? Math.sin(t * 12 + k) * 0.6 : 0; });
     this.updateBall();
+    if (!this.plan.scene) this.animateInteractive(t, dt, sky);
+    else if (this.catObj) this.catObj.root.visible = false;
 
     this.syncActors(dt);
     this.controls.update();
@@ -1652,7 +2263,7 @@ export class Office3D extends window.Office {
     if (!this.ball) return;
     const players = this.plan.pois.filter((q) => q.pair === 'pp' && q.taken)
       .map((q) => this.people.get(q.taken)).filter((p) => p && p.poi && p.poi.pair === 'pp' && !p.path.length);
-    this.ball.visible = players.length === 2;
+    this.ball.visible = players.length === 2 || (this.until && this.t / 1000 < this.until.rally);
     if (!this.ball.visible) return;
     const pp = this.plan.pp;
     const k = (this.t / 900) % 2;
@@ -1664,5 +2275,17 @@ export class Office3D extends window.Office {
     // Let OrbitControls drags through without flickering the tooltip.
     if (e.buttons && !click) return;
     super.pointer(e, click);
+    // Agents win; otherwise props (lamps, doors, fridge, cat…) are clickable.
+    if (!this.gl || !this.room || !this.clicks || this.plan.scene || this.hoverKey) return;
+    const now = performance.now();
+    let hit;
+    if (!click && now - (this._pickAt || 0) < 60) hit = this._pickLast;
+    else { hit = this.pickInteractive(e); this._pickAt = now; this._pickLast = hit; }
+    if (hit) this.canvas.style.cursor = 'pointer';
+    if (click && hit) {
+      const d = this._down;
+      if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) return; // that was an orbit drag
+      hit.userData.onClick();
+    }
   }
 }
