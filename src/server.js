@@ -91,7 +91,7 @@ function snapshot(watcher, opts) {
   const raw = watcher.sessions();
   const sessions = raw.map((s) => view(s, now, opts));
   sessions.sort((a, b) => (b.lastEventAt || 0) - (a.lastEventAt || 0));
-  return { now, lang: opts.demo ? null : promptLanguage(raw), sessions };
+  return { now, lang: opts.demo || opts.hurly ? null : promptLanguage(raw), sessions };
 }
 
 function createServer(watcher, opts, { onShutdown, onRestart } = {}) {

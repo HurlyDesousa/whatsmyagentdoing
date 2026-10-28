@@ -5,6 +5,7 @@ const http = require('http');
 const { spawn } = require('child_process');
 const { Watcher, CLAUDE_DIR, CODEX_DIR, GEMINI_DIR, ompDirs } = require('../src/watcher');
 const { DemoWatcher } = require('../src/demo');
+const { HurlyCrew } = require('../src/hurly-crew');
 const scenes = require('../src/scenes');
 const updater = require('../src/update');
 const { createServer, snapshot } = require('../src/server');
@@ -23,6 +24,8 @@ Options:
   --private         Hide prompts, replies and titles; show status only
   --json            Print one snapshot as JSON and exit
   --demo            Show a made-up team instead of your sessions
+  --hurly           Show Hurly's ops crew (Grok Bot teammates + Paperclip agents)
+  --no-live         With --hurly: don't poll Paperclip, use seed/crew.json only
   --stop            Stop a running dashboard
   --update          Update to the latest version (git pull) and restart a running dashboard
   --scenes          List 3D scenes (installed and downloadable)
@@ -40,7 +43,7 @@ Override with CLAUDE_CONFIG_DIR / CODEX_HOME / GEMINI_CLI_HOME /
 OMP profiles under ~/.omp/profiles are discovered automatically.`;
 
 function parseArgs(argv) {
-  const o = { port: 4545, hours: 24, open: true, privacy: false, json: false, demo: false, stop: false, scenes: false, scene: null, removeScene: null, update: false };
+  const o = { port: 4545, hours: 24, open: true, privacy: false, json: false, demo: false, hurly: false, live: true, stop: false, scenes: false, scene: null, removeScene: null, update: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h' || a === '--help') { console.log(HELP); process.exit(0); }
@@ -58,6 +61,8 @@ function parseArgs(argv) {
     else if (a === '--private') o.privacy = true;
     else if (a === '--json') o.json = true;
     else if (a === '--demo') o.demo = true;
+    else if (a === '--hurly') o.hurly = true;
+    else if (a === '--no-live') o.live = false;
     else if (a === '--stop') o.stop = true;
     else if (a === '--update') o.update = true;
     else if (a === '--scenes') o.scenes = true;
@@ -167,6 +172,14 @@ async function main() {
     return;
   }
 
+  if (o.json && o.hurly) {
+    const w = new HurlyCrew({ live: o.live });
+    if (w.live) await w.poll();
+    w.tick();
+    console.log(JSON.stringify(snapshot(w, o).sessions, null, 2));
+    return;
+  }
+
   if (o.json) {
     const w = new Watcher({ hours: o.hours, ompDir: o.ompDir });
     w.tick();
@@ -176,7 +189,7 @@ async function main() {
     return;
   }
 
-  const query = o.scene ? `/?view=office&quality=high&scene=${encodeURIComponent(o.scene)}` : '';
+  const query = o.hurly && !o.scene ? '/?view=office&quality=high' : o.scene ? `/?view=office&quality=high&scene=${encodeURIComponent(o.scene)}` : '';
   if (await alreadyRunning(o.port)) {
     const url = `http://localhost:${o.port}${query}`;
     console.log(`Already running at ${url}`);
@@ -185,7 +198,7 @@ async function main() {
     return;
   }
 
-  const watcher = (o.demo ? new DemoWatcher() : new Watcher({ hours: o.hours, ompDir: o.ompDir })).start();
+  const watcher = (o.hurly ? new HurlyCrew({ live: o.live }) : o.demo ? new DemoWatcher() : new Watcher({ hours: o.hours, ompDir: o.ompDir })).start();
   const server = createServer(watcher, o, {
     onShutdown: () => { watcher.stop(); server.close(); process.exit(0); },
     // after an update from the page: start the new code on the same port
@@ -209,7 +222,7 @@ async function main() {
       const url = `http://localhost:${port}`;
       const n = watcher.sessions().length;
       const openUrl = url + query;
-      const what = o.demo ? 'demo team' : `${n} session${n === 1 ? '' : 's'} in the last ${o.hours}h`;
+      const what = o.hurly ? `Hurly crew, ${watcher.live ? 'Paperclip live' : 'seed/crew.json only'} — open ${openUrl}` : o.demo ? 'demo team' : `${n} session${n === 1 ? '' : 's'} in the last ${o.hours}h`;
       console.log(`whatsmyagentdoing v${updater.localVersion()} → ${url}  (${what}, Ctrl+C to stop)`);
       printUpdateHint();
       if (o.open) openBrowser(openUrl);

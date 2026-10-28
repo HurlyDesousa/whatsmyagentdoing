@@ -18,6 +18,8 @@
     codex: ['#10a37f', '#2bb38f', '#0d8a6b', '#4cc3a0'],
     gemini: ['#4f7cf0', '#6b8ff5', '#3d66d6', '#8aa6f8'],
     omp: ['#a96926', '#c78942', '#8d531e', '#dca45c'],
+    grokbot: ['#2b2b2b', '#444444', '#1a1a1a', '#5a5a5a'],
+    paperclip: ['#6d5bd0', '#8574e0', '#5847b8', '#9d8ff0'],
   };
   // Official product icons, shared by both renderers and the page UI (OMP: a neutral monogram).
   // Load once per page from the same origin so video capture stays readable.
@@ -27,6 +29,8 @@
     codex: { label: 'Codex', short: 'Cx', color: '#10a37f', logo: '/assets/agents/codex.png' },
     gemini: { label: 'Gemini', short: 'G', color: '#4f7cf0', logo: '/assets/agents/gemini.png' },
     omp: { label: 'OMP', short: 'OMP', color: '#a96926', logo: '/assets/agents/omp.svg' },
+    grokbot: { label: 'Grok Bot', short: 'GB', color: '#2b2b2b', logo: '/assets/agents/grokbot.svg' },
+    paperclip: { label: 'Paperclip', short: 'PC', color: '#6d5bd0', logo: '/assets/agents/paperclip.svg' },
   };
   for (const badge of Object.values(AGENT_BADGES)) {
     badge.image = new Image();
