@@ -55,11 +55,12 @@
     { re: /\bproxmox\b/i, kind: 'cloud', color: '#4ecf7a' },
     { re: /\bdockhand\b/i, kind: 'wedge', color: '#e84d9a' },
     { re: /\btruenas\b/i, kind: 'tablet', color: '#8b5e3c' },
-    { re: /\bdoc(?:ument)?\b/i, kind: 'drop', color: '#e84545' },
+    { re: /^doc(?:umentation)?(?:\s|$)/i, kind: 'drop', color: '#e84545' },
   ];
 
   function blobForSession(s, h) {
-    const label = `${s?.title || ''} ${s?.prompt || ''} ${s?.key || ''}`;
+    // Match agent desk title only — never issue prompt text.
+    const label = String(s?.title || '').trim();
     for (const row of CREW_BLOB_MAP) {
       if (row.re.test(label)) return { kind: row.kind, color: row.color };
     }

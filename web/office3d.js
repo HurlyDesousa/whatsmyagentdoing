@@ -36,7 +36,7 @@ const CREW_BLOB_MAP = [
   { re: /\bproxmox\b/i, kind: 'cloud', color: 0x4ecf7a },     // green cloud
   { re: /\bdockhand\b/i, kind: 'wedge', color: 0xe84d9a },   // magenta wedge
   { re: /\btruenas\b/i, kind: 'tablet', color: 0x8b5e3c },   // brown tablet
-  { re: /\bdoc(?:ument)?\b/i, kind: 'drop', color: 0xe84545 }, // red teardrop
+  { re: /^doc(?:umentation)?(?:\s|$)/i, kind: 'drop', color: 0xe84545 }, // red teardrop
 ];
 
 const STATUS_COLOR = {
@@ -51,7 +51,8 @@ function sameBlobPair(a, b) {
 }
 
 function blobDefForPerson(p) {
-  const label = `${p?.s?.title || ''} ${p?.s?.prompt || ''} ${p?.key || ''}`;
+  // Match agent desk title only — never issue prompt text (avoids “document”/“monitor” false hits).
+  const label = String(p?.s?.title || '').trim();
   for (const row of CREW_BLOB_MAP) {
     if (row.re.test(label)) return { kind: row.kind, color: row.color };
   }
@@ -1185,10 +1186,10 @@ export class Office3D extends window.Office {
     if (st.pose === 'walk') return null;
     if (p.mode === 'work' && p.desk) {
       if (p.desk.yaw != null) return p.desk.yaw;
-      // North-desk seats sit south of the desk; yaw 0 aimed eyes into the
-      // desk and showed backs to the SE camera. Face the camera (Math.PI)
-      // so eyes read like Medium 2D `front` for side === 'n'.
-      return Math.PI;
+      // Eyes live on local +Z. Default camera looks from +Z, so yaw 0 faces
+      // the camera. North seats are on the −Z side of the desk (desk.y − gap),
+      // so yaw 0 also faces the desk; south seats need Math.PI.
+      return p.desk.side === 'n' ? 0 : Math.PI;
     }
     const q = p.poi;
     if (!q) return null;
