@@ -118,12 +118,18 @@ function createServer(watcher, opts, { onShutdown, onRestart } = {}) {
   setInterval(() => push(false), 5000).unref();
   setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 20000).unref();
 
+  const TRUSTED_HOSTS = new Set(
+    ['localhost', '127.0.0.1', '[::1]',
+      ...String(process.env.TRUSTED_HOSTS || 'office.s-w.art').split(',')]
+      .map((h) => h.trim().toLowerCase()).filter(Boolean));
+
   const server = http.createServer((req, res) => {
     // Refuse anything not addressed to loopback (blocks DNS-rebinding pages
     // from reading your prompts through this server).
-    const host = String(req.headers.host || '').replace(/:\d+$/, '');
-    if (!['localhost', '127.0.0.1', '[::1]'].includes(host)) {
-      res.writeHead(403).end();
+    // Extra hosts (e.g. behind Cloudflare Access + reverse proxy) via TRUSTED_HOSTS.
+    const host = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
+    if (!TRUSTED_HOSTS.has(host)) {
+      res.writeHead(403, { 'content-type': 'text/plain' }).end('Forbidden');
       return;
     }
     const url = new URL(req.url, 'http://localhost');
