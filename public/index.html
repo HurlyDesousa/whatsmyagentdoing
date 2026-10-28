@@ -229,7 +229,12 @@
   body.dash .tip .card { background: #1c1d24; }
   .officebar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-top: 10px; }
   .officebar .legend { margin: 0; font-size: 11.5px; }
+  body.dash .officebar { display: flex !important; justify-content: space-between; align-items: center; gap: 12px; }
+  body.dash .officebar #legend { flex-wrap: nowrap; gap: 4px 12px; white-space: nowrap; font-size: 11px; }
   .officebar #agentLegend { justify-self: end; }
+  body.dash .officebar { grid-template-columns: 1fr auto auto 1fr; }
+  body.dash .officebar .showall { grid-column: 4; }
+  body:not(.dash) .showall { display: none; }
   body.dash .officebar #agentLegend { display: none; }
   .trow { padding: 6px 8px; }
   .lightseg { justify-self: center; background: var(--glass) !important; }
@@ -290,6 +295,42 @@
   }
 
   /* The PiP iframe owns its animation clock, layout, and pointer events. */
+  /* ---- video-parity: kinds, filter pills, show-all, step timeline */
+  [data-k="coding"] { --s: #4f8ff7; } [data-k="browsing"] { --s: #2ec4b6; } [data-k="terminal"] { --s: #9bd04f; }
+  [data-k="thinking"] { --s: #a48bf0; } [data-k="needs"] { --s: #ff8a3d; } [data-k="error"] { --s: #f0675d; }
+  [data-k="done"] { --s: #3fc48f; } [data-k="idle"] { --s: #8a899a; }
+  button.pill { cursor: pointer; font: inherit; font-size: 12.5px; align-items: center; transition: border-color .15s, background .15s; }
+  button.pill:hover { border-color: rgba(255,255,255,.18); }
+  button.pill.on { border-color: var(--accent); background: rgba(255,138,61,.12); color: #ffc49b; box-shadow: 0 0 0 1px rgba(255,138,61,.35) inset; }
+  button.pill.on b { color: var(--accent); }
+  button.pill:disabled { cursor: default; }
+  .pi { width: 14px; height: 14px; flex: none; display: inline-block; align-self: center; color: var(--muted); }
+  .pill.warn .pi, .pill.on .pi { color: var(--accent); }
+  .pi.spin { animation: spin 2.4s linear infinite; }
+  .showall { justify-self: end; display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; cursor: pointer; user-select: none; }
+  .showall input { appearance: none; width: 14px; height: 14px; border-radius: 4px; border: 1.5px solid #5a596a; background: transparent; display: grid; place-items: center; margin: 0; cursor: pointer; }
+  .showall input:checked { background: var(--accent); border-color: var(--accent); }
+  .showall input:checked::after { content: "✓"; color: #1a1210; font-size: 10px; font-weight: 900; line-height: 1; }
+  .tname .rl { color: var(--faint); font-weight: 500; font-size: 11px; margin-left: 6px; }
+  .tline b { color: var(--ink); font-weight: 600; opacity: .85; }
+  .trow.dim { opacity: .35; }
+  .spill[data-k]::before { background: var(--s); }
+  .filterchip { display: inline-flex; gap: 6px; align-items: center; margin-left: 8px; font-size: 10.5px; color: #ffc49b; border: 1px solid rgba(255,138,61,.5); border-radius: 999px; padding: 1px 7px; cursor: pointer; background: rgba(255,138,61,.08); font-weight: 600; }
+  .detail .stepmeta { display: flex; justify-content: space-between; margin-top: 6px; color: var(--faint); font-size: 11px; }
+  .detail .bar.thin { height: 4px; margin-top: 8px; }
+  .detail .bar.thin i { background: linear-gradient(90deg, #ff7a2d, #ff9a4d); }
+  .steps { margin-top: 10px; display: grid; gap: 0; position: relative; }
+  .stp { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start; font-size: 12px; position: relative; padding-bottom: 9px; }
+  .stp:not(:last-child)::after { content: ""; position: absolute; left: 8px; top: 16px; bottom: 0; width: 2px; background: rgba(255,255,255,.1); }
+  .stp.ok:not(:last-child)::after { background: rgba(63,196,143,.45); }
+  .stp .ck { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 9px; font-weight: 900; border: 1.5px solid #4a495a; color: transparent; background: transparent; }
+  .stp.ok .ck { background: #3fc48f; border-color: #3fc48f; color: #0d1a13; }
+  .stp.cur .ck { border-color: var(--accent); background: rgba(255,138,61,.18); box-shadow: 0 0 10px rgba(255,138,61,.55); }
+  .stp.cur .ck::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .stp .st { color: var(--muted); line-height: 1.35; word-break: break-word; }
+  .stp.ok .st { color: #b9b8c6; }
+  .stp.cur .st { color: #ffc49b; font-weight: 700; }
+  .stp .st time { display: block; color: var(--faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; font-weight: 400; }
   body.pip { padding: 8px; }
   body.pip .wrap { height: calc(100dvh - 16px); display: flex; flex-direction: column; }
   body.pip header { gap: 6px; margin-bottom: 8px; flex: none; }
@@ -377,6 +418,7 @@
         <button data-v="now">Now</button><button data-v="day">Day</button><button data-v="evening">Evening</button><button data-v="night">Night</button>
       </div>
       <div class="legend" id="agentLegend"></div>
+      <label class="showall" id="showAllWrap" title="Show a task bubble over every working agent"><input type="checkbox" id="showAll"> Show all tasks</label>
     </div>
   </div>
   <aside class="side" id="side">
@@ -416,7 +458,7 @@ function applyLang(code) {
   document.querySelectorAll('[data-t]').forEach((el) => (el.textContent = L[el.dataset.t]));
   const legend = document.getElementById('legend');
   if (legend) legend.innerHTML = Object.entries(LEGEND_LABEL)
-    .map(([k, v]) => `<span data-s="${k}"><span class="dot" style="color:var(--s)"></span>${esc(v)}</span>`).join('');
+    .map(([k, v]) => `<span data-k="${k}"><span class="dot" style="color:var(--s)"></span>${esc(v)}</span>`).join('');
   const sel = document.getElementById('langSel');
   if (sel) sel.options[0].textContent = `🌐 ${L.auto}`;
   if (typeof office !== 'undefined' && office) office.offDutyLabel = L.wentHome;
@@ -432,7 +474,7 @@ const store = (() => {
   return { get, set };
 })();
 
-const PREF_DEFAULTS = { view: 'office', quality: 'mid', scene: 'office', agent: 'all', showSub: false, showIdle: false, showAgent: true, lang: 'auto', light: 'now' };
+const PREF_DEFAULTS = { view: 'office', quality: 'mid', scene: 'office', agent: 'all', showSub: false, showIdle: false, showAgent: true, lang: 'auto', light: 'now', showAll: false };
 function validPreference(k, v) {
   if (!Object.hasOwn(PREF_DEFAULTS, k)) return false;
   if (typeof PREF_DEFAULTS[k] === 'boolean') return typeof v === 'boolean';
@@ -569,11 +611,12 @@ function render() {
     const desks = office?.plan?.desks?.length || 0;
     const used = office?.deskOf?.size || 0;
     const nWork = count((s) => ACTIVE.has(s)), nNeed = count(GROUPS[0].match), nIdle = count((s) => !ACTIVE.has(s) && !GROUPS[0].match(s));
+    const fp = (f, n, label, icon, warn) => `<button class="pill${warn ? ' warn' : ''}${state.filter === f ? ' on' : ''}" data-f="${f}" aria-pressed="${state.filter === f}" title="${state.filter === f ? 'Clear filter' : 'Show only ' + label}">${icon}<b>${n}</b>${label}</button>`;
     document.getElementById('summary').innerHTML =
-      `<span class="pill"><b>${nWork}</b>working</span>` +
-      `<span class="pill${nNeed ? ' warn' : ''}"><b>${nNeed}</b>need you</span>` +
-      `<span class="pill"><b>${nIdle}</b>idle</span>` +
-      (desks ? `<span class="pill"><b>${Math.max(0, desks - used)}</b>free desks</span>` : '');
+      fp('working', nWork, 'working', PILL_ICON.working) +
+      fp('needs', nNeed, 'need you', PILL_ICON.needs, nNeed) +
+      fp('idle', nIdle, 'idle', PILL_ICON.idle) +
+      (desks ? `<span class="pill">${PILL_ICON.desk}<b>${Math.max(0, desks - used)}</b>free desks</span>` : '');
   }
 
   const working = count((s) => ACTIVE.has(s));
@@ -583,6 +626,8 @@ function render() {
   const main = document.getElementById('main');
   const officeMode = state.view === 'office';
   document.getElementById('dashgrid').classList.toggle('list-mode', !officeMode);
+  autoFocus(all);
+  if (office) { office.filter = state.filter; office.showAll = state.showAll; }
   renderSide(all, now);
   document.getElementById('officeWrap').style.display = officeMode ? '' : 'none';
   // The office decides who sits at a desk and who wanders around.
@@ -921,7 +966,59 @@ window.addEventListener('storage', (e) => {
 });
 
 // ---- Hurly dashboard: Team panel, task detail, activity log, lighting.
-const LEGEND_LABEL = { typing: 'Coding / replying', tool: 'Tool / terminal', thinking: 'Thinking', waiting: 'Needs you', error: 'Error', done: 'Done', idle: 'Idle' };
+const LEGEND_LABEL = { coding: 'Coding', browsing: 'Browsing', terminal: 'In terminal', thinking: 'Thinking', needs: 'Needs you', error: 'Error', done: 'Done', idle: 'Idle' };
+const KIND_COLOR = { coding: '#4f8ff7', browsing: '#2ec4b6', terminal: '#9bd04f', thinking: '#a48bf0', needs: '#ff8a3d', error: '#f0675d', done: '#3fc48f', idle: '#8a899a' };
+// Same mapping as statusKind() in web/office3d.js (kept in sync by hand).
+function kindOf(s) {
+  const st = s.status;
+  if (st === 'waiting') return 'needs';
+  if (st === 'error') return 'error';
+  if (st === 'thinking') return 'thinking';
+  if (st === 'typing') return 'coding';
+  if (st === 'tool') {
+    const a = String(s.activity || '');
+    if (/brows|web|fetch|http|search|read|chart|watch|page|url/i.test(a)) return 'browsing';
+    if (/edit|write|patch|apply|code/i.test(a)) return 'coding';
+    return 'terminal';
+  }
+  if (st === 'done' || st === 'interrupted') return 'done';
+  return 'idle';
+}
+const PILL_ICON = {
+  working: '<svg class="pi spin" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2.4" stroke-linecap="round"/></svg>',
+  needs: '<svg class="pi" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 4.4v4.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="11.4" r="1.1" fill="currentColor"/></svg>',
+  idle: '<svg class="pi" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6.5h4.2L2 11.5h4.4M8.6 3h3.6L8.6 7.6h3.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  desk: '<svg class="pi" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.5h7v5h-7z M3 9.5h10 M5 9.5v4 M11 9.5v4 M4.5 7.5v2 M11.5 7.5v2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+const FILTERS = {
+  needs: (s) => s.status === 'waiting' || s.status === 'error',
+  working: (s) => ACTIVE.has(s.status),
+  idle: (s) => !ACTIVE.has(s.status) && s.status !== 'waiting' && s.status !== 'error',
+};
+state.filter = null;
+document.getElementById('summary').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-f]'); if (!b) return;
+  state.filter = state.filter === b.dataset.f ? null : b.dataset.f;
+  render();
+});
+// Auto-focus: with nothing selected, select the first Needs-you agent so its
+// card + bubble show. Never overrides a pick; after the user closes the card
+// it only re-triggers for a Needs-you agent that wasn't there before.
+const needsSeen = new Set();
+state.userCleared = false;
+function autoFocus(all) {
+  const needs = all.filter((s) => !s.subagent && FILTERS.needs(s));
+  const fresh = needs.filter((s) => !needsSeen.has(s.key));
+  for (const k of [...needsSeen]) if (!needs.some((s) => s.key === k)) needsSeen.delete(k);
+  needs.forEach((s) => needsSeen.add(s.key));
+  if (state.sel && all.some((s) => s.key === state.sel)) return;
+  if (state.sel) state.sel = null;
+  const pick = state.userCleared ? fresh[0] : needs[0];
+  if (pick) { state.sel = pick.key; state.userCleared = false; }
+}
+const showAllEl = document.getElementById('showAll');
+showAllEl.checked = !!state.showAll;
+showAllEl.addEventListener('change', () => { state.showAll = showAllEl.checked; store.set('showAll', state.showAll); render(); });
 const STATUS_HEX = { thinking: '#a48bf0', tool: '#5ea4ee', typing: '#3fc48f', waiting: '#ff8a3d', done: '#86b872', interrupted: '#77768a', error: '#f0675d', idle: '#77768a' };
 let lookFor = null; // blobLookFor from the 3D bundle (same colours as the blobs)
 import('/office3d.js').then((m) => { lookFor = m.blobLookFor; render(); }).catch(() => {});
@@ -930,62 +1027,109 @@ function agentColor(s) {
   return STATUS_HEX[s.status] || '#888';
 }
 function pillOf(s) {
-  if (s.status === 'waiting' || s.status === 'error') return { cls: 'p-needs', txt: s.status === 'error' ? 'Error' : 'Needs you' };
-  if (ACTIVE.has(s.status)) return { cls: '', txt: { thinking: 'Thinking', tool: 'Tool', typing: 'Coding' }[s.status] || 'Working' };
-  if (s.status === 'done' || s.status === 'interrupted') return { cls: '', txt: 'Done' };
-  return { cls: '', txt: 'Idle' };
+  const k = kindOf(s);
+  return { cls: k === 'needs' || k === 'error' ? 'p-needs' : '', txt: LEGEND_LABEL[k], k };
 }
+// Demo-style narrative line: "Browsing — Reading 6 landing pages".
+function narrative(s) {
+  const k = kindOf(s);
+  const verb = { coding: 'Coding', browsing: 'Browsing', terminal: 'In terminal', thinking: 'Thinking', needs: 'Needs you', error: 'Error', done: 'Done', idle: 'Idle' }[k];
+  const what = statusLine(s);
+  if (!what || what === verb || /^(thinking…|idle)$/i.test(what)) return { verb, what: k === 'done' ? 'Free for a new task' : '' };
+  return { verb, what };
+}
+const unNeed = (t) => String(t || '').replace(/\s*·\s*needs you$/i, '').trim();
 function statusLine(s) {
-  if (s.status === 'waiting') return s.activity || s.reply || 'Waiting for you';
+  if (s.status === 'waiting') { const a = unNeed(s.activity); return (a && !/^paused$/i.test(a) ? a : '') || s.title || s.reply || 'Waiting for you'; }
   if (s.status === 'error') return s.error || s.activity || 'Error';
   if (ACTIVE.has(s.status)) return s.activity || (s.status === 'thinking' ? 'Thinking…' : s.title || L[s.status]);
   if (s.status === 'done') return s.reply || s.title || 'Finished — free for a new task';
   return s.title || 'Idle';
 }
 const ROLE = { grokbot: 'Grok Bot', paperclip: 'Paperclip' };
+const roleOf = (s) => s.role ? `${String(s.role).replace(/\s*\(.*$/, '')} · ${ROLE[s.agent] || AGENT_NAME[s.agent] || s.agent}` : (ROLE[s.agent] || AGENT_NAME[s.agent] || s.agent);
 const ORDER = (s) => (GROUPS[0].match(s.status) ? 0 : ACTIVE.has(s.status) ? 1 : s.status === 'done' ? 2 : 3);
 state.sel = null;
 function selectAgent(key) {
   state.sel = state.sel === key ? null : key;
+  if (!state.sel) state.userCleared = true;
   if (office) office.focusKey = state.sel;
   render();
 }
+function updatedLabel(s, now) {
+  const t = s.lastEventAt;
+  if (!t) return '—';
+  return now - t < 15_000 ? 'just now' : ago(t, now);
+}
+// Task steps for the detail card. Real data first (session step/steps/plan,
+// e.g. the Hurly crew loop); otherwise build an honest estimate from this
+// agent's own activity history (done = earlier entries, current = latest).
+function stepsOf(s) {
+  const hist = actLog.filter((e) => e.key === s.key);
+  const curText = statusLine(s);
+  if (Number.isFinite(s.step) && Number.isFinite(s.steps) && s.steps > 0) {
+    const plan = Array.isArray(s.plan) && s.plan.length === s.steps ? s.plan : Array.from({ length: s.steps }, (_, i) => `Step ${i + 1}`);
+    const rows = plan.map((text, i) => ({ text: i + 1 === s.step && statusLine(s) && !/^thinking…$/i.test(statusLine(s)) ? `${text} — ${statusLine(s)}` : text, state: i + 1 < s.step ? 'ok' : i + 1 === s.step ? 'cur' : '' }));
+    return { exact: true, cur: s.step, total: s.steps, rows, source: 'from session step data' };
+  }
+  const seen = new Set();
+  const past = [];
+  for (const e of hist.slice().reverse()) {
+    const k = e.text.replace(/^(on shift|joined) · /, '');
+    if (seen.has(k)) continue;
+    seen.add(k);
+    past.push({ text: k, ts: e.ts });
+    if (past.length >= 5) break;
+  }
+  past.reverse();
+  if (!ACTIVE.has(s.status) && s.status !== 'waiting' && s.status !== 'error') {
+    const rows = past.map((r) => ({ ...r, state: 'ok' }));
+    return { exact: false, cur: rows.length, total: s.status === 'done' && rows.length ? rows.length : 0, rows, source: 'from activity history' };
+  }
+  const last = past.pop();
+  const rows = past.map((r) => ({ ...r, state: 'ok' }));
+  rows.push({ text: curText, ts: last ? last.ts : '', state: 'cur' });
+  const total = rows.length + (s.status === 'waiting' ? 1 : 2);
+  return { exact: false, cur: rows.length, total, rows, source: 'estimated from activity history' };
+}
 function renderSide(all, now) {
   const list = all.filter((s) => !s.subagent).slice().sort((a, b) => ORDER(a) - ORDER(b) || String(a.project).localeCompare(String(b.project)));
-  document.getElementById('teamN').textContent = `${list.length} bots`;
-  document.getElementById('teamList').innerHTML = list.map((s) => {
+  const f = state.filter && FILTERS[state.filter];
+  const shown = f ? list.filter(f) : list;
+  const flabel = { needs: 'need you', working: 'working', idle: 'idle' }[state.filter];
+  document.getElementById('teamN').innerHTML = f ? `${shown.length} of ${list.length} bots<span class="filterchip" data-clearf title="Clear filter">${esc(flabel)} ×</span>` : `${list.length} bots`;
+  document.getElementById('teamList').innerHTML = shown.map((s) => {
     const p = pillOf(s);
-    return `<div class="trow${state.sel === s.key ? ' sel' : ''}${p.cls ? ' warnrow' : ''}" data-sel="${esc(s.key)}" data-s="${esc(s.status)}" title="${esc(s.title || '')}">
+    const n = narrative(s);
+    return `<div class="trow${state.sel === s.key ? ' sel' : ''}${p.cls ? ' warnrow' : ''}" data-sel="${esc(s.key)}" data-s="${esc(s.status)}" data-k="${p.k}" title="${esc(s.title || '')}">
       <span class="sw" style="--c:${agentColor(s)}"></span>
-      <span class="tname">${esc(s.project || s.agent)}<small>${esc(ROLE[s.agent] || AGENT_NAME[s.agent] || s.agent)}</small></span>
-      <span class="spill ${p.cls}">${esc(p.txt)}</span>
-      <span class="tline">${esc(statusLine(s))}</span></div>`;
-  }).join('') || `<div class="tline" style="padding:8px">No sessions yet</div>`;
+      <span class="tname">${esc(s.project || s.agent)}<span class="rl">${esc(roleOf(s))}</span></span>
+      <span class="spill ${p.cls}" data-k="${p.k}">${esc(p.txt)}</span>
+      <span class="tline">${n.what ? `<b>${esc(n.verb)}</b> — ${esc(n.what)}` : `<b>${esc(n.verb)}</b>`}</span></div>`;
+  }).join('') || `<div class="tline" style="padding:8px">${f ? 'Nobody matches this filter' : 'No sessions yet'}</div>`;
   if (office) office.focusKey = state.sel;
   const det = document.getElementById('detail');
   const s = state.sel && all.find((x) => x.key === state.sel);
   if (!s) { det.hidden = true; det.innerHTML = ''; return; }
   const p = pillOf(s);
-  const prog = ACTIVE.has(s.status) ? 60 : s.status === 'waiting' ? 85 : s.status === 'done' ? 100 : 0;
-  const tl = actLog.filter((e) => e.key === s.key).slice(-4).reverse();
+  const st = stepsOf(s);
   det.hidden = false;
   det.dataset.s = s.status;
   det.innerHTML = `
     <div class="dh"><span class="sw" style="--c:${agentColor(s)}"></span>
-      <div><div class="dn">${esc(s.project || s.agent)}</div><div class="dm">${esc(ROLE[s.agent] || s.agent)} · updated ${esc(s.lastEventAt ? ago(s.lastEventAt, now) : '—')}</div></div>
-      <span class="spill ${p.cls}" style="margin-left:auto">${esc(p.txt)}</span><button class="dx" data-unsel title="Close">×</button></div>
+      <div><div class="dn">${esc(s.project || s.agent)}</div><div class="dm">${esc(roleOf(s))} · updated ${esc(updatedLabel(s, now))}</div></div>
+      <span class="spill ${p.cls}" data-k="${p.k}" style="margin-left:auto">${esc(p.txt)}</span><button class="dx" data-unsel title="Close">×</button></div>
     <div class="lab">Task</div>
     <div class="task">${esc(s.title || '—')}</div>
-    ${prog ? `<div class="bar"><i style="width:${prog}%"></i></div>` : ''}
-    ${s.activity ? `<div class="txt">${esc(s.activity)}</div>` : ''}
-    ${s.prompt ? `<div class="txt q">${esc(s.prompt)}</div>` : ''}
-    ${s.reply ? `<div class="txt r">${esc(s.reply)}</div>` : ''}
+    ${st.total ? `<div class="bar thin"><i style="width:${Math.round(100 * st.cur / st.total)}%"></i></div>
+    <div class="stepmeta"><span>${esc(st.source)}</span><span>${st.exact ? `step ${st.cur} of ${st.total}` : `≈ step ${st.cur} of ${st.total} (est.)`}</span></div>` : ''}
     ${s.error ? `<div class="txt" style="color:var(--error)">${esc(s.error)}</div>` : ''}
-    ${tl.length ? `<div class="tl">${tl.map((e) => `<div class="tlrow" data-s="${esc(e.status)}"><time>${esc(e.ts)}</time><span class="d"></span><span>${esc(e.text)}</span></div>`).join('')}</div>` : ''}
+    ${st.rows.length ? `<div class="steps">${st.rows.map((r) => `<div class="stp ${r.state}"><span class="ck">${r.state === 'ok' ? '✓' : ''}</span><span class="st">${r.ts ? `<time>${esc(r.ts)}</time>` : ''}${esc(r.text)}</span></div>`).join('')}</div>` : ''}
     <div class="note">${esc(s.model || '')}${s.status === 'waiting' ? ' · answer it where the agent runs (Paperclip / Grok Bot chat)' : ''}</div>`;
 }
 document.getElementById('side').addEventListener('click', (e) => {
-  if (e.target.closest('[data-unsel]')) { state.sel = null; if (office) office.focusKey = null; render(); return; }
+  if (e.target.closest('[data-clearf]')) { state.filter = null; render(); return; }
+  if (e.target.closest('[data-unsel]')) { state.sel = null; state.userCleared = true; if (office) office.focusKey = null; render(); return; }
   const row = e.target.closest('[data-sel]');
   if (row) { hideTip(); selectAgent(row.dataset.sel); }
 });

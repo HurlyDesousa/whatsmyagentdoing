@@ -41,6 +41,36 @@ function softColor(c) {
 }
 const soft = (c) => softColor(c).getHex();
 
+// Demo-style activity kinds (legend: Coding, Browsing, In terminal, Thinking,
+// Needs you, Error, Done, Idle), derived from our status + activity text.
+export const KIND_COLOR = {
+  coding: '#4f8ff7', browsing: '#2ec4b6', terminal: '#9bd04f', thinking: '#a48bf0',
+  needs: '#ff8a3d', error: '#f0675d', done: '#3fc48f', idle: '#8a899a',
+};
+export function statusKind(s) {
+  const st = s && s.status;
+  if (st === 'waiting') return 'needs';
+  if (st === 'error') return 'error';
+  if (st === 'thinking') return 'thinking';
+  if (st === 'typing') return 'coding';
+  if (st === 'tool') {
+    const a = String(s.activity || '');
+    if (/brows|web|fetch|http|search|read|chart|watch|page|url/i.test(a)) return 'browsing';
+    if (/edit|write|patch|apply|code/i.test(a)) return 'coding';
+    return 'terminal';
+  }
+  if (st === 'done' || st === 'interrupted') return 'done';
+  return 'idle';
+}
+const WORKING_ST = new Set(['thinking', 'tool', 'typing']);
+function filterMatch(s, f) {
+  if (!f) return true;
+  if (f === 'needs') return s.status === 'waiting' || s.status === 'error';
+  if (f === 'working') return WORKING_ST.has(s.status);
+  if (f === 'idle') return !WORKING_ST.has(s.status) && s.status !== 'waiting' && s.status !== 'error';
+  return true;
+}
+
 
 // Turn a scene manifest into the floor plan the shared simulation uses:
 // stations play the part of desks, pois are where off-duty agents hang out.
@@ -72,10 +102,10 @@ function scenePlan(def) {
 // Lighting presets for the Now / Day / Evening / Night control. `lamp`,
 // `door`, `screen` and `ceil` scale the interior lights.
 const LIGHTS = {
-  day: { sky: 0xa9d4f2, sun: 1.75, sunCol: 0xfff3e0, amb: 1.2, hemiSky: 0xfff6ea, hemiGround: 0xc9b8a0, exposure: 1.12, lamp: 0.9, door: 1.8, halo: 0.55, screen: 1, ceil: 0, night: false },
-  dawn: { sky: 0xf3c9a8, sun: 1.15, sunCol: 0xffd9b8, amb: 0.9, hemiSky: 0xffe6d2, hemiGround: 0xb39a8c, exposure: 1.1, lamp: 1.4, door: 2.4, halo: 0.7, screen: 1.15, ceil: 0.35, night: false },
-  evening: { sky: 0xf2a46e, sun: 1.25, sunCol: 0xffa75e, amb: 0.72, hemiSky: 0xffc596, hemiGround: 0x8c6a62, exposure: 1.08, lamp: 2.2, door: 3, halo: 0.85, screen: 1.3, ceil: 0.75, night: false, evening: true },
-  night: { sky: 0x1d2350, sun: 0.32, sunCol: 0x8d96ff, amb: 0.5, hemiSky: 0x9a96ff, hemiGround: 0x2c2646, exposure: 1.05, lamp: 3.6, door: 5.2, halo: 1, screen: 1.8, ceil: 1.5, night: true },
+  day: { sky: 0xa9d4f2, sun: 1.75, sunCol: 0xfff3e0, amb: 1.2, hemiSky: 0xfff6ea, hemiGround: 0xc9b8a0, exposure: 1.12, lamp: 0.9, door: 1.8, halo: 0.55, screen: 1, ceil: 0, glow: 0.35, night: false },
+  dawn: { sky: 0xf3c9a8, sun: 1.15, sunCol: 0xffd9b8, amb: 0.9, hemiSky: 0xffe6d2, hemiGround: 0xb39a8c, exposure: 1.1, lamp: 1.4, door: 2.4, halo: 0.7, screen: 1.15, ceil: 0.35, glow: 0.6, night: false },
+  evening: { sky: 0xf2a46e, sun: 1.25, sunCol: 0xffa75e, amb: 0.72, hemiSky: 0xffc596, hemiGround: 0x8c6a62, exposure: 1.08, lamp: 2.2, door: 3, halo: 0.85, screen: 1.3, ceil: 0.75, glow: 0.9, night: false, evening: true },
+  night: { sky: 0x1d2350, sun: 0.32, sunCol: 0x8d96ff, amb: 0.5, hemiSky: 0x9a96ff, hemiGround: 0x2c2646, exposure: 1.05, lamp: 3.6, door: 5.2, halo: 1, screen: 2.1, ceil: 1.1, glow: 1.5, night: true },
 };
 export const LIGHT_MODES = ['now', 'day', 'evening', 'night'];
 // Mode comes from the page (window.OFFICE_LIGHT, saved in localStorage).
@@ -274,6 +304,8 @@ export class Office3D extends window.Office {
     this.scene.add(this.room);
     this.screens.clear();
     this.blinkers = [];
+    this.glows = [];       // localized lights + additive halos, scaled by sky.glow
+    this.screenGlows = []; // per-desk monitor halos, tinted by the worker's status
     const { W, D, OW, MR, PY } = plan;
     const dark = false; // pastel room in both page themes
 
@@ -345,6 +377,8 @@ export class Office3D extends window.Office {
     halo.rotation.y = Math.PI / 2; halo.position.set(0.02, 1.2, dy);
     this.room.add(halo);
     this.doorHalo = halo;
+    // neon strip over the door frame
+    this.glows.push({ m: this.boxMesh(-0.02, dy - 0.62, 1.82, 0.03, 1.24, 0.04, 0xff7ad0, { emissive: 0xff5fc0, ei: 1, shadow: false, round: false }), ei: 1.4 });
     // warm ceiling lights, only on in the evening / at night
     for (let i = 0; i < 3; i++) {
       const l = new THREE.PointLight(0xffd6a0, 0, 7, 1.4);
@@ -406,6 +440,44 @@ export class Office3D extends window.Office {
     return t;
   }
 
+  // Additive soft halo (cheap "bloom" for lamps, screens, racks).
+  haloSprite(rgb, x, y, z, size) {
+    this._haloTex = this._haloTex || {};
+    const tex = this._haloTex[rgb] || (this._haloTex[rgb] = this.glowTexture(rgb));
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+    sp.position.set(x, y, z);
+    sp.scale.set(size, size, 1);
+    sp.renderOrder = 2;
+    sp.raycast = () => {}; // never a floor/seat hit
+    this.room.add(sp);
+    return sp;
+  }
+
+  // Night sky seen through the windows: deep blue gradient, stars, a moon.
+  starTexture() {
+    if (this._stars) return this._stars;
+    const cv = document.createElement('canvas');
+    cv.width = 512; cv.height = 384;
+    const c = cv.getContext('2d');
+    const g = c.createLinearGradient(0, 0, 0, 384);
+    g.addColorStop(0, '#0b1030'); g.addColorStop(0.7, '#1c2358'); g.addColorStop(1, '#3a2f6e');
+    c.fillStyle = g; c.fillRect(0, 0, 512, 384);
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 160; i++) {
+      const r = rnd() < 0.12 ? 1.8 : rnd() < 0.5 ? 1.1 : 0.7;
+      c.fillStyle = `rgba(255,255,${220 + Math.floor(rnd() * 35)},${0.55 + rnd() * 0.45})`;
+      c.beginPath(); c.arc(rnd() * 512, rnd() * 300, r, 0, Math.PI * 2); c.fill();
+    }
+    c.fillStyle = 'rgba(255,246,214,.95)';
+    c.beginPath(); c.arc(410, 70, 16, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#121845';
+    c.beginPath(); c.arc(418, 64, 14, 0, Math.PI * 2); c.fill();
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return (this._stars = t);
+  }
+
   patternTexture(paint) {
     const cv = document.createElement('canvas');
     cv.width = cv.height = 128;
@@ -447,7 +519,13 @@ export class Office3D extends window.Office {
     this.place('computerMouse', x + 1.0, kb, 0.08, 0.12, { y0: top, rot });
     const h = (Math.round(x * 10) * 31 + Math.round(y * 10) * 17) >>> 0;
     if (h % 3 === 0) this.potted('plantSmall' + (1 + (h % 3)), x + 0.05, y + 0.3, 0.25, 0.25, { y0: top, h: 0.3 });
-    if (h % 4 === 1) this.place('lampSquareTable', x + 1.1, back, 0.25, 0.25, { y0: top, h: 0.35 });
+    if (h % 4 === 1) {
+      this.recolor(this.place('lampSquareTable', x + 1.1, back, 0.25, 0.25, { y0: top, h: 0.35 }), { lamp: 0xffe3a0 }, { lamp: 0xffcf70 });
+      const l = new THREE.PointLight(0xffc27a, 0, 2.6, 1.8);
+      l.position.set(x + 1.22, top + 0.42, back + 0.12);
+      this.room.add(l);
+      this.glows.push({ light: l, base: 1.6, sprite: this.haloSprite('255,200,120', x + 1.22, top + 0.4, back + 0.12, 1.1), sbase: 0.85 });
+    }
     // chair, facing the desk
     const seat = dk.seat;
     this.recolor(this.place('chairDesk', seat.x - 0.3, seat.y - 0.3, 0.6, 0.6, { h: 0.9, rot: dk.side === 's' ? Math.PI : 0 }), { carpet: alt ? 0xa8dcc8 : 0xeab0b4, metalMedium: 0xb3b8c9 });
@@ -458,6 +536,10 @@ export class Office3D extends window.Office {
       if (quad) {
         quad.material = new THREE.MeshStandardMaterial({ color: 0x3a3f52, emissive: 0x000000, roughness: 0.4 });
         this.screens.set(dk, quad);
+        quad.updateMatrixWorld(true);
+        const wp = new THREE.Vector3(); quad.getWorldPosition(wp);
+        const fz = dk.side === 's' ? 0.12 : -0.12;
+        this.screenGlows.push({ dk, sprite: this.haloSprite('255,255,255', wp.x, wp.y, wp.z + fz, 1.0) });
       }
     }
   }
@@ -476,6 +558,12 @@ export class Office3D extends window.Office {
               { emissive: k % 3 === 0 ? 0xffb347 : 0x5cf08a, ei: 1, shadow: false });
             this.blinkers.push({ m: led, r, k });
           }
+        }
+        {
+          const l = new THREE.PointLight(0x4cf2c0, 0, 3.2, 1.6);
+          l.position.set(p.x + 0.35, 1.2, p.y + 1.0);
+          this.room.add(l);
+          this.glows.push({ light: l, base: 1.8, sprite: this.haloSprite('76,242,192', p.x + 0.35, 1.1, p.y + 0.66, 1.6), sbase: 0.6 });
         }
         break;
       }
@@ -506,6 +594,12 @@ export class Office3D extends window.Office {
         const cols = [0xf2d16b, 0x5cf08a, 0xff8a65, 0x81d4fa, 0xce93d8];
         for (let r = 0; r < 4; r++) for (let k = 0; k < 3; k++) {
           this.boxMesh(p.x + 0.62, p.y + 0.13 + k * 0.14, 0.82 + r * 0.22, 0.06, 0.07, 0.13, cols[(r * 3 + k) % 5], { emissive: cols[(r * 3 + k) % 5], ei: 0.25, shadow: false });
+        }
+        {
+          const l = new THREE.PointLight(0x7fc8ff, 0, 2.6, 1.8);
+          l.position.set(p.x + 1.0, 1.3, p.y + 0.35);
+          this.room.add(l);
+          this.glows.push({ light: l, base: 1.3, sprite: this.haloSprite('127,200,255', p.x + 0.75, 1.3, p.y + 0.35, 1.3), sbase: 0.5 });
         }
         break;
       }
@@ -637,6 +731,12 @@ export class Office3D extends window.Office {
         this.arcadeScreen = this.boxMesh(x + 0.1, y + 0.7, 1.0, 0.5, 0.01, 0.45, 0x000000, { emissive: 0xff44aa, ei: 1, shadow: false });
         this.boxMesh(x, y + 0.7, 1.55, 0.7, 0.02, 0.17, 0xffcf4a, { emissive: 0xffcf4a, ei: 0.6, shadow: false });
         this.boxMesh(x, y + 0.7, 0.8, 0.7, 0.2, 0.08, 0xa898dc);
+        {
+          const l = new THREE.PointLight(0xff5fc0, 0, 3, 1.6);
+          l.position.set(x + 0.35, 1.3, y + 1.1);
+          this.room.add(l);
+          this.glows.push({ light: l, base: 1.6, sprite: this.haloSprite('255,95,192', x + 0.35, 1.25, y + 0.75, 1.4), sbase: 0.6 });
+        }
         break;
       }
       case 'lamp':
@@ -644,6 +744,7 @@ export class Office3D extends window.Office {
         this.lampLight = new THREE.PointLight(0xffc96a, 0, 4.5);
         this.lampLight.position.set(p.x, 1.6, p.y);
         this.room.add(this.lampLight);
+        this.glows.push({ sprite: this.haloSprite('255,201,106', p.x, 1.55, p.y, 2.4), sbase: 0.8 });
         break;
       case 'rug':
         this.recolor(this.place('rugRectangle', p.x, p.y, p.w, p.d, { y0: 0.004 }), { carpet: 0x9eaad9, carpetDarker: 0x8592c6 }); // soft periwinkle rug
@@ -1197,6 +1298,21 @@ export class Office3D extends window.Office {
       }
       a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift, p.y + Math.cos(a.yaw) * fwd);
       this.animateBlob(a, p, st, this.t / 1000, dt);
+      // status-pill filter: non-matching blobs fade out
+      const want2 = filterMatch(p.s, this.filter) ? 1 : 0.16;
+      a.alpha = a.alpha ?? 1;
+      if (Math.abs(a.alpha - want2) > 0.005) {
+        a.alpha += (want2 - a.alpha) * Math.min(1, dt * 8);
+        a.obj.traverse((o) => {
+          if (!o.isMesh || o === a.ring) return;
+          for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+            if (m.userData.o0 == null) { m.userData.o0 = m.opacity; m.userData.t0 = m.transparent; }
+            const tr = m.userData.t0 || a.alpha < 0.99;
+            if (m.transparent !== tr) { m.transparent = tr; m.needsUpdate = true; }
+            m.opacity = m.userData.o0 * a.alpha;
+          }
+        });
+      }
       const focused = this.focusKey === p.key;
       a.ring.visible = focused;
       if (focused) {
@@ -1297,9 +1413,25 @@ export class Office3D extends window.Office {
     this.hemi.groundColor.setHex(sky.hemiGround);
     this.gl.toneMappingExposure = sky.exposure;
     if (this.windowMat) {
-      this.windowMat.color.setHex(sky.sky);
-      this.windowMat.emissive.setHex(sky.sky);
-      this.windowMat.emissiveIntensity = sky.night ? 0.9 : 0.6;
+      const starry = sky.night && !this.plan.scene;
+      if (starry) {
+        if (this.windowMat.map !== this.starTexture()) { this.windowMat.map = this.windowMat.emissiveMap = this.starTexture(); this.windowMat.needsUpdate = true; }
+        this.windowMat.color.setHex(0xffffff);
+        this.windowMat.emissive.setHex(0xffffff);
+        this.windowMat.emissiveIntensity = 0.85;
+      } else {
+        if (this.windowMat.map) { this.windowMat.map = this.windowMat.emissiveMap = null; this.windowMat.needsUpdate = true; }
+        this.windowMat.color.setHex(sky.sky);
+        this.windowMat.emissive.setHex(sky.sky);
+        this.windowMat.emissiveIntensity = sky.night ? 0.9 : 0.6;
+      }
+    }
+    const gk = sky.glow ?? 0.5;
+    for (const g of this.glows || []) {
+      const flick = 0.94 + 0.06 * Math.sin(t * 1.7 + (g.base || 1) * 3);
+      if (g.light) g.light.intensity = g.base * gk * flick;
+      if (g.sprite) g.sprite.material.opacity = Math.min(1, g.sbase * (0.25 + 0.75 * Math.min(1, gk))) * (gk < 0.5 ? 0.55 : 1);
+      if (g.m) g.m.material.emissiveIntensity = g.ei * (0.5 + 0.5 * gk);
     }
     if (this.plan.scene) this.animateScene(t, sky);
     if (this.lampLight) this.lampLight.intensity = sky.lamp;
@@ -1320,6 +1452,12 @@ export class Office3D extends window.Office {
       } else {
         scr.material.emissive.setHex(0x000000);
       }
+    }
+    for (const g of this.screenGlows || []) {
+      const p = occupant.get(g.dk);
+      const col = p ? STATUS_COLOR[p.s.status] : null;
+      if (col) { g.sprite.material.color.setHex(col); g.sprite.material.opacity = Math.min(1, 0.22 + 0.45 * gk) * (this.filter && !filterMatch(p.s, this.filter) ? 0.25 : 1); }
+      else g.sprite.material.opacity = 0;
     }
     for (const b of this.blinkers) {
       const on = Math.sin(this.t / (180 + b.r * 37 + b.k * 53) + b.r * b.k) > 0.2 && (b.r * 4 + b.k) < Math.max(4, this.deskOf.size * 3);
@@ -1354,7 +1492,8 @@ export class Office3D extends window.Office {
       this.hit.push({ key: p.key, x0: sx - 18, x1: sx + 18, y0: sy - 24, y1: fy + 4 });
     }
     heads.sort((a, b) => b[2] - a[2]);
-    for (const [p, at] of heads) this.bubble(p, at);
+    if (this.compact) for (const [p, at] of heads) this.bubble(p, at);
+    else this.drawTags3D(heads);
     if (this.offDuty > 0) {
       c.font = '600 11px ui-sans-serif, system-ui, -apple-system, "PingFang TC", sans-serif';
       c.textAlign = 'left';
@@ -1362,6 +1501,150 @@ export class Office3D extends window.Office {
       c.globalAlpha = 0.65;
       c.fillText(`+${this.offDuty} ${this.offDutyLabel}`, 12, this.ch - 12);
       c.globalAlpha = 1;
+    }
+  }
+
+  // ------------------------------------------------------------ demo-style overlay
+  // Name tags (dark pill + kind dot), floating speech bubbles with a dotted
+  // connector: orange "NEEDS YOU" card, white chat bubble (task / activity),
+  // optional step progress bar. "Show all tasks" (this.showAll) adds a chat
+  // bubble over every working agent; otherwise only selected + Needs-you.
+  drawTags3D(heads) {
+    const c = this.ctx;
+    const t = this.t / 1000;
+    const font = (w, px) => `${w} ${px}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
+    const placed = [];
+    const overlaps = (r) => placed.some((q) => r.x0 < q.x1 && r.x1 > q.x0 && r.y0 < q.y1 && r.y1 > q.y0);
+    const wrap = (text, maxW, maxLines) => {
+      const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ');
+      const lines = [];
+      let cur = '';
+      for (const w of words) {
+        const next = cur ? cur + ' ' + w : w;
+        if (c.measureText(next).width <= maxW || !cur) cur = next;
+        else { lines.push(cur); cur = w; if (lines.length === maxLines) break; }
+      }
+      if (lines.length < maxLines && cur) lines.push(cur);
+      else if (cur && lines.length === maxLines) lines[maxLines - 1] += '…';
+      return lines.map((l) => { while (c.measureText(l).width > maxW && l.length > 2) l = l.slice(0, -2) + '…'; return l; });
+    };
+    const rr = (x, y, w, h, r) => { c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, r) : c.rect(x, y, w, h); };
+    const clean = (v) => String(v || '').replace(/\s*·\s*needs you$/i, '').trim();
+    const items = [];
+    for (const [p, at] of heads) {
+      const s = p.s || {};
+      const kind = statusKind(s);
+      const needs = kind === 'needs' || kind === 'error';
+      const sel = this.focusKey === p.key;
+      const hov = this.hoverKey === p.key;
+      const match = filterMatch(s, this.filter);
+      const atDesk = p.mode === 'work';
+      const working = WORKING_ST.has(s.status) && atDesk && !p.path.length;
+      const showTag = sel || hov || needs || atDesk || this.showAll;
+      let bubble = null;
+      if (match && (needs || sel || (this.showAll && working))) {
+        const text = needs ? (clean(s.activity) && !/^paused$/i.test(clean(s.activity)) ? clean(s.activity) : (s.title || clean(s.activity) || 'Waiting for you'))
+          : (s.activity || s.title || s.reply || (kind === 'thinking' ? 'Thinking…' : ''));
+        if (text) bubble = { needs, err: kind === 'error', text, step: s.step, steps: s.steps };
+      }
+      items.push({ p, at, s, kind, sel, hov, match, showTag, bubble, prio: sel ? 3 : needs ? 2 : 1 });
+    }
+    // tags first (front to back order already), then bubbles by priority so the
+    // selected / Needs-you ones claim space first
+    const tagAt = new Map();
+    for (const it of items) {
+      if (!it.showTag) continue;
+      const { p, at, s, kind } = it;
+      const name = this.label(s);
+      c.font = font(700, 10.5);
+      let tx = name;
+      while (c.measureText(tx).width > 110 && tx.length > 2) tx = tx.slice(0, -2) + '…';
+      const w = c.measureText(tx).width + 24, h = 19;
+      const x = at.x - w / 2, y = at.y - 8 - h;
+      c.globalAlpha = it.match ? (it.p.mode === 'work' || it.sel || it.hov ? 1 : 0.78) : 0.22;
+      c.shadowColor = 'rgba(0,0,0,.35)'; c.shadowBlur = 6; c.shadowOffsetY = 2;
+      rr(x, y, w, h, 7);
+      c.fillStyle = 'rgba(22,24,33,.88)'; c.fill();
+      c.shadowColor = 'transparent';
+      if (it.sel) { c.strokeStyle = KIND_COLOR[kind]; c.lineWidth = 1.5; c.stroke(); }
+      c.fillStyle = KIND_COLOR[kind];
+      c.beginPath(); c.arc(x + 10, y + h / 2, 3.4, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#f2f1f7'; c.textAlign = 'left'; c.textBaseline = 'middle';
+      c.fillText(tx, x + 17, y + h / 2 + 0.5);
+      // "!" badge beside Needs-you tags
+      if ((kind === 'needs' || kind === 'error') && it.match) {
+        const jump = Math.abs(Math.sin(t * 3.2)) * 3;
+        c.fillStyle = KIND_COLOR[kind];
+        c.beginPath(); c.arc(x + w + 9, y + h / 2 - jump, 8, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#fff'; c.font = font(900, 11); c.textAlign = 'center';
+        c.fillText('!', x + w + 9, y + h / 2 - jump + 0.5);
+      }
+      c.globalAlpha = 1;
+      placed.push({ x0: x, x1: x + w, y0: y, y1: y + h });
+      tagAt.set(p.key, { x, y, w, h });
+      this.hit.push({ key: p.key, x0: x, x1: x + w + (kind === 'needs' ? 18 : 0), y0: y, y1: y + h });
+    }
+    for (const it of items.filter((i) => i.bubble).sort((a, b) => a.prio - b.prio)) {
+      const { p, at, bubble: b } = it;
+      const tag = tagAt.get(p.key);
+      const anchorY = tag ? tag.y : at.y - 10;
+      c.font = font(600, 11);
+      const maxW = b.needs ? 168 : 150;
+      const lines = wrap(b.text, maxW, b.needs ? 3 : 2);
+      const head = b.needs ? 14 : 0;
+      const bar = b.steps ? 12 : 0;
+      const w = Math.max(b.needs ? 120 : 60, ...lines.map((l) => c.measureText(l).width)) + 20;
+      const h = 10 + head + lines.length * 14 + bar + 4;
+      // first free spot: straight up, then nudged left / right, then higher;
+      // always inside the canvas
+      let gap = 22, r = null, dx = 0;
+      const mk = (g, ox) => {
+        let x0 = Math.max(4, Math.min(this.cw - w - 4, at.x - w / 2 + ox));
+        let y0 = Math.max(4, anchorY - g - h);
+        return { x0, x1: x0 + w, y0, y1: y0 + h };
+      };
+      search: for (let k = 0; k < 5; k++, gap += 16) {
+        for (const ox of [0, -w * 0.55, w * 0.55]) {
+          const c2 = mk(gap, ox);
+          if (!overlaps(c2)) { r = c2; break search; }
+        }
+      }
+      if (!r) { gap = 22; r = mk(gap, 0); }
+      gap = Math.max(6, anchorY - r.y1);
+      const x = r.x0, y = r.y0;
+      dx = Math.max(x + 12, Math.min(x + w - 12, at.x));
+      // dotted connector down to the name tag / head
+      c.save();
+      c.setLineDash([2, 3]);
+      c.strokeStyle = b.needs ? 'rgba(255,170,100,.95)' : 'rgba(255,255,255,.8)';
+      c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(dx, y + h); c.lineTo(at.x, anchorY - 1); c.stroke();
+      c.restore();
+      const pulse = b.needs ? 0.5 + 0.5 * Math.sin(t * 3) : 0;
+      c.shadowColor = b.needs ? `rgba(255,138,61,${0.35 + 0.3 * pulse})` : 'rgba(0,0,0,.3)';
+      c.shadowBlur = b.needs ? 14 : 8; c.shadowOffsetY = 2;
+      rr(x, y, w, h, 10);
+      c.fillStyle = b.needs ? '#ffe7c7' : '#ffffff'; c.fill();
+      c.shadowColor = 'transparent';
+      if (b.needs) { c.strokeStyle = b.err ? '#f0675d' : '#ff9a4d'; c.lineWidth = 1.5; c.stroke(); }
+      c.textAlign = 'left'; c.textBaseline = 'middle';
+      let ty = y + 5;
+      if (b.needs) {
+        c.font = font(800, 8.5);
+        c.fillStyle = b.err ? '#c8412f' : '#c8611a';
+        c.fillText(b.err ? 'ERROR' : 'NEEDS YOU', x + 10, ty + 7);
+        ty += head;
+      }
+      c.font = font(600, 11);
+      c.fillStyle = '#25232b';
+      for (const l of lines) { c.fillText(l, x + 10, ty + 8); ty += 14; }
+      if (b.steps) {
+        const f = Math.max(0, Math.min(1, b.step / b.steps));
+        rr(x + 10, ty + 4, w - 20, 4, 2); c.fillStyle = 'rgba(0,0,0,.1)'; c.fill();
+        rr(x + 10, ty + 4, (w - 20) * f, 4, 2); c.fillStyle = '#ff8a3d'; c.fill();
+      }
+      placed.push(r);
+      this.hit.push({ key: p.key, x0: r.x0, x1: r.x1, y0: r.y0, y1: r.y1 + gap });
     }
   }
 

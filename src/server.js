@@ -64,6 +64,12 @@ function view(s, now, { privacy }) {
     lastEventAt: s.lastEventAt || s.mtime,
     startedAt: s.startedAt,
   };
+  // Optional extras some sources provide (Hurly crew): role + task steps.
+  if (s.role) out.role = s.role;
+  if (Number.isFinite(s.step) && Number.isFinite(s.steps) && s.steps > 0) {
+    out.step = s.step; out.steps = s.steps;
+    if (Array.isArray(s.plan)) out.plan = s.plan.slice(0, 12).map(String);
+  }
   if (s.agent === 'omp') {
     out.ompProfile = s.ompProfile || null;
     out.resumeCommand = ompResumeCommand(s);

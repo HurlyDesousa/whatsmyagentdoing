@@ -29,21 +29,21 @@ const POLL_MS = 30_000;
 // key, display name, agent badge, paperclip agent id (live), seed status, task, activity
 const CREW = [
   // Grok Bot teammates
-  { key: 'chief', name: 'Chief Master', agent: 'grokbot', status: 'active', task: 'Ops coordination · SWA-2978 3D office spike', activity: 'Planning next dispatch' },
-  { key: 'monitor', name: 'Monitor Master', agent: 'grokbot', status: 'watching', task: 'Charting mem watch', activity: 'Watching memory charts' },
-  { key: 'proxmox', name: 'Proxmox Master', agent: 'grokbot', status: 'idle', task: 'Proxmox cluster (pve*)' },
-  { key: 'dockhand', name: 'Dockhand Master', agent: 'grokbot', status: 'idle', task: 'Docker hosts' },
-  { key: 'truenas', name: 'TrueNAS Master', agent: 'grokbot', status: 'idle', task: 'TrueNAS storage' },
-  { key: 'doc', name: 'Doc Master', agent: 'grokbot', status: 'offline', task: 'Docs (off the floor)' },
+  { key: 'chief', role: 'Ops lead', name: 'Chief Master', agent: 'grokbot', status: 'active', task: 'Ops coordination · SWA-2978 3D office spike', activity: 'Planning next dispatch' },
+  { key: 'monitor', role: 'Monitoring', name: 'Monitor Master', agent: 'grokbot', status: 'watching', task: 'Charting mem watch', activity: 'Watching memory charts' },
+  { key: 'proxmox', role: 'Proxmox infra', name: 'Proxmox Master', agent: 'grokbot', status: 'idle', task: 'Proxmox cluster (pve*)' },
+  { key: 'dockhand', role: 'Docker hosts', name: 'Dockhand Master', agent: 'grokbot', status: 'idle', task: 'Docker hosts' },
+  { key: 'truenas', role: 'Storage', name: 'TrueNAS Master', agent: 'grokbot', status: 'idle', task: 'TrueNAS storage' },
+  { key: 'doc', role: 'Docs', name: 'Doc Master', agent: 'grokbot', status: 'offline', task: 'Docs (off the floor)' },
   // Paperclip agents
-  { key: 'cm2', name: 'Code Master 2', agent: 'paperclip', pc: 'eb8ecca2-c2cd-4fc9-ac22-0c63b25d2e4b', status: 'running', task: 'Charting batch SWA-2971', activity: 'Bash: npm run build' },
-  { key: 'qa', name: 'QA Engineer', agent: 'paperclip', pc: '47312222-173f-478e-bdb3-c36938e012dd', status: 'idle', task: 'QA' },
-  { key: 'claude', name: 'Claude', agent: 'paperclip', pc: 'abd3ef5c-f872-4a0f-a626-ab48518b3242', status: 'paused', task: 'Paused — needs Hurly', activity: 'Paused · needs you' },
-  { key: 'dispatcher', name: 'Dispatcher', agent: 'paperclip', pc: '00862553-fcd5-476d-a5d8-e8102c846c16', status: 'idle', task: 'Queue: SWA-2978 follow-up' },
-  { key: 'cm1', name: 'Code Master 1', agent: 'paperclip', pc: 'a08c0cb1-355a-4cd6-ade3-91fe773d05ea', status: 'idle', task: 'Coding' },
-  { key: 'gpu', name: 'GPU Agent', agent: 'paperclip', pc: 'bca31b4a-add1-4299-8865-c04100478d18', status: 'idle', task: 'GPU jobs' },
-  { key: 'amazon', name: 'Amazon Master', agent: 'paperclip', pc: '644aa5aa-f4a7-4114-ad84-d0277307b9e8', status: 'idle', task: 'Amazon' },
-  { key: 'accountant', name: 'Accountant', agent: 'paperclip', pc: '2fdb3770-fda5-4675-bfbd-6aef0f950f9d', status: 'idle', task: 'Books' },
+  { key: 'cm2', role: 'Code', name: 'Code Master 2', agent: 'paperclip', pc: 'eb8ecca2-c2cd-4fc9-ac22-0c63b25d2e4b', status: 'running', task: 'Charting batch SWA-2971', activity: 'Bash: npm run build' },
+  { key: 'qa', role: 'QA', name: 'QA Engineer', agent: 'paperclip', pc: '47312222-173f-478e-bdb3-c36938e012dd', status: 'idle', task: 'QA' },
+  { key: 'claude', role: 'Code · Claude', name: 'Claude', agent: 'paperclip', pc: 'abd3ef5c-f872-4a0f-a626-ab48518b3242', status: 'paused', task: 'Paused — needs Hurly', activity: 'Paused · needs you' },
+  { key: 'dispatcher', role: 'Dispatch', name: 'Dispatcher', agent: 'paperclip', pc: '00862553-fcd5-476d-a5d8-e8102c846c16', status: 'idle', task: 'Queue: SWA-2978 follow-up' },
+  { key: 'cm1', role: 'Code', name: 'Code Master 1', agent: 'paperclip', pc: 'a08c0cb1-355a-4cd6-ade3-91fe773d05ea', status: 'idle', task: 'Coding' },
+  { key: 'gpu', role: 'GPU jobs', name: 'GPU Agent', agent: 'paperclip', pc: 'bca31b4a-add1-4299-8865-c04100478d18', status: 'idle', task: 'GPU jobs' },
+  { key: 'amazon', role: 'Shopping', name: 'Amazon Master', agent: 'paperclip', pc: '644aa5aa-f4a7-4114-ad84-d0277307b9e8', status: 'idle', task: 'Amazon' },
+  { key: 'accountant', role: 'Finance', name: 'Accountant', agent: 'paperclip', pc: '2fdb3770-fda5-4675-bfbd-6aef0f950f9d', status: 'idle', task: 'Books' },
 ];
 
 // Small loops so working avatars visibly move between thinking / tools / typing.
@@ -98,6 +98,7 @@ class HurlyCrew extends EventEmitter {
       startedAt: now - (i + 1) * 600_000,
       offset: (i * 5.3) % 17,
       source: 'seed',
+      baseRole: c.role || null,
     }));
   }
 
@@ -137,7 +138,7 @@ class HurlyCrew extends EventEmitter {
         if (!s.pc || !byId.has(s.pc)) continue;
         const a = byId.get(s.pc);
         const iss = issueOf.get(s.pc);
-        s.live = { status: a.status, heartbeat: a.lastHeartbeatAt, task: iss ? `${iss.identifier} ${iss.title}` : null };
+        s.live = { role: a.title || a.role || null, status: a.status, heartbeat: a.lastHeartbeatAt, task: iss ? `${iss.identifier} ${iss.title}` : null };
       }
       this.liveError = null;
       this.liveAt = Date.now();
@@ -177,6 +178,11 @@ class HurlyCrew extends EventEmitter {
         status = loop[i][0];
         stepKey = `${Math.floor((t + s.offset) / total)}:${i}`;
       } else status = FIXED[crew] || 'done';
+      // Real step data only (crew.json override: step / steps / plan[]); the
+      // status loop above is a simulation, so it never fakes task progress.
+      if (Number.isFinite(ov.step) && Number.isFinite(ov.steps)) { s.step = ov.step; s.steps = ov.steps; s.plan = Array.isArray(ov.plan) ? ov.plan : null; }
+      else { s.step = s.steps = null; s.plan = null; }
+      s.role = ov.role || (s.live && s.live.role) || s.baseRole || null;
 
       const activity = ov.activity || (status === 'waiting' ? 'Paused · needs you' : status === 'tool' ? (source === 'seed' && s.seedActivity ? s.seedActivity : task) : null);
       const reply = status === 'done' ? task : null;
