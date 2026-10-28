@@ -44,10 +44,19 @@
     done: '#5f9a4c', error: '#de4b40', interrupted: '#9b9a94', idle: '#9b9a94',
   };
 
+  // Multi-floor office (SWA-3012): basement / ground / 2nd. Shared x–y sim;
+  // floor is a separate layer attribute. 3D stacks slabs; 2D filters by view.
+  const OFFICE_FLOORS = [
+    { id: -1, key: 'basement', short: 'B', label: 'Basement' },
+    { id: 0, key: 'ground', short: '1', label: 'Ground' },
+    { id: 1, key: 'second', short: '2', label: '2nd' },
+  ];
+  const LEVEL_H = 2.95; // world units between stacked slabs (3D)
+
   const ACT_EMOJI = {
     coffee: '☕', water: '💧', fridge: '🍎', sink: '🫧', stool: '💬', couch: '💬', beanbag: '🎧',
     window: '☁️', read: '📖', whiteboard: '✏️', meeting: '💬', arcade: '🎮', pingpong: '🏓', plant: '🌱',
-    vending: '🥤', foosball: '⚽', phone: '📞',
+    vending: '🥤', foosball: '⚽', phone: '📞', stairs: '🪜',
   };
 
   function hash(str) {
@@ -334,7 +343,12 @@
       this.t = performance.now();
       this.pal = palette();
       this.plan = this.buildPlan(0);
-      this.cat = { x: this.plan.W - 3, y: this.plan.D - 2, path: [], until: 0, face: 1 };
+      this.viewFloor = 0;
+      try {
+        const saved = localStorage.getItem('officeFloor');
+        if (saved != null && OFFICE_FLOORS.some((f) => String(f.id) === saved)) this.viewFloor = +saved;
+      } catch (_) {}
+      this.cat = { x: this.plan.W - 3, y: this.plan.D - 2, path: [], until: 0, face: 1, floor: 0 };
       this.theme = matchMedia('(prefers-color-scheme: dark)');
       this.onTheme = () => (this.pal = palette());
       this.theme.addEventListener('change', this.onTheme);
@@ -572,7 +586,68 @@
         { y: 2.2, color: '#c96442', text: 'SHIP IT' },
         { y: 4.6, color: '#10a37f', text: 'TESTS ✓' },
       ];
-      return { W, D, OW, OD, MR, PY, RW, grid, items, props, pois, desks, windows, posters, pp, door: { x: 0.4, y: D - 1.2 } };
+
+      // ---- multi-floor (SWA-3012): tag ground, add basement + 2nd pods + stairs
+      for (const d of desks) d.floor = 0;
+      for (const q of pois) if (q.floor == null) q.floor = 0;
+      for (const p of props) if (p.floor == null) p.floor = 0;
+
+      const sx = 0.55, sy = Math.max(OD + 0.4, D - 2.55);
+      solid(sx, sy, 1.35, 1.6, 0.05);
+      prop('stairs', { x: sx, y: sy, w: 1.35, d: 1.6, floor: 0 });
+      // One stairs POI per floor (same x/y footprint) so wanderers can change levels.
+      for (const fl of [-1, 0, 1]) {
+        poi(sx + 0.65, sy + 0.75, 'stairs', 'front', { floor: fl, stairs: true });
+      }
+
+      const addFloorPod = (floor, ox, oy, panel) => {
+        for (let k = 0; k < 2; k++) {
+          const x = ox + k * 1.5;
+          desks.push({ x, y: oy, side: 'n', seat: { x: x + 0.7, y: oy - 0.45 }, floor });
+          desks.push({ x, y: oy + 0.92, side: 's', seat: { x: x + 0.7, y: oy + 0.92 + 1.25 }, floor });
+        }
+        prop('panel', { x: ox - 0.1, y: oy + 0.82, w: 3.15, d: 0.08, h: 1.15, color: panel, floor });
+        prop('panel', { x: ox - 0.18, y: oy - 0.05, w: 0.08, d: 1.82, h: 1.15, color: panel, floor });
+        prop('plant', { x: ox - 0.15, y: oy + 1.7, floor });
+        prop('lamp', { x: ox + 2.9, y: oy + 1.5, floor });
+        poi(ox + 1.4, oy - 0.55, 'window', 'back', { floor });
+      };
+      // Basement: cooler server-room desks + a rack.
+      addFloorPod(-1, 1.5, 2.2, '#8aa4c8');
+      addFloorPod(-1, 5.7, 2.2, '#9bb8a0');
+      prop('rack', { x: OW - 1.15, y: 0.35, floor: -1 });
+      prop('cooler', { x: OW + 0.4, y: MR + 0.4, floor: -1 });
+      poi(OW + 0.65, MR + 1.25, 'water', 'back', { floor: -1 });
+      // 2nd floor: loft desks + lounge couch.
+      addFloorPod(1, 1.5, 2.2, '#d4a0b8');
+      addFloorPod(1, 5.7, 2.2, '#c9b07a');
+      prop('couch', { x: OW + 0.6, y: PY + 1.0, w: 2.8, d: 0.8, floor: 1 });
+      prop('rug', { x: OW + 0.3, y: PY + 0.6, w: 4.0, d: Math.max(2, D - PY - 1.0), floor: 1 });
+      prop('plant', { x: W - 0.5, y: D - 0.5, floor: 1 });
+      for (let k = 0; k < 3; k++) poi(OW + 1.1 + k * 0.9, PY + 1.6, 'couch', 'front', { sit: 0.36, floor: 1 });
+
+      return {
+        W, D, OW, OD, MR, PY, RW, grid, items, props, pois, desks, windows, posters, pp,
+        door: { x: 0.4, y: D - 1.2, floor: 0 },
+        floors: [-1, 0, 1],
+        stairsAt: { x: sx + 0.65, y: sy + 0.75 },
+      };
+    }
+
+    floorOf(p) {
+      if (!p) return this.viewFloor || 0;
+      if (p.desk && p.desk.floor != null) return p.desk.floor;
+      if (p.napDesk && p.napDesk.floor != null) return p.napDesk.floor;
+      if (p.poi && p.poi.floor != null) return p.poi.floor;
+      return p.floor ?? 0;
+    }
+
+    setViewFloor(fl) {
+      const id = OFFICE_FLOORS.some((f) => f.id === fl) ? fl : 0;
+      if (this.viewFloor === id) return;
+      this.viewFloor = id;
+      try { localStorage.setItem('officeFloor', String(id)); } catch (_) {}
+      if (typeof this.onFloorChange === 'function') this.onFloorChange(id);
     }
 
     glassX(add, x, y, d) {
@@ -602,8 +677,10 @@
       this.offDuty = off.length - wanderers.length;
 
       const cap = this.plan.desks.length;
+      const groundCap = this.plan.desks.filter((d) => (d.floor ?? 0) === 0).length;
       // Scene packs have a fixed floor plan; the built-in office grows with the team.
-      if (!this.plan.fixed && (working.length > cap - 1 || (cap > 8 && working.length < cap * 0.35))) {
+      // Shrink/grow against ground desks only — basement/2nd pods are fixed extras.
+      if (!this.plan.fixed && (working.length > cap - 1 || (groundCap > 8 && working.length < groundCap * 0.35))) {
         this.plan = this.buildPlan(working.length);
         this.deskOf.clear();
         for (const p of this.people.values()) { p.poi = null; p.napDesk = null; p.desk = null; p.until = 0; }
@@ -636,10 +713,11 @@
         if (isWorker) {
           this.release(p);
           const desk = desks[this.deskOf.get(s.key)];
+          p.floor = desk.floor ?? 0;
           if (p.desk !== desk || p.mode !== 'work') { p.desk = desk; this.goTo(p, desk.seat); }
           p.mode = 'work';
         } else {
-          if (p.mode !== 'wander') { p.mode = 'wander'; p.desk = null; p.poi = null; p.until = 0; }
+          if (p.mode !== 'wander') { p.mode = 'wander'; p.desk = null; p.poi = null; p.until = 0; p.floor = p.floor ?? 0; }
           // Someone started working at the desk this one was napping on.
           if (p.napDesk && takenDesks.has(p.napDesk)) { this.release(p); p.path = []; }
         }
@@ -670,7 +748,7 @@
         shirt: pick(SHIRT[s.agent] || SHIRT.claude, h, 11),
         hairStyle: h % 4,
         phase: (h % 1000) / 1000 * Math.PI * 2,
-        x: door.x, y: door.y,
+        x: door.x, y: door.y, floor: door.floor ?? 0,
         path: [], walkFace: 'front', until: 0, mode: null,
         // On the first snapshot everyone is placed directly, no stampede.
         placeOnArrive: this.first,
@@ -690,19 +768,23 @@
       if (p.poi && now < p.until) return;
       this.release(p);
       const plan = this.plan;
+      const fl = p.floor ?? 0;
       const workingDesks = new Set([...this.deskOf.values()].map((i) => plan.desks[i]));
       const sleepy = p.s.status === 'idle';
       const weighted = [];
       for (const q of plan.pois) {
         if (q.taken) continue;
+        if ((q.floor ?? 0) !== fl) continue;
         let w = 1;
+        if (q.stairs) w = 0.55;
         if (q.pair) w = plan.pois.some((o) => o.pair === q.pair && o !== q && o.taken) ? 7 : 1.2;
         if (q.act === 'couch' || q.act === 'beanbag' || q.sleepy) w = sleepy ? 3 : 1.4;
         weighted.push([q, w]);
       }
       for (const d of plan.noNap ? [] : plan.desks) {
+        if ((d.floor ?? 0) !== fl) continue;
         if (workingDesks.has(d) || d.napper) continue;
-        weighted.push([{ x: d.seat.x, y: d.seat.y, act: 'nap', face: d.side === 'n' ? 'front' : 'back', sit: 0.34, desk: d }, sleepy ? 3 : 0.25]);
+        weighted.push([{ x: d.seat.x, y: d.seat.y, act: 'nap', face: d.side === 'n' ? 'front' : 'back', sit: 0.34, desk: d, floor: d.floor }, sleepy ? 3 : 0.25]);
       }
       if (!weighted.length) return;
       let r = Math.random() * weighted.reduce((a, [, w]) => a + w, 0);
@@ -712,8 +794,15 @@
       choice.taken = p.key;
       p.poi = choice;
       p.until = Infinity; // set on arrival
-      p.stay = (choice.act === 'nap' ? rand(25, 60) : choice.act === 'pingpong' ? rand(15, 30) : rand(8, 20)) * 1000;
+      p.stay = (choice.act === 'nap' ? rand(25, 60) : choice.act === 'pingpong' ? rand(15, 30) : choice.stairs ? rand(1.2, 2.2) : rand(8, 20)) * 1000;
       this.goTo(p, choice);
+    }
+
+    takeStairs(p) {
+      const cur = p.floor ?? 0;
+      const opts = [-1, 0, 1].filter((f) => Math.abs(f - cur) === 1);
+      if (!opts.length) return;
+      p.floor = opts[(p.h + Math.floor(this.t / 700)) % opts.length];
     }
 
     setVisible(v) { this.visible = v; if (v) this.resize(); }
@@ -1630,7 +1719,15 @@
       const wall = Date.now();
       for (const [k, p] of this.people) {
         if (p.mode === 'wander') {
-          if (p.poi && !p.path.length && p.until === Infinity) p.until = wall + p.stay;
+          if (p.poi && !p.path.length && p.until === Infinity) {
+            if (p.poi.stairs) {
+              this.takeStairs(p);
+              this.release(p);
+              p.until = wall + 600;
+            } else {
+              p.until = wall + p.stay;
+            }
+          }
           this.wander(p, wall);
         }
         if (p.path.length) {
@@ -1654,20 +1751,36 @@
       c.translate(this.cam.ox, this.cam.oy);
       c.scale(this.cam.zoom, this.cam.zoom);
 
+      const vf = this.viewFloor || 0;
       this.drawRoom();
+      // Soft tint when viewing basement / 2nd so the shared ground shell still reads.
+      if (vf !== 0) {
+        const { W, D } = this.plan;
+        const P = (x, y) => this.iso(x, y, 0);
+        c.save();
+        c.globalAlpha = 0.18;
+        c.fillStyle = vf < 0 ? '#6a8cff' : '#ff9ec4';
+        this.poly([P(0, 0), P(W, 0), P(W, D), P(0, D)], c.fillStyle);
+        c.restore();
+      }
       const occupant = new Map();
       for (const p of this.people.values()) {
+        if (this.floorOf(p) !== vf) continue;
         if (p.mode === 'work' && p.desk) occupant.set(p.desk, p);
         else if (p.napDesk) occupant.set(p.napDesk, p);
       }
-      const items = [...this.plan.items];
+      const items = vf === 0 ? [...this.plan.items] : [];
       for (const dk of this.plan.desks) {
+        if ((dk.floor ?? 0) !== vf) continue;
         const p = occupant.get(dk);
         items.push({ depth: dk.x + 0.7 + dk.y + 0.4, draw: () => this.desk(dk, p) });
         items.push({ depth: dk.seat.x + dk.seat.y - 0.06, draw: () => this.chair(dk, p) });
       }
-      for (const p of this.people.values()) items.push({ depth: p.x + p.y + 0.01, person: p });
-      items.push({ depth: this.cat.x + this.cat.y, draw: () => this.drawCat() });
+      for (const p of this.people.values()) {
+        if (this.floorOf(p) !== vf) continue;
+        items.push({ depth: p.x + p.y + 0.01, person: p });
+      }
+      if (vf === 0) items.push({ depth: this.cat.x + this.cat.y, draw: () => this.drawCat() });
       items.sort((a, b) => a.depth - b.depth);
 
       this.hit = [];
@@ -1705,10 +1818,24 @@
         x0: h.x0 * z + this.cam.ox, x1: h.x1 * z + this.cam.ox,
         y0: h.y0 * z + this.cam.oy, y1: h.y1 * z + this.cam.oy,
       }));
+
+      // Floor chip (screen space) so 2D matches the picker.
+      const meta = OFFICE_FLOORS.find((f) => f.id === (this.viewFloor || 0)) || OFFICE_FLOORS[1];
+      c.save();
+      c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      c.font = '700 12px ui-rounded, "Comic Sans MS", system-ui, sans-serif';
+      c.textAlign = 'left';
+      c.fillStyle = this.pal.text;
+      c.globalAlpha = 0.75;
+      c.fillText(meta.label, 12, 18);
+      c.globalAlpha = 1;
+      c.restore();
     }
   }
 
   window.Office = Office;
+  window.OFFICE_FLOORS = OFFICE_FLOORS;
+  window.OFFICE_LEVEL_H = LEVEL_H;
   window.OFFICE_AGENT_BADGES = AGENT_BADGES;
   window.OfficeGrid = Grid;
 })();

@@ -23,6 +23,7 @@ const CHAR_HEIGHT = 1.02; // world units (≈ tiles)
 const WALL_H = 2.4;
 const SIT_FORWARD = 0.16;
 const FLOOR_T = 0.42; // thickness of the office floor slab (it used to be a paper-thin plane)
+const LEVEL_H = (typeof window !== 'undefined' && window.OFFICE_LEVEL_H) || 2.95; // stack spacing (SWA-3012)
 
 // Pastel room in both page themes; the Now/Day/Evening/Night lighting does the mood.
 const dark3 = () => false;
@@ -241,7 +242,7 @@ export class Office3D extends window.Office {
   // Place a furniture model so its footprint fills (x, y, w, d) on the floor
   // plan, standing on height y0. rot turns it (0 = model's own front faces +z).
   // With `stretch` the model is scaled per axis to exactly w × h × d.
-  place(name, x, y, w, d, { rot = 0, y0 = 0, h = null, stretch = false, group = this.room } = {}) {
+  place(name, x, y, w, d, { rot = 0, y0 = 0, h = null, stretch = false, group = this.floorRoot || this.room } = {}) {
     const src = this.models[name];
     if (!src) return null;
     const m = src.clone(true);
@@ -272,8 +273,13 @@ export class Office3D extends window.Office {
     m.position.set(x + w / 2, z + h / 2, y + d / 2);
     m.castShadow = opts.shadow !== false;
     m.receiveShadow = true;
-    (opts.group || this.room).add(m);
+    (opts.group || this.floorRoot || this.room).add(m);
     return m;
+  }
+
+  addToFloor(obj) {
+    (this.floorRoot || this.room).add(obj);
+    return obj;
   }
 
   glassMat() {
@@ -309,6 +315,17 @@ export class Office3D extends window.Office {
     this.glows = [];       // localized lights + additive halos, scaled by sky.glow
     this.screenGlows = []; // per-desk monitor halos, tinted by the worker's status
     this.initInteractive();
+    // SWA-3012: stack basement / ground / 2nd as sibling groups.
+    this.floors3d = {};
+    for (const fl of (plan.floors || [0])) {
+      const g = new THREE.Group();
+      g.name = `floor-${fl}`;
+      g.userData.floor = fl;
+      g.position.y = fl * LEVEL_H;
+      this.room.add(g);
+      this.floors3d[fl] = g;
+    }
+    this.floorRoot = this.floors3d[0] || this.room;
     const { W, D, OW, MR, PY, RW } = plan;
     const dark = false; // pastel room in both page themes
 
@@ -325,7 +342,7 @@ export class Office3D extends window.Office {
       m.rotation.x = -Math.PI / 2;
       m.position.set(x + w / 2, 0, y + d / 2);
       m.receiveShadow = true;
-      this.room.add(m);
+      this.addToFloor(m);
     };
     const planks = this.patternTexture((c, s) => {
       // light tan floor tiles (Grok Bot Office look)
@@ -349,7 +366,7 @@ export class Office3D extends window.Office {
     const pp = plan.pp;
     const mat = new THREE.Mesh(new THREE.PlaneGeometry(pp.x1 - pp.x0 + 1.2, 2.7), new THREE.MeshStandardMaterial({ color: dark ? 0x2f4a3a : 0xcde6d4, roughness: 1 }));
     mat.rotation.x = -Math.PI / 2; mat.position.set((pp.x0 + pp.x1) / 2, 0.005, pp.y - 0.05); mat.receiveShadow = true;
-    this.room.add(mat);
+    this.addToFloor(mat);
     this.buildCarpets();
 
     // walls: back (z=0) with windows, left (x=0) with a door
@@ -366,7 +383,7 @@ export class Office3D extends window.Office {
       this.boxMesh(wx, -T, 2.0, 1.5, T, WALL_H - 2.0, 0, { mat: wallMat });
       const glass = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.15), this.windowMat);
       glass.position.set(wx + 0.75, 1.425, -T / 2);
-      this.room.add(glass);
+      this.addToFloor(glass);
       this.boxMesh(wx + 0.73, -0.02, 0.85, 0.04, 0.04, 1.15, dark ? 0x2b2926 : 0xf2e8da);
       this.boxMesh(wx, -0.02, 0.83, 1.5, 0.1, 0.04, dark ? 0x2b2926 : 0xf2e8da);
       this.addBlind(wx);
@@ -387,18 +404,18 @@ export class Office3D extends window.Office {
         const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshStandardMaterial({ color: 0xf5d27a, roughness: 0.4, metalness: 0.2 }));
         knob.position.set(sx, 0.95, 0.95); knob.castShadow = true; pv.add(knob);
       }
-      this.room.add(pv);
+      this.addToFloor(pv);
       this.addDoor(pv, 0.35, dy, 1.45);
     }
     this.boxMesh(0, dy - 0.6, 0, 0.9, 1.2, 0.01, dark ? 0x5a3b2e : 0xe7a9a2, { shadow: false, round: false });
     // magenta doorway glow (demo look)
     const doorGlow = new THREE.PointLight(0xff5fc0, 2.2, 5.5, 1.6); // softer magenta; brighter at night
     doorGlow.position.set(0.6, 1.9, dy);
-    this.room.add(doorGlow);
+    this.addToFloor(doorGlow);
     this.doorGlow = doorGlow;
     const halo = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 2.6), new THREE.MeshBasicMaterial({ map: this.glowTexture('255,95,192'), transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending }));
     halo.rotation.y = Math.PI / 2; halo.position.set(0.02, 1.2, dy);
-    this.room.add(halo);
+    this.addToFloor(halo);
     this.doorHalo = halo;
     // neon strip over the door frame
     this.glows.push({ m: this.boxMesh(-0.02, dy - 0.62, 1.82, 0.03, 1.24, 0.04, 0xff7ad0, { emissive: 0xff5fc0, ei: 1, shadow: false, round: false }), ei: 1.4 });
@@ -406,27 +423,27 @@ export class Office3D extends window.Office {
     for (let i = 0; i < 3; i++) {
       const l = new THREE.PointLight(0xffd6a0, 0, 7, 1.4);
       l.position.set(1.5 + (i + 0.5) * (W - 1.5) / 3, WALL_H + 0.2, D * 0.5);
-      this.room.add(l);
+      this.addToFloor(l);
       this.ceilLights.push(l);
     }
     // posters + whiteboard
     for (const ps of plan.posters) {
       const m = this.textPlane(ps.text, '#' + soft(ps.color).toString(16).padStart(6, '0'), 0.9, 1.0);
       m.rotation.y = Math.PI / 2; m.position.set(0.005, 1.45, ps.y + 0.45);
-      this.room.add(m);
+      this.addToFloor(m);
     }
     const wb = this.textPlane('', '#fdfdfb', 2.6, 1.15);
     wb.position.set(OW + 3.7, 1.4, 0.005);
-    this.room.add(wb);
+    this.addToFloor(wb);
     this.whiteboardScribbles(OW + 3.7);
     const sign = this.textPlane('MEETING', dark ? '#3a4a5a' : '#b7a6d2', 1.3, 0.3);
     sign.position.set(OW + 1.1, 2.15, 0.005);
-    this.room.add(sign);
+    this.addToFloor(sign);
 
-    // desks
-    for (const dk of plan.desks) this.buildDesk(dk);
+    // desks + props on the ground floor only (other floors built below)
+    for (const dk of plan.desks) if ((dk.floor ?? 0) === 0) this.buildDesk(dk);
 
-    for (const p of plan.props) this.buildProp(p);
+    for (const p of plan.props) if ((p.floor ?? 0) === 0) this.buildProp(p);
     {
       // glass swing door into the meeting room (the gap in the glass wall)
       const pv = new THREE.Group();
@@ -435,12 +452,108 @@ export class Office3D extends window.Office {
       this.boxMesh(-0.035, 0, 0, 0.07, 0.96, 0.1, 0xe6dccd, { group: pv });
       this.boxMesh(-0.035, 0, 2.02, 0.07, 0.96, 0.06, 0xe6dccd, { group: pv });
       this.boxMesh(-0.06, 0.82, 0.8, 0.12, 0.04, 0.45, 0xb7a6d2, { group: pv });
-      this.room.add(pv);
+      this.floorRoot.add(pv);
       this.addDoor(pv, OW, 4.1, 1.5);
     }
     this.buildButterfly(OW + RW / 2, PY + (D - PY) / 2, RW / 2 - 1.1, (D - PY) / 2 - 0.9);
+    // Basement + 2nd floor shells (simpler props; ground keeps full interactivity).
+    if (this.floors3d[-1]) { this.floorRoot = this.floors3d[-1]; this.buildExtraFloor(-1); }
+    if (this.floors3d[1]) { this.floorRoot = this.floors3d[1]; this.buildExtraFloor(1); }
+    this.floorRoot = this.floors3d[0] || this.room;
+    this.buildStairsShaft();
+    this.applyFloorView(true);
     this.clicks.updateMatrixWorld(true);
     this.fitCamera3D(true);
+  }
+
+  // Simpler stacked floors: thick slab, short walls, desks/props tagged for that floor.
+  buildExtraFloor(fl) {
+    const plan = this.plan;
+    const { W, D } = plan;
+    const slab = fl < 0 ? 0xb8c4e0 : 0xf0c4d4;
+    const rim = fl < 0 ? 0x8aa0d0 : 0xe8a0b8;
+    this.boxMesh(-0.12, -0.12, -0.16, W + 0.12, D + 0.12, 0.158, fl < 0 ? 0xd8e0f4 : 0xf8dde8, { rough: 0.9, shadow: false });
+    this.boxMesh(-0.09, -0.09, -FLOOR_T, W + 0.06, D + 0.06, FLOOR_T - 0.15, slab, { rough: 0.95, shadow: false });
+    this.boxMesh(-0.1, -0.1, -0.175, W + 0.08, D + 0.08, 0.025, rim, { rough: 0.9, shadow: false, round: false });
+    const floorMat = new THREE.MeshStandardMaterial({ color: fl < 0 ? 0xe4eaf8 : 0xfae8ef, roughness: 0.92 });
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(W / 2, 0.002, D / 2);
+    m.receiveShadow = true;
+    this.floorRoot.add(m);
+    const wallCol = fl < 0 ? 0xb0b8d4 : 0xd8b8c8;
+    const wallMat = new THREE.MeshStandardMaterial({ color: wallCol, roughness: 1 });
+    const T = 0.12, h = WALL_H * 0.92;
+    this.boxMesh(-T, -T, 0, W + T, T, h, 0, { mat: wallMat });
+    this.boxMesh(-T, -T, 0, T, D + T, h, 0, { mat: wallMat });
+    // Open front so stacked floors stay readable from the default camera.
+    this.boxMesh(-T, D, 0, W + T, T, 0.35, rim, { rough: 0.9, shadow: false });
+    const label = fl < 0 ? 'BASEMENT' : '2ND FLOOR';
+    const sign = this.textPlane(label, fl < 0 ? '#7a90c8' : '#d489a8', 2.2, 0.38);
+    sign.position.set(W * 0.35, 2.05, 0.02);
+    this.floorRoot.add(sign);
+    for (const dk of plan.desks) if ((dk.floor ?? 0) === fl) this.buildDesk(dk);
+    for (const p of plan.props) if ((p.floor ?? 0) === fl) this.buildProp(p);
+  }
+
+  buildStairsShaft() {
+    const at = this.plan.stairsAt;
+    if (!at || !this.floors3d) return;
+    const g = new THREE.Group();
+    g.name = 'stairs';
+    this.room.add(g);
+    const x = at.x - 0.55, z = at.y - 0.7;
+    // Vertical shaft columns
+    for (const [cx, cz] of [[x, z], [x + 1.2, z], [x, z + 1.4], [x + 1.2, z + 1.4]]) {
+      this.boxMesh(cx, cz, -LEVEL_H - 0.2, 0.12, 0.12, LEVEL_H * 2 + WALL_H, 0xe8d5c0, { group: g, rough: 0.85 });
+    }
+    // Step runs between levels
+    const stepN = 8;
+    for (const [from, to] of [[-1, 0], [0, 1]]) {
+      for (let i = 0; i < stepN; i++) {
+        const t = i / stepN;
+        const y0 = from * LEVEL_H + t * LEVEL_H;
+        const inset = (i / stepN) * 1.05;
+        this.boxMesh(x + 0.15 + inset * 0.15, z + 0.15, y0, 0.95 - inset * 0.1, 1.2, 0.12, 0xf2c9a8, { group: g, rough: 0.9 });
+      }
+    }
+    // Clickable floor-change pads on each landing
+    for (const fl of [-1, 0, 1]) {
+      if (!this.floors3d[fl]) continue;
+      const y = fl * LEVEL_H;
+      this.clickBox(x, z, y, 1.35, 1.6, 0.35, () => this.setViewFloor(fl));
+    }
+  }
+
+  applyFloorView(resetCam) {
+    const vf = this.viewFloor || 0;
+    for (const [key, g] of Object.entries(this.floors3d || {})) {
+      const on = +key === vf;
+      g.traverse((o) => {
+        if (!o.isMesh || !o.material) return;
+        for (const mat of Array.isArray(o.material) ? o.material : [o.material]) {
+          if (mat.userData.floorO0 == null) {
+            mat.userData.floorO0 = mat.opacity ?? 1;
+            mat.userData.floorT0 = !!mat.transparent;
+          }
+          const target = on ? mat.userData.floorO0 : Math.min(0.42, mat.userData.floorO0 * 0.45);
+          const tr = mat.userData.floorT0 || target < 0.98;
+          if (mat.transparent !== tr) { mat.transparent = tr; mat.needsUpdate = true; }
+          mat.opacity = target;
+          mat.depthWrite = on;
+        }
+      });
+    }
+    if (resetCam || this._floorCam !== vf) {
+      this._floorCam = vf;
+      this.fitted = false;
+      this.fitCamera3D(true);
+    }
+  }
+
+  setViewFloor(fl) {
+    super.setViewFloor(fl);
+    if (this.floors3d) this.applyFloorView(true);
   }
 
   // Swap Kenney material colours by material name (clones, so other copies keep theirs).
@@ -487,7 +600,7 @@ export class Office3D extends window.Office {
     sp.scale.set(size, size, 1);
     sp.renderOrder = 2;
     sp.raycast = () => {}; // never a floor/seat hit
-    this.room.add(sp);
+    (this.floorRoot || this.room).add(sp);
     return sp;
   }
 
@@ -539,7 +652,7 @@ export class Office3D extends window.Office {
     line([[0.65, 0.1], [1.05, 0.1], [1.05, -0.15], [0.65, -0.15], [0.65, 0.1]], 0xc96442);
     line([[-1.1, -0.35], [-0.9, -0.1], [-0.7, -0.3], [-0.5, -0.05], [-0.3, -0.25], [-0.1, 0.0]], 0x5f9a4c);
     g.position.set(cx, 1.4, 0.01);
-    this.room.add(g);
+    this.addToFloor(g);
   }
 
   buildDesk(dk) {
@@ -561,7 +674,7 @@ export class Office3D extends window.Office {
       const lm = this.recolor(this.place('lampSquareTable', x + 1.1, back, 0.25, 0.25, { y0: top, h: 0.35 }), { lamp: 0xffe3a0 }, { lamp: 0xffcf70 });
       const l = new THREE.PointLight(0xffc27a, 0, 2.6, 1.8);
       l.position.set(x + 1.22, top + 0.42, back + 0.12);
-      this.room.add(l);
+      this.addToFloor(l);
       // click to switch; off by default in Day light (see animateInteractive)
       const L = this.addLamp(lm, l, { base: 1.6, sprite: this.haloSprite('255,200,120', x + 1.22, top + 0.4, back + 0.12, 1.1), sbase: 0.85, at: [x + 1.22, top + 0.5, back + 0.12] });
       this.clickBox(x + 1.0, back - 0.1, top, 0.45, 0.45, 0.5, () => this.toggleLamp(L));
@@ -603,7 +716,7 @@ export class Office3D extends window.Office {
         {
           const l = new THREE.PointLight(0x4cf2c0, 0, 3.2, 1.6);
           l.position.set(p.x + 0.35, 1.2, p.y + 1.0);
-          this.room.add(l);
+          this.addToFloor(l);
           this.glows.push({ light: l, base: 1.8, sprite: this.haloSprite('76,242,192', p.x + 0.35, 1.1, p.y + 0.66, 1.6), sbase: 0.6 });
         }
         break;
@@ -626,7 +739,7 @@ export class Office3D extends window.Office {
         this.ball = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), new THREE.MeshStandardMaterial({ color: 0xffffff }));
         this.ball.castShadow = true;
         this.ball.visible = false;
-        this.room.add(this.ball);
+        this.addToFloor(this.ball);
         this.clickBox(x, y, 0, 2.6, 1.4, 0.8, () => { this.until.rally = this.t / 1000 + 7; this.spawnFx('spark', x + 1.3, 1.0, y + 0.7, { n: 5, spread: 0.6 }); });
         break;
       }
@@ -640,7 +753,7 @@ export class Office3D extends window.Office {
         {
           const l = new THREE.PointLight(0x7fc8ff, 0, 2.6, 1.8);
           l.position.set(p.x + 1.0, 1.3, p.y + 0.35);
-          this.room.add(l);
+          this.addToFloor(l);
           this.glows.push({ light: l, base: 1.3, sprite: this.haloSprite('127,200,255', p.x + 0.75, 1.3, p.y + 0.35, 1.3), sbase: 0.5 });
         }
         break;
@@ -665,7 +778,7 @@ export class Office3D extends window.Office {
             rod.add(man);
           }
           rod.position.set(x + 0.2 + k * 0.24, 0.8, y + 0.4);
-          this.room.add(rod);
+          this.addToFloor(rod);
           this.rods.push(rod);
         }
         this.clickBox(x, y, 0, 1.6, 0.8, 0.85, () => { this.until.fb = this.t / 1000 + 5; this.spawnFx('spark', x + 0.8, 1.0, y + 0.4, { n: 4, spread: 0.5 }); });
@@ -682,7 +795,7 @@ export class Office3D extends window.Office {
         this.place('stoolBar', x + 0.45, y + 0.4, 0.4, 0.4, { h: 0.5 });
         const l = new THREE.PointLight(0xffd9a0, 0.6, 2.5);
         l.position.set(x + 0.65, 1.85, y + 0.65);
-        this.room.add(l);
+        this.addToFloor(l);
         break;
       }
       case 'glass':
@@ -723,7 +836,7 @@ export class Office3D extends window.Office {
         const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.42, 16),
           new THREE.MeshPhysicalMaterial({ color: 0x8ec5f2, transparent: true, opacity: 0.65, roughness: 0.1 }));
         bottle.position.set(p.x + 0.21, 0.95 + 0.21, p.y + 0.21);
-        this.room.add(bottle);
+        this.addToFloor(bottle);
         break;
       }
       case 'sink':
@@ -772,7 +885,7 @@ export class Office3D extends window.Office {
         m.scale.set(1, 0.5, 1);
         m.position.set(p.x, 0.2, p.y);
         m.castShadow = m.receiveShadow = true;
-        this.room.add(m);
+        this.addToFloor(m);
         const bean = { m, x: p.x, y: p.y, sy: 0.5, wob: 0 };
         this.beans.push(bean);
         this.clickBox(p.x - 0.45, p.y - 0.45, 0, 0.9, 0.9, 0.45, () => { bean.wob = 1; this.spawnFx('puff', p.x, 0.35, p.y, { n: 4, spread: 0.6, up: 0.25, life: 1, size: 0.25, grow: 1 }); });
@@ -787,7 +900,7 @@ export class Office3D extends window.Office {
         {
           const l = new THREE.PointLight(0xff5fc0, 0, 3, 1.6);
           l.position.set(x + 0.35, 1.3, y + 1.1);
-          this.room.add(l);
+          this.addToFloor(l);
           this.arcadeGlow = { light: l, base: 1.6, sprite: this.haloSprite('255,95,192', x + 0.35, 1.25, y + 0.75, 1.4), sbase: 0.6 };
           this.glows.push(this.arcadeGlow);
         }
@@ -800,7 +913,7 @@ export class Office3D extends window.Office {
         const lm = this.recolor(this.place('lampRoundFloor', p.x - 0.25, p.y - 0.25, 0.5, 0.5, { h: 1.7 }), { lamp: 0xffd34d }, { lamp: 0xffc933 });
         const l = new THREE.PointLight(0xffc96a, 0, 4.5);
         l.position.set(p.x, 1.6, p.y);
-        this.room.add(l);
+        this.addToFloor(l);
         const L = this.addLamp(lm, l, { base: 1.6, floor: true, sprite: this.haloSprite('255,201,106', p.x, 1.55, p.y, 2.4), sbase: 0.8, at: [p.x, 1.7, p.y] });
         this.clickBox(p.x - 0.35, p.y - 0.35, 0, 0.7, 0.7, 1.8, () => this.toggleLamp(L));
         break;
@@ -808,6 +921,13 @@ export class Office3D extends window.Office {
       case 'rug':
         this.recolor(this.place('rugRectangle', p.x, p.y, p.w, p.d, { y0: 0.004 }), { carpet: 0x9eaad9, carpetDarker: 0x8592c6 }); // soft periwinkle rug
         break;
+      case 'stairs': {
+        // Landing pad on the focused floor; the shaft is built once in buildStairsShaft.
+        const { x, y, w = 1.35, d = 1.6 } = p;
+        this.boxMesh(x, y, 0, w, d, 0.08, 0xe8c4a0, { rough: 0.85 });
+        this.boxMesh(x + 0.08, y + 0.08, 0.08, 0.18, d - 0.16, 0.9, 0xd4a882, { rough: 0.9 });
+        break;
+      }
     }
   }
 
@@ -908,7 +1028,7 @@ export class Office3D extends window.Office {
     const carpet = new THREE.Mesh(new THREE.BoxGeometry(cw, ch, cd), [side, side, top, side, side, side]);
     carpet.position.set(OW + 0.9 + cw / 2, ch / 2, 0.9 + cd / 2);
     carpet.receiveShadow = true;
-    this.room.add(carpet);
+    this.addToFloor(carpet);
     // round welcome rug inside the entrance door
     const rc = document.createElement('canvas');
     rc.width = rc.height = 128;
@@ -919,7 +1039,7 @@ export class Office3D extends window.Office {
     const rug = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.03, 40), [new THREE.MeshStandardMaterial({ color: 0xf2b39a, roughness: 1 }), new THREE.MeshStandardMaterial({ map: rt, roughness: 1 }), side]);
     rug.position.set(1.35, 0.015, this.plan.door.y);
     rug.receiveShadow = true;
-    this.room.add(rug);
+    this.addToFloor(rug);
   }
 
   // ---- roller blinds on the back windows
@@ -941,11 +1061,11 @@ export class Office3D extends window.Office {
     m.castShadow = true;
     g.add(m);
     g.scale.y = 0.05;
-    this.room.add(g);
+    this.addToFloor(g);
     const roller = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.56, 10), new THREE.MeshStandardMaterial({ color: 0xe9c9b4, roughness: 0.8 }));
     roller.rotation.z = Math.PI / 2;
     roller.position.set(wx + 0.75, 2.02, 0.05);
-    this.room.add(roller);
+    this.addToFloor(roller);
     const b = { g, down: false, k: 0.05 };
     this.blinds.push(b);
     this.clickBox(wx, -0.12, 0.84, 1.5, 0.32, 1.25, () => { b.down = !b.down; });
@@ -993,7 +1113,7 @@ export class Office3D extends window.Office {
     // snacks
     const cyl = (cx, cz, z, r, hh, col) => {
       const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, hh, 10), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 }));
-      m.position.set(cx, z + hh / 2, cz); m.castShadow = true; this.room.add(m);
+      m.position.set(cx, z + hh / 2, cz); m.castShadow = true; this.addToFloor(m);
     };
     cyl(x + 0.22, y + 0.35, 0.12, 0.05, 0.3, 0xa6d8f0);
     cyl(x + 0.36, y + 0.32, 0.12, 0.05, 0.26, 0xf7b7a3);
@@ -1003,7 +1123,7 @@ export class Office3D extends window.Office {
     cyl(x + 0.5, y + 0.33, 0.535, 0.07, 0.12, 0xffd88a);
     for (const [ax, col] of [[0.22, 0xf28b8b], [0.36, 0x9bd37b], [0.5, 0xf28b8b]]) {
       const ap = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshStandardMaterial({ color: col, roughness: 0.5 }));
-      ap.position.set(x + ax, 0.985, y + 0.35); ap.castShadow = true; this.room.add(ap);
+      ap.position.set(x + ax, 0.985, y + 0.35); ap.castShadow = true; this.addToFloor(ap);
     }
     this.boxMesh(x + 0.62, y + 0.2, 0.935, 0.14, 0.2, 0.1, 0xf6c1d6); // cake slice box
     this.boxMesh(x + 0.15, y + 0.15, 1.35, 0.25, 0.35, 0.08, 0xdff3ff);
@@ -1016,14 +1136,14 @@ export class Office3D extends window.Office {
       this.boxMesh(0, 0, z0, w, 0.06, hh, 0xd6efe6, { group: pv, rough: 0.6 });
       this.boxMesh(w - 0.095, 0.06, z0 + hh * 0.35, 0.035, 0.04, Math.min(0.5, hh * 0.45), 0xf6f1e8, { group: pv }); // handle
       this.boxMesh(0.08, -0.07, z0 + hh * 0.3, w - 0.16, 0.07, 0.035, 0xe4f1f8, { group: pv, round: false }); // door bin
-      this.room.add(pv);
+      this.addToFloor(pv);
       return this.addDoor(pv, null, null, 1.75, { auto, sign: -1 });
     };
     const main = door(0.12, 1.18, 'fridge');
     door(1.32, 0.61, null);
     const l = new THREE.PointLight(0xe8f6ff, 0, 2.4, 2);
     l.position.set(x + w / 2, 1.0, y + d + 0.15);
-    this.room.add(l);
+    this.addToFloor(l);
     this.fridge = { main, light: l, liner };
   }
 
@@ -1043,7 +1163,7 @@ export class Office3D extends window.Office {
     liquid.position.y = 0.006; liquid.scale.y = 0.001;
     mug.add(cup, base, handle, liquid);
     mug.visible = false;
-    this.room.add(mug);
+    this.addToFloor(mug);
     this.coffee = { mug, liquid, x, z, t0: -99 };
   }
 
@@ -1071,7 +1191,7 @@ export class Office3D extends window.Office {
     const bodyM = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.07, 3, 6), new THREE.MeshStandardMaterial({ color: 0x6b5a7a }));
     bodyM.rotation.x = Math.PI / 2; bodyM.raycast = () => {};
     g.add(bodyM);
-    this.room.add(g);
+    this.addToFloor(g);
     const fly = this.haloSprite('255,240,140', cx, 1.2, cz, 0.45);
     this.butterfly = { g, wings, fly, cx, cz, rx: Math.max(0.6, rx), rz: Math.max(0.6, rz) };
   }
@@ -1748,20 +1868,24 @@ export class Office3D extends window.Office {
 
   fitCamera3D(reset) {
     const { W, D } = this.plan;
-    const center = new THREE.Vector3(W / 2, 0.6, D / 2);
+    const fy = (this.viewFloor || 0) * LEVEL_H;
+    const multi = !this.plan.scene && this.floors3d && Object.keys(this.floors3d).length > 1;
+    const center = new THREE.Vector3(W / 2, fy + 0.6, D / 2);
     if (reset || !this.fitted) {
-      const dist = 40;
+      const dist = multi ? 48 : 40;
       this.camera.position.set(center.x + dist * 0.62, center.y + dist * 0.58, center.z + dist * 0.62);
       this.controls.target.copy(center);
-      this.camera.zoom = this.compact ? 1 : 1.25;
+      this.camera.zoom = this.compact ? 1 : (multi ? 1.05 : 1.25);
       this.fitted = true;
     }
     this.camera.lookAt(this.controls.target);
     this.camera.updateMatrixWorld(true);
-    // Fit the room's corners into the view.
+    // Fit the room's corners into the view (include stacked floors when present).
     const inv = this.camera.matrixWorldInverse;
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const x of [0, W]) for (const y of [this.plan.scene ? 0 : -FLOOR_T, this.plan.viewH || WALL_H]) for (const z of [0, D]) {
+    const yLo = this.plan.scene ? 0 : (multi ? -LEVEL_H - FLOOR_T : -FLOOR_T);
+    const yHi = this.plan.viewH || (multi ? LEVEL_H + WALL_H : WALL_H);
+    for (const x of [0, W]) for (const y of [yLo, yHi]) for (const z of [0, D]) {
       const v = new THREE.Vector3(x, y, z).applyMatrix4(inv);
       minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x); minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
     }
@@ -1773,12 +1897,12 @@ export class Office3D extends window.Office {
     const cxv = (minX + maxX) / 2, cyv = (minY + maxY) / 2;
     Object.assign(this.camera, { left: cxv - w / 2, right: cxv + w / 2, top: cyv + h / 2, bottom: cyv - h / 2 });
     this.camera.updateProjectionMatrix();
-    // Sun casts shadows over the whole room.
-    this.sun.position.set(center.x - 6, 14, center.z - 3);
+    // Sun casts shadows over the whole stack.
+    this.sun.position.set(center.x - 6, fy + (multi ? 18 : 14), center.z - 3);
     this.sun.target.position.copy(center);
     const sc = this.sun.shadow.camera;
     const r = Math.max(W, D) * 0.75;
-    Object.assign(sc, { left: -r, right: r, top: r, bottom: -r, near: 1, far: 50 });
+    Object.assign(sc, { left: -r, right: r, top: r + (multi ? LEVEL_H : 0), bottom: -r - (multi ? LEVEL_H : 0), near: 1, far: multi ? 80 : 50 });
     sc.updateProjectionMatrix();
   }
 
@@ -1890,8 +2014,10 @@ export class Office3D extends window.Office {
       }
       a.last = { x: p.x, y: p.y };
       a.obj.rotation.y = a.yaw;
-      const seatY = st.pose === 'sit' ? this.seatHeight(p.x, p.y, st.sitZ)
-        : this.plan.terrain ? this.groundHeight(p.x, p.y) : 0;
+      const fl = this.floorOf(p);
+      const fy = (this.plan.scene ? 0 : fl) * LEVEL_H;
+      const seatY = st.pose === 'sit' ? this.seatHeight(p.x, p.y, st.sitZ, fl)
+        : this.plan.terrain ? this.groundHeight(p.x, p.y) : fy;
       // The sit pose's torso leans back past its origin; slide the body
       // forward so the back rests against the backrest instead of in it.
       const fwd = st.pose === 'sit' ? SIT_FORWARD * 0.4 : 0;
@@ -1904,8 +2030,9 @@ export class Office3D extends window.Office {
       }
       a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift, p.y + Math.cos(a.yaw) * fwd);
       this.animateBlob(a, p, st, this.t / 1000, dt);
-      // status-pill filter: non-matching blobs fade out
-      const want2 = filterMatch(p.s, this.filter) ? 1 : 0.16;
+      // status-pill filter + dim agents on other floors (still visible in the stack)
+      const onFloor = fl === (this.viewFloor || 0);
+      const want2 = filterMatch(p.s, this.filter) ? (onFloor ? 1 : 0.38) : 0.16;
       a.alpha = a.alpha ?? 1;
       if (Math.abs(a.alpha - want2) > 0.005) {
         a.alpha += (want2 - a.alpha) * Math.min(1, dt * 8);
@@ -1970,12 +2097,13 @@ export class Office3D extends window.Office {
   // Kenney's `sit` clip is a sit-on-the-floor pose (seat at the model's
   // origin), so lift the character to whatever surface is under the seat
   // point: chair cushion, stool, sofa or beanbag. Measured once per spot.
-  seatHeight(x, y, fallback) {
-    const key = `${x.toFixed(2)},${y.toFixed(2)}`;
+  seatHeight(x, y, fallback, floor = 0) {
+    const fy = (this.plan.scene ? 0 : floor) * LEVEL_H;
+    const key = `${x.toFixed(2)},${y.toFixed(2)},${floor}`;
     this.seats = this.seats || new Map();
     if (this.seats.has(key)) return this.seats.get(key);
-    const best = this.surfaceBelow(x, y, 0.75);
-    const v = best > 0.05 ? best : fallback;
+    const best = this.surfaceBelow(x, y, fy + 0.75, fy + 1.35);
+    const v = best > fy + 0.05 ? best : fy + (fallback || 0);
     this.seats.set(key, v);
     return v;
   }
@@ -2092,12 +2220,14 @@ export class Office3D extends window.Office {
       if (!a) continue;
       const st = this.stateOf(p);
       const scale = p.s.subagent ? 0.8 : 1;
-      const base = this.plan.terrain && st.pose !== 'sit' ? this.groundHeight(p.x, p.y) : 0;
+      const fl = this.floorOf(p);
+      const floorY = (this.plan.scene ? 0 : fl) * LEVEL_H;
+      const base = this.plan.terrain && st.pose !== 'sit' ? this.groundHeight(p.x, p.y) : floorY;
       const floatUp = st.pose !== 'walk' && p.poi && p.poi.float ? 0.45 + Math.sin((this.t / 1000 + p.phase) * 0.9) * 0.18 : 0;
-      const top = (st.pose === 'sit' ? this.seatHeight(p.x, p.y, st.sitZ) + CHAR_HEIGHT * 0.8 * scale : base + CHAR_HEIGHT * scale) + floatUp;
+      const top = (st.pose === 'sit' ? this.seatHeight(p.x, p.y, st.sitZ, fl) + CHAR_HEIGHT * 0.8 * scale : base + CHAR_HEIGHT * scale) + floatUp;
       v.set(p.x, top + 0.05, p.y).project(this.camera);
       const sx = (v.x + 1) / 2 * this.cw, sy = (1 - v.y) / 2 * this.ch;
-      const foot = new THREE.Vector3(p.x, 0, p.y).project(this.camera);
+      const foot = new THREE.Vector3(p.x, floorY, p.y).project(this.camera);
       const fy = (1 - foot.y) / 2 * this.ch;
       heads.push([p, { x: sx, y: sy, act: st.act }, v.z]);
       this.hit.push({ key: p.key, x0: sx - 18, x1: sx + 18, y0: sy - 24, y1: fy + 4 });
