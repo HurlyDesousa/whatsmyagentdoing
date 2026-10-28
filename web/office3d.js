@@ -15,23 +15,52 @@ const FURNITURE = ['desk', 'chairDesk', 'computerScreen', 'computerKeyboard', 'c
   'lampRoundFloor', 'lampSquareTable', 'televisionModern', 'cabinetTelevision', 'trashcan',
   'coatRackStanding', 'radio', 'speaker', 'toaster', 'cardboardBoxClosed'];
 
-// Soft flat Grok Bot sidebar blobs: purple triangle, red drop, green cloud,
-// orange oval, brown oval, pink wedge — each with two black oval eyes.
+// Soft flat Grok Bot sidebar blobs. Named crew get fixed shape+colour;
+// everyone else hashes across the remaining variants.
 const GROK_BLOBS = [
   { kind: 'triangle', color: 0x9b5cff },
   { kind: 'drop', color: 0xe84545 },
   { kind: 'cloud', color: 0x4ecf7a },
   { kind: 'oval', color: 0xff8a3d, rx: 0.42, ry: 0.52 },
-  { kind: 'oval', color: 0x8b5e3c, rx: 0.48, ry: 0.4 },
+  { kind: 'bean', color: 0x8b5e3c, rx: 0.5, ry: 0.38 },
   { kind: 'wedge', color: 0xff6fae },
+  { kind: 'squircle', color: 0xff9f43 },
+  { kind: 'tablet', color: 0x7a5340 },
+];
+
+// Hurly crew map (prefer over hash). Paperclip agents outside this list keep
+// other variants; hash fallback skips these six reserved pairs.
+const CREW_BLOB_MAP = [
+  { re: /\bchief\b/i, kind: 'wedge', color: 0x8b5cff },       // violet wedge
+  { re: /\bmonitor\b/i, kind: 'squircle', color: 0xff8a3d },  // orange squircle
+  { re: /\bproxmox\b/i, kind: 'cloud', color: 0x4ecf7a },     // green cloud
+  { re: /\bdockhand\b/i, kind: 'wedge', color: 0xe84d9a },   // magenta wedge
+  { re: /\btruenas\b/i, kind: 'tablet', color: 0x8b5e3c },   // brown tablet
+  { re: /\bdoc(?:ument)?\b/i, kind: 'drop', color: 0xe84545 }, // red teardrop
 ];
 
 const STATUS_COLOR = {
   thinking: 0x8b6be6, tool: 0x3b8ee0, typing: 0x22a874, waiting: 0xe09412, error: 0xde4b40,
 };
-const CHAR_HEIGHT = 0.92; // world units (≈ tiles)
+const CHAR_HEIGHT = 0.74; // desk-friendly blob scale (was ~0.92)
 const WALL_H = 2.4;
-const SIT_FORWARD = 0.1;
+const SIT_FORWARD = 0.14; // nudge into the desk surface while seated
+
+function sameBlobPair(a, b) {
+  return a.kind === b.kind && (a.color >>> 0) === (b.color >>> 0);
+}
+
+function blobDefForPerson(p) {
+  const label = `${p?.s?.title || ''} ${p?.s?.prompt || ''} ${p?.key || ''}`;
+  for (const row of CREW_BLOB_MAP) {
+    if (row.re.test(label)) return { kind: row.kind, color: row.color };
+  }
+  const reserved = CREW_BLOB_MAP.map((r) => ({ kind: r.kind, color: r.color }));
+  const pool = GROK_BLOBS.filter((b) => !reserved.some((r) => sameBlobPair(b, r)));
+  const list = pool.length ? pool : GROK_BLOBS;
+  const h = (p?.h >>> 0) || 0;
+  return list[h % list.length];
+}
 
 function blobExtrude(shape, depth = 0.2) {
   const geo = new THREE.ExtrudeGeometry(shape, {
@@ -84,6 +113,18 @@ function makeBlobBody(def) {
     s.quadraticCurveTo(0.42, 0.05, 0.5, -0.42);
     s.quadraticCurveTo(0, -0.56, -0.5, -0.42);
     s.quadraticCurveTo(-0.42, 0.05, 0, 0.56);
+  } else if (def.kind === 'squircle') {
+    const r = 0.46, k = 0.22;
+    s.moveTo(0, r);
+    s.bezierCurveTo(k, r, r, k, r, 0);
+    s.bezierCurveTo(r, -k, k, -r, 0, -r);
+    s.bezierCurveTo(-k, -r, -r, -k, -r, 0);
+    s.bezierCurveTo(-r, k, -k, r, 0, r);
+  } else if (def.kind === 'tablet' || def.kind === 'bean') {
+    const rx = def.rx || (def.kind === 'tablet' ? 0.36 : 0.5);
+    const ry = def.ry || (def.kind === 'tablet' ? 0.48 : 0.38);
+    const pts = new THREE.EllipseCurve(0, 0, rx, ry, 0, Math.PI * 2, false, 0).getPoints(36);
+    s.setFromPoints(pts);
   } else {
     const rx = def.rx || 0.42, ry = def.ry || 0.52;
     const pts = new THREE.EllipseCurve(0, 0, rx, ry, 0, Math.PI * 2, false, 0).getPoints(36);
@@ -95,21 +136,31 @@ function makeBlobBody(def) {
   return mesh;
 }
 
-function createGrokBlob(index) {
-  const def = GROK_BLOBS[((index % GROK_BLOBS.length) + GROK_BLOBS.length) % GROK_BLOBS.length];
+function createGrokBlob(defOrIndex) {
+  const def = typeof defOrIndex === 'object' && defOrIndex
+    ? defOrIndex
+    : GROK_BLOBS[((((defOrIndex || 0) % GROK_BLOBS.length) + GROK_BLOBS.length) % GROK_BLOBS.length)];
   const root = new THREE.Group();
   const body = makeBlobBody(def);
   root.add(body);
 
   const eyeMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.35 });
-  const eyeGeo = new THREE.SphereGeometry(0.075, 14, 12);
-  eyeGeo.scale(0.72, 1.2, 0.55);
+  const eyeGeo = new THREE.SphereGeometry(0.07, 14, 12);
+  eyeGeo.scale(0.62, 1.35, 0.5); // vertical oval eyes
   const left = new THREE.Mesh(eyeGeo, eyeMat);
   const right = new THREE.Mesh(eyeGeo.clone(), eyeMat);
-  left.position.set(-0.12, 0.06, 0.14);
-  right.position.set(0.12, 0.06, 0.14);
+  left.position.set(-0.11, 0.05, 0.14);
+  right.position.set(0.11, 0.05, 0.14);
   left.castShadow = true;
   right.castShadow = true;
+  const glintMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const glintGeo = new THREE.SphereGeometry(0.018, 8, 6);
+  const glintL = new THREE.Mesh(glintGeo, glintMat);
+  const glintR = new THREE.Mesh(glintGeo.clone(), glintMat);
+  glintL.position.set(-0.03, 0.03, 0.045);
+  glintR.position.set(-0.03, 0.03, 0.045);
+  left.add(glintL);
+  right.add(glintR);
   const eyes = new THREE.Group();
   eyes.add(left, right);
   root.add(eyes);
@@ -123,11 +174,21 @@ function createGrokBlob(index) {
   sheen.scale.set(1.4, 0.7, 0.5);
   root.add(sheen);
 
+  // Soft floor glow disc (parented; follows the blob).
+  const glow = new THREE.Mesh(
+    new THREE.CircleGeometry(0.28, 24),
+    new THREE.MeshBasicMaterial({ color: def.color, transparent: true, opacity: 0.22, depthWrite: false }),
+  );
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.y = 0.01;
+  root.add(glow);
+
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(root);
   const h = Math.max(0.01, box.max.y - box.min.y);
   root.position.y = -box.min.y;
-  return { root, body, eyes, leftEye: left, rightEye: right, color: def.color, kind: def.kind, nativeH: h };
+  glow.position.y = box.min.y + 0.015;
+  return { root, body, eyes, leftEye: left, rightEye: right, glow, color: def.color, kind: def.kind, nativeH: h };
 }
 
 // Turn a scene manifest into the floor plan the shared simulation uses:
@@ -158,11 +219,12 @@ function scenePlan(def) {
 }
 
 function skyNow() {
+  // Tuned toward the Grok Bot Office / 0xRafy day–night look.
   const h = new Date().getHours() + new Date().getMinutes() / 60;
-  if (h >= 7 && h < 17) return { sky: 0xa9d4f2, sun: 1.7, amb: 1.15, night: false };
-  if (h >= 5 && h < 7) return { sky: 0xf3c9a8, sun: 1.1, amb: 0.8, night: false };
-  if (h >= 17 && h < 19) return { sky: 0xf0a679, sun: 1.0, amb: 0.75, night: false };
-  return { sky: 0x1d2747, sun: 0.9, amb: 1.05, night: true };
+  if (h >= 7 && h < 17) return { sky: 0xb7daf5, sun: 1.55, amb: 1.22, night: false };
+  if (h >= 5 && h < 7) return { sky: 0xf6c9b0, sun: 1.05, amb: 0.85, night: false };
+  if (h >= 17 && h < 19) return { sky: 0xf0a888, sun: 0.95, amb: 0.78, night: false };
+  return { sky: 0x152038, sun: 0.7, amb: 0.95, night: true };
 }
 
 // The scene pack for the instance being constructed. The base constructor
@@ -204,10 +266,10 @@ export class Office3D extends window.Office {
     this.controls.screenSpacePanning = true;
     this.controls.zoomToCursor = true;
 
-    // Softer pastel keying closer to the 0xRafy Grok office demo.
-    this.hemi = new THREE.HemisphereLight(0xffeaf5, 0xb09a88, 1.2);
+    // Soft keying closer to the 0xRafy Grok office demo (warm day / cool night).
+    this.hemi = new THREE.HemisphereLight(0xffe8f2, 0xa8927c, 1.25);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xfff2e4, 1.35);
+    this.sun = new THREE.DirectionalLight(0xfff1e2, 1.3);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0006;
@@ -344,35 +406,35 @@ export class Office3D extends window.Office {
       m.receiveShadow = true;
       this.room.add(m);
     };
+    // Tan office planks + soft slate pantry tiles (0xRafy / Grok office).
     const planks = this.patternTexture((c, s) => {
-      c.fillStyle = dark ? '#4a3f35' : '#e3cfb0'; c.fillRect(0, 0, s, s);
-      c.strokeStyle = dark ? 'rgba(0,0,0,.25)' : 'rgba(120,90,50,.18)'; c.lineWidth = 2;
+      c.fillStyle = dark ? '#3f3830' : '#e2c9a4'; c.fillRect(0, 0, s, s);
+      c.strokeStyle = dark ? 'rgba(0,0,0,.28)' : 'rgba(120,90,50,.16)'; c.lineWidth = 2;
       for (let i = 0; i <= 4; i++) { c.beginPath(); c.moveTo(0, i * s / 4); c.lineTo(s, i * s / 4); c.stroke(); }
       for (let i = 0; i < 4; i++) { const x = ((i * 37) % 4 + 0.5) * s / 4; c.beginPath(); c.moveTo(x, i * s / 4); c.lineTo(x, (i + 1) * s / 4); c.stroke(); }
     });
     const tiles = this.patternTexture((c, s) => {
-      c.fillStyle = dark ? '#3d4044' : '#f4f4f1'; c.fillRect(0, 0, s, s);
-      c.fillStyle = dark ? '#35383c' : '#e3e4e0'; c.fillRect(0, 0, s / 2, s / 2); c.fillRect(s / 2, s / 2, s / 2, s / 2);
+      c.fillStyle = dark ? '#343a44' : '#d9dde6'; c.fillRect(0, 0, s, s);
+      c.fillStyle = dark ? '#2c323c' : '#c8ceda'; c.fillRect(0, 0, s / 2, s / 2); c.fillRect(s / 2, s / 2, s / 2, s / 2);
     });
     planks.repeat.set(OW / 2, D / 2);
     floor(0, 0, OW, D, 0xffffff, planks);
-    floor(OW, 0, W - OW, MR, dark ? 0x33404d : 0xc9d3dc);
+    floor(OW, 0, W - OW, MR, dark ? 0x2a3340 : 0xb8c6d8);
     tiles.repeat.set((W - OW), (PY - MR));
     floor(OW, MR, W - OW, PY - MR, 0xffffff, tiles);
     const planks2 = planks.clone(); planks2.needsUpdate = true; planks2.repeat.set((W - OW) / 2, (D - PY) / 2);
     floor(OW, PY, W - OW, D - PY, 0xffffff, planks2);
     const pp = plan.pp;
-    const mat = new THREE.Mesh(new THREE.PlaneGeometry(pp.x1 - pp.x0 + 1.2, 2.7), new THREE.MeshStandardMaterial({ color: dark ? 0x2f4a3a : 0xbfd8c4, roughness: 1 }));
+    const mat = new THREE.Mesh(new THREE.PlaneGeometry(pp.x1 - pp.x0 + 1.2, 2.7), new THREE.MeshStandardMaterial({ color: dark ? 0x24362f : 0xa8d4c0, roughness: 1 }));
     mat.rotation.x = -Math.PI / 2; mat.position.set((pp.x0 + pp.x1) / 2, 0.005, pp.y - 0.05); mat.receiveShadow = true;
     this.room.add(mat);
 
-    // walls: back (z=0) with windows, left (x=0) with a door
-    const wallCol = dark ? 0x4a4640 : 0xf7f1ea;
-    const wallMat = new THREE.MeshStandardMaterial({ color: wallCol, roughness: 0.95 });
+    // Slate walls (day soft blue-gray; night deeper slate).
+    const wallMat = new THREE.MeshStandardMaterial({ color: dark ? 0x3a414c : 0xd8dee8, roughness: 0.95 });
     const T = 0.12;
     let cx = -T;
     const sky = skyNow();
-    this.windowMat = new THREE.MeshStandardMaterial({ color: sky.sky, emissive: sky.sky, emissiveIntensity: 0.6 });
+    this.windowMat = new THREE.MeshStandardMaterial({ color: sky.sky, emissive: sky.sky, emissiveIntensity: sky.night ? 0.35 : 0.55 });
     for (const wx of plan.windows) {
       this.boxMesh(cx, -T, 0, wx - cx, T, WALL_H, 0, { mat: wallMat });
       this.boxMesh(wx, -T, 0, 1.5, T, 0.85, 0, { mat: wallMat });
@@ -380,8 +442,8 @@ export class Office3D extends window.Office {
       const glass = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.15), this.windowMat);
       glass.position.set(wx + 0.75, 1.425, -T / 2);
       this.room.add(glass);
-      this.boxMesh(wx + 0.73, -0.02, 0.85, 0.04, 0.04, 1.15, dark ? 0x2b2926 : 0xcfc5b3);
-      this.boxMesh(wx, -0.02, 0.83, 1.5, 0.1, 0.04, dark ? 0x2b2926 : 0xcfc5b3);
+      this.boxMesh(wx + 0.73, -0.02, 0.85, 0.04, 0.04, 1.15, dark ? 0x23262c : 0xb4bcc8);
+      this.boxMesh(wx, -0.02, 0.83, 1.5, 0.1, 0.04, dark ? 0x23262c : 0xb4bcc8);
       cx = wx + 1.5;
     }
     this.boxMesh(cx, -T, 0, W - cx, T, WALL_H, 0, { mat: wallMat });
@@ -389,8 +451,11 @@ export class Office3D extends window.Office {
     this.boxMesh(-T, -T, 0, T, dy - 0.6 + T, WALL_H, 0, { mat: wallMat });
     this.boxMesh(-T, dy + 0.6, 0, T, D - dy - 0.6, WALL_H, 0, { mat: wallMat });
     this.boxMesh(-T, dy - 0.6, 1.8, T, 1.2, WALL_H - 1.8, 0, { mat: wallMat });
+    // Magenta door glow (Grok office accent).
     this.boxMesh(-T + 0.02, dy - 0.55, 0, 0.06, 1.1, 1.78, dark ? 0x5c4431 : 0xa8825a);
-    this.boxMesh(0, dy - 0.6, 0, 0.9, 1.2, 0.01, dark ? 0x5a3b2e : 0xb9654a, { shadow: false });
+    this.boxMesh(0, dy - 0.6, 0, 0.9, 1.2, 0.01, dark ? 0x7a2f6a : 0xe85bb8, {
+      shadow: false, emissive: dark ? 0x7a2f6a : 0xe85bb8, ei: sky.night ? 1.4 : 0.55,
+    });
     // posters + whiteboard
     for (const ps of plan.posters) {
       const m = this.textPlane(ps.text, ps.color, 0.9, 1.0);
@@ -1092,7 +1157,7 @@ export class Office3D extends window.Office {
   actorFor(p) {
     let a = this.actors.get(p.key);
     if (a) return a;
-    const blob = createGrokBlob(p.h);
+    const blob = createGrokBlob(blobDefForPerson(p));
     const obj = blob.root;
     const targetH = CHAR_HEIGHT * (p.s && p.s.subagent ? 0.8 : 1);
     obj.scale.setScalar(targetH / blob.nativeH);
@@ -1120,7 +1185,10 @@ export class Office3D extends window.Office {
     if (st.pose === 'walk') return null;
     if (p.mode === 'work' && p.desk) {
       if (p.desk.yaw != null) return p.desk.yaw;
-      return p.desk.side === 'n' ? 0 : Math.PI;
+      // North-desk seats sit south of the desk; yaw 0 aimed eyes into the
+      // desk and showed backs to the SE camera. Face the camera (Math.PI)
+      // so eyes read like Medium 2D `front` for side === 'n'.
+      return Math.PI;
     }
     const q = p.poi;
     if (!q) return null;
@@ -1163,7 +1231,14 @@ export class Office3D extends window.Office {
       a.last = { x: p.x, y: p.y };
       const seatY = st.pose === 'sit' ? this.seatHeight(p.x, p.y, st.sitZ)
         : this.plan.terrain ? this.groundHeight(p.x, p.y) : 0;
-      const fwd = st.pose === 'sit' ? SIT_FORWARD : 0;
+      // Sit nudge toward the desk surface (independent of camera-facing yaw).
+      let sitOx = 0, sitOz = 0;
+      if (st.pose === 'sit' && p.desk) {
+        sitOz = p.desk.side === 'n' ? SIT_FORWARD : -SIT_FORWARD;
+      } else if (st.pose === 'sit') {
+        sitOx = Math.sin(a.yaw) * SIT_FORWARD;
+        sitOz = Math.cos(a.yaw) * SIT_FORWARD;
+      }
       let lift = 0;
       if (st.pose !== 'walk' && p.poi && p.poi.float) {
         const k = this.t / 1000 + p.phase;
@@ -1177,25 +1252,27 @@ export class Office3D extends window.Office {
       let sx = a.baseScale, sy = a.baseScale, sz = a.baseScale;
       let tiltX = 0, tiltZ = 0;
       if (st.pose === 'walk') {
-        bob = Math.abs(Math.sin(t * 10)) * 0.06;
-        tiltZ = Math.sin(t * 10) * 0.12;
-        sy = a.baseScale * (1 + Math.sin(t * 10) * 0.04);
+        bob = Math.abs(Math.sin(t * 10)) * 0.05;
+        tiltZ = Math.sin(t * 10) * 0.1;
+        sy = a.baseScale * (1 + Math.sin(t * 10) * 0.035);
       } else if (st.pose === 'sit') {
-        sy = a.baseScale * 0.86;
-        sx = sz = a.baseScale * 1.06;
-        tiltX = 0.18;
+        sy = a.baseScale * 0.9;
+        sx = sz = a.baseScale * 1.04;
+        tiltX = 0.08; // light lean; eyes stay camera-readable
       } else if (a.current === 'emote-yes') {
+        // Hop when waiting / waving.
         tiltZ = Math.sin(t * 9) * 0.35;
-        bob = Math.abs(Math.sin(t * 9)) * 0.04;
+        bob = Math.abs(Math.sin(t * 9)) * 0.06;
+        sy = a.baseScale * (1 + Math.abs(Math.sin(t * 9)) * 0.06);
       } else if (String(a.current).startsWith('interact') || a.current === 'holding-right' || a.current === 'holding-both') {
-        tiltX = 0.22 + Math.sin(t * 6) * 0.06;
+        tiltX = 0.18 + Math.sin(t * 6) * 0.05;
         bob = Math.sin(t * 3) * 0.015;
       } else if (st.act === 'nap') {
         tiltX = 0.85;
-        sy = a.baseScale * 0.75;
-        sx = sz = a.baseScale * 1.12;
+        sy = a.baseScale * 0.72;
+        sx = sz = a.baseScale * 1.14;
       } else {
-        bob = Math.sin(t * 2.2) * 0.02;
+        bob = Math.sin(t * 2.2) * 0.025; // float / bob idle
       }
       // Blink: squash eyes occasionally.
       const blink = Math.sin(t * 0.65) > 0.97;
@@ -1206,7 +1283,7 @@ export class Office3D extends window.Office {
       }
       a.obj.scale.set(sx, sy, sz);
       a.obj.rotation.set(tiltX, a.yaw, tiltZ);
-      a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift + bob, p.y + Math.cos(a.yaw) * fwd);
+      a.obj.position.set(p.x + sitOx, seatY + lift + bob, p.y + sitOz);
 
       // hand-held props float beside the blob
       a.cup.visible = st.act === 'coffee' || st.act === 'water' || (st.pose !== 'walk' && p.poi && p.poi.prop === 'cup');
@@ -1297,12 +1374,18 @@ export class Office3D extends window.Office {
     const sky = skyNow();
     this.sun.intensity = sky.sun;
     this.hemi.intensity = sky.amb;
+    if (this.hemi) {
+      this.hemi.color.setHex(sky.night ? 0xc9b8e8 : 0xffe8f2);
+      this.hemi.groundColor.setHex(sky.night ? 0x3a3348 : 0xa8927c);
+    }
+    if (this.sun) this.sun.color.setHex(sky.night ? 0xb0c4ff : 0xfff1e2);
     if (this.windowMat) {
       this.windowMat.color.setHex(sky.sky);
       this.windowMat.emissive.setHex(sky.sky);
+      this.windowMat.emissiveIntensity = sky.night ? 0.35 : 0.55;
     }
     if (this.plan.scene) this.animateScene(t, sky);
-    if (this.lampLight) this.lampLight.intensity = sky.night ? 2.2 : 0;
+    if (this.lampLight) this.lampLight.intensity = sky.night ? 2.6 : 0.35;
 
     // screens show who is working and on what
     const occupant = new Map();

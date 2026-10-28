@@ -42,9 +42,32 @@
     { kind: 'drop', color: '#e84545' },
     { kind: 'cloud', color: '#4ecf7a' },
     { kind: 'oval', color: '#ff8a3d' },
-    { kind: 'oval-wide', color: '#8b5e3c' },
+    { kind: 'bean', color: '#8b5e3c' },
     { kind: 'wedge', color: '#ff6fae' },
+    { kind: 'squircle', color: '#ff9f43' },
+    { kind: 'tablet', color: '#7a5340' },
   ];
+
+  // Hurly crew map. Hash fallback skips these reserved pairs.
+  const CREW_BLOB_MAP = [
+    { re: /\bchief\b/i, kind: 'wedge', color: '#8b5cff' },
+    { re: /\bmonitor\b/i, kind: 'squircle', color: '#ff8a3d' },
+    { re: /\bproxmox\b/i, kind: 'cloud', color: '#4ecf7a' },
+    { re: /\bdockhand\b/i, kind: 'wedge', color: '#e84d9a' },
+    { re: /\btruenas\b/i, kind: 'tablet', color: '#8b5e3c' },
+    { re: /\bdoc(?:ument)?\b/i, kind: 'drop', color: '#e84545' },
+  ];
+
+  function blobForSession(s, h) {
+    const label = `${s?.title || ''} ${s?.prompt || ''} ${s?.key || ''}`;
+    for (const row of CREW_BLOB_MAP) {
+      if (row.re.test(label)) return { kind: row.kind, color: row.color };
+    }
+    const reserved = new Set(CREW_BLOB_MAP.map((r) => `${r.kind}:${r.color}`));
+    const pool = GROK_BLOBS.filter((b) => !reserved.has(`${b.kind}:${b.color}`));
+    const list = pool.length ? pool : GROK_BLOBS;
+    return list[(h >>> 0) % list.length];
+  }
 
   const STATUS_COLOR = {
     thinking: '#8b6be6', tool: '#3b8ee0', typing: '#22a874', waiting: '#e09412',
@@ -67,40 +90,43 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
   function palette() {
+    // Tan tiles, slate walls, white desks, teal sofa, navy rug, terracotta pots.
     const dark = matchMedia('(prefers-color-scheme: dark)').matches;
     return dark ? {
       dark: true,
-      wood1: '#4a3f35', wood2: '#453a31', woodLine: 'rgba(0,0,0,.22)',
-      tileA: '#3d4044', tileB: '#35383c', carpet: '#33404d', carpetLine: 'rgba(255,255,255,.04)',
-      wallL: '#4a4640', wallR: '#3f3b36', wallTop: '#5a554e', trim: '#2b2926',
-      deskTop: '#8a6a4c', deskL: '#6e533b', deskR: '#5c4431',
+      wood1: '#3f3830', wood2: '#38322b', woodLine: 'rgba(0,0,0,.25)',
+      tileA: '#343a44', tileB: '#2c323c', carpet: '#2a3340', carpetLine: 'rgba(255,255,255,.05)',
+      wallL: '#3a414c', wallR: '#323943', wallTop: '#4a5260', trim: '#23262c',
+      deskTop: '#e8e6e1', deskL: '#c9c6bf', deskR: '#b0ada6',
       monitor: '#18181a', screenOff: '#26282c', chair: '#2d2d32',
-      rug: '#47544f', rugEdge: '#3a4541', couch: '#5b6b8c', couchD: '#4a587a',
+      rug: '#24325a', rugEdge: '#1a2444', couch: '#2f8f8a', couchD: '#247470',
       counter: '#d9d4c9', counterL: '#a9a397', counterR: '#958f84', metal: '#8d939a',
-      glass: 'rgba(160,200,230,.10)', glassEdge: 'rgba(190,220,240,.35)', mat: '#2f4a3a',
+      glass: 'rgba(160,200,230,.10)', glassEdge: 'rgba(190,220,240,.35)', mat: '#24362f',
       text: '#ecebe6', tagBg: 'rgba(20,20,19,.78)', bubble: '#f4f3ee', bubbleInk: '#1c1c1a',
-      plant: '#4f8a52', pot: '#9a5b3c', shadow: 'rgba(0,0,0,.28)', book: ['#c96442', '#3b8ee0', '#5f9a4c', '#c9a24c', '#8b6be6'],
+      plant: '#4f8a52', pot: '#b06a45', shadow: 'rgba(0,0,0,.28)', lamp: '#f0c84a',
+      doorGlow: '#e85bb8', book: ['#c96442', '#3b8ee0', '#5f9a4c', '#c9a24c', '#8b6be6'],
     } : {
       dark: false,
-      wood1: '#e6d3b6', wood2: '#dfcaab', woodLine: 'rgba(120,90,50,.12)',
-      tileA: '#f4f4f1', tileB: '#e6e7e3', carpet: '#c9d3dc', carpetLine: 'rgba(0,0,0,.035)',
-      wallL: '#f4efe6', wallR: '#e8e1d4', wallTop: '#fbf8f2', trim: '#cfc5b3',
-      deskTop: '#c89f72', deskL: '#a8825a', deskR: '#946f4b',
+      wood1: '#e2c9a4', wood2: '#d9bf98', woodLine: 'rgba(120,90,50,.14)',
+      tileA: '#d9dde6', tileB: '#c8ceda', carpet: '#b8c6d8', carpetLine: 'rgba(0,0,0,.04)',
+      wallL: '#d8dee8', wallR: '#c9d0dc', wallTop: '#e8edf5', trim: '#b4bcc8',
+      deskTop: '#f7f7f4', deskL: '#e4e4df', deskR: '#d2d2cc',
       monitor: '#2a2a2e', screenOff: '#3a3d44', chair: '#4a4a52',
-      rug: '#c4d4cb', rugEdge: '#a9bcb1', couch: '#7d93c4', couchD: '#6a80b0',
+      rug: '#2c3f78', rugEdge: '#1f2e5c', couch: '#3aa8a1', couchD: '#2f8f88',
       counter: '#fbfaf7', counterL: '#d9d4c9', counterR: '#c9c3b6', metal: '#b5bcc4',
-      glass: 'rgba(170,210,235,.16)', glassEdge: 'rgba(120,160,190,.55)', mat: '#bfd8c4',
+      glass: 'rgba(170,210,235,.16)', glassEdge: 'rgba(120,160,190,.55)', mat: '#a8d4c0',
       text: '#1c1c1a', tagBg: 'rgba(255,255,255,.9)', bubble: '#ffffff', bubbleInk: '#1c1c1a',
-      plant: '#5a9b5d', pot: '#b86f4b', shadow: 'rgba(60,40,20,.18)', book: ['#c96442', '#3b8ee0', '#5f9a4c', '#c9a24c', '#8b6be6'],
+      plant: '#5a9b5d', pot: '#c57a4e', shadow: 'rgba(60,40,20,.18)', lamp: '#f5d15a',
+      doorGlow: '#e85bb8', book: ['#c96442', '#3b8ee0', '#5f9a4c', '#c9a24c', '#8b6be6'],
     };
   }
 
   function skyColor(d = new Date()) {
     const h = d.getHours() + d.getMinutes() / 60;
-    if (h >= 7 && h < 17) return { sky: '#a9d4f2', night: false };
-    if (h >= 5 && h < 7) return { sky: '#f3c9a8', night: false };
-    if (h >= 17 && h < 19) return { sky: '#f0a679', night: false };
-    return { sky: '#1d2747', night: true };
+    if (h >= 7 && h < 17) return { sky: '#b7daf5', night: false };
+    if (h >= 5 && h < 7) return { sky: '#f6c9b0', night: false };
+    if (h >= 17 && h < 19) return { sky: '#f0a888', night: false };
+    return { sky: '#152038', night: true };
   }
 
   // ---------------------------------------------------------------- A* grid
@@ -298,8 +324,9 @@
         const panel = PANEL[p % PANEL.length];
         for (let k = 0; k < 2; k++) {
           const x = px + k * 1.5;
-          desks.push({ x, y: py, side: 'n', seat: { x: x + 0.7, y: py - 0.45 } });
-          desks.push({ x, y: py + 0.92, side: 's', seat: { x: x + 0.7, y: py + 0.92 + 1.25 } });
+          // Tighter seat→desk gap so blobs sit into the desk, not in the aisle.
+          desks.push({ x, y: py, side: 'n', seat: { x: x + 0.7, y: py - 0.38 } });
+          desks.push({ x, y: py + 0.92, side: 's', seat: { x: x + 0.7, y: py + 0.92 + 1.12 } });
           solid(x, py, 1.4, 0.8, 0.08);
           solid(x, py + 0.92, 1.4, 0.8, 0.08);
         }
@@ -796,7 +823,7 @@
       this.poly([P(0, dy - 0.6, 0), P(0, dy + 0.6, 0), P(0, dy + 0.6, 1.8), P(0, dy - 0.6, 1.8)], pal.trim);
       this.poly([P(0, dy - 0.52, 0), P(0, dy + 0.52, 0), P(0, dy + 0.52, 1.72), P(0, dy - 0.52, 1.72)], this.shade(pal.deskL, -10));
       this.onWall('x0', dy - 0.25, 0.85, (c) => { c.fillStyle = '#d8c48a'; c.beginPath(); c.arc(0, 0, 1.8, 0, Math.PI * 2); c.fill(); });
-      this.poly([P(0.05, dy - 0.6), P(0.9, dy - 0.6), P(0.9, dy + 0.6), P(0.05, dy + 0.6)], pal.dark ? '#5a3b2e' : '#b9654a');
+      this.poly([P(0.05, dy - 0.6), P(0.9, dy - 0.6), P(0.9, dy + 0.6), P(0.05, dy + 0.6)], pal.doorGlow || '#e85bb8');
     }
 
     // ------------------------------------------------------------ furniture
@@ -985,7 +1012,7 @@
       c.strokeStyle = '#333'; c.lineWidth = 2;
       c.beginPath(); c.moveTo(b.x, b.y); c.lineTo(t.x, t.y); c.stroke();
       c.fillStyle = '#333'; c.beginPath(); c.ellipse(b.x, b.y, 7, 3.5, 0, 0, Math.PI * 2); c.fill();
-      c.fillStyle = '#f3e3b5';
+      c.fillStyle = this.pal.lamp || '#f5d15a';
       c.beginPath(); c.moveTo(t.x - 9, t.y + 4); c.lineTo(t.x + 9, t.y + 4); c.lineTo(t.x + 5, t.y - 8); c.lineTo(t.x - 5, t.y - 8); c.closePath(); c.fill();
     }
 
@@ -1186,7 +1213,16 @@
         c.quadraticCurveTo(12, 0, 13, 12);
         c.quadraticCurveTo(0, 16, -13, 12);
         c.quadraticCurveTo(-12, 0, 0, -15);
-      } else if (kind === 'oval-wide') {
+      } else if (kind === 'squircle') {
+        const r = 12, k = 5.5;
+        c.moveTo(0, -r);
+        c.bezierCurveTo(k, -r, r, -k, r, 0);
+        c.bezierCurveTo(r, k, k, r, 0, r);
+        c.bezierCurveTo(-k, r, -r, k, -r, 0);
+        c.bezierCurveTo(-r, -k, -k, -r, 0, -r);
+      } else if (kind === 'tablet') {
+        c.roundRect(-9, -13, 18, 26, 4);
+      } else if (kind === 'bean' || kind === 'oval-wide') {
         c.ellipse(0, 0, 13, 10, 0, 0, Math.PI * 2);
       } else {
         c.ellipse(0, 0, 11, 14, 0, 0, Math.PI * 2);
@@ -1220,14 +1256,21 @@
       const y = b.y - bob - (seated ? 2 : 8);
       if (st.act === 'pingpong') x += Math.sin(t * 7 + p.phase) * 4;
       if (st.act === 'foosball') x += Math.sin(t * 5 + p.phase) * 1.5;
-      const sc = s.subagent ? 0.8 : 1;
-      const blob = GROK_BLOBS[p.h % GROK_BLOBS.length];
+      const sc = (s.subagent ? 0.72 : 0.9);
+      const blob = blobForSession(s, p.h);
       c.save();
       c.translate(x, y);
       c.scale(sc, sc);
-      if (st.act === 'wave') c.rotate(Math.sin(t * 8 + p.phase) * 0.18);
+      if (st.act === 'wave') {
+        c.translate(0, -Math.abs(Math.sin(t * 9 + p.phase)) * 3);
+        c.rotate(Math.sin(t * 8 + p.phase) * 0.18);
+      }
       if (st.act === 'nap') { c.rotate(0.9); c.scale(1.08, 0.78); }
-      else if (seated) c.scale(1.05, 0.88);
+      else if (seated) c.scale(1.04, 0.9);
+
+      // Soft floor glow under the blob.
+      c.fillStyle = blob.color.length === 7 ? `${blob.color}33` : 'rgba(120,100,180,.18)';
+      c.beginPath(); c.ellipse(0, 14, 11, 4.5, 0, 0, Math.PI * 2); c.fill();
 
       this.fillGrokBlob(blob.kind, blob.color);
       // Soft top highlight
@@ -1238,9 +1281,15 @@
         const sleepy = s.status === 'idle';
         const blink = Math.sin(t * 0.7 + p.phase * 3) > 0.985;
         c.fillStyle = '#1a1a1a';
-        const eh = blink || sleepy ? 1.1 : 3.4;
-        c.beginPath(); c.ellipse(-3.6, -1, 2.1, eh / 2, 0, 0, Math.PI * 2); c.fill();
-        c.beginPath(); c.ellipse(3.6, -1, 2.1, eh / 2, 0, 0, Math.PI * 2); c.fill();
+        const eh = blink || sleepy ? 1.1 : 3.8;
+        c.beginPath(); c.ellipse(-3.6, -1, 1.9, eh / 2, 0, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.ellipse(3.6, -1, 1.9, eh / 2, 0, 0, Math.PI * 2); c.fill();
+        // White eye glints
+        if (!blink && !sleepy) {
+          c.fillStyle = '#ffffff';
+          c.beginPath(); c.ellipse(-4.2, -1.8, 0.7, 0.7, 0, 0, Math.PI * 2); c.fill();
+          c.beginPath(); c.ellipse(3.0, -1.8, 0.7, 0.7, 0, 0, Math.PI * 2); c.fill();
+        }
       }
 
       // Tiny props beside the blob (coffee / book) so wander acts still read.
