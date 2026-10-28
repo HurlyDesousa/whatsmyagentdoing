@@ -7,12 +7,12 @@ import * as THREE from 'three';
 // Named crew -> silhouette + colour. Keys match HurlyCrew session ids
 // (`grokbot:chief`, `paperclip:cm2`, …); names are matched as a fallback.
 export const CREW_LOOKS = {
-  chief: { shape: 'triangle', color: 0x8b5cf6 },     // Chief Master — purple triangle
-  proxmox: { shape: 'drop', color: 0xf0384a },       // Proxmox — red drop
-  monitor: { shape: 'cloud', color: 0x22c06a },      // Monitor Master — green cloud
-  dockhand: { shape: 'oval', color: 0xff7417 },      // Dockhand — orange oval
-  truenas: { shape: 'bean', color: 0x9b6436 },       // TrueNAS — brown oval
-  doc: { shape: 'wedge', color: 0xff4fa3 },          // Doc Master — pink wedge
+  chief: { shape: 'wedge', color: 0x8b5cf6 },       // Chief Master — violet wedge
+  monitor: { shape: 'squircle', color: 0xff7417 },   // Monitor — orange squircle
+  proxmox: { shape: 'cloud', color: 0x22c06a },      // Proxmox — green cloud
+  dockhand: { shape: 'wedge', color: 0xff4fa3 },     // Dockhand — magenta wedge
+  truenas: { shape: 'tablet', color: 0x9b6436 },     // TrueNAS — brown tablet
+  doc: { shape: 'drop', color: 0xf0384a },           // Doc Master — red teardrop
   // Paperclip agents: the rest of the palette, fixed so they never shuffle.
   cm2: { shape: 'triangle', color: 0x3b82f6 },
   cm1: { shape: 'oval', color: 0x6366f1 },
@@ -29,7 +29,8 @@ const NAME_KEYS = [
   [/claude/i, 'claude'], [/\bqa\b/i, 'qa'], [/dispatch/i, 'dispatcher'], [/gpu/i, 'gpu'], [/amazon/i, 'amazon'],
   [/account/i, 'accountant'],
 ];
-export const SHAPES = ['triangle', 'drop', 'cloud', 'oval', 'bean', 'wedge'];
+export const SHAPES = ['triangle', 'drop', 'cloud', 'oval', 'bean', 'wedge', 'squircle', 'tablet'];
+const RESERVED = new Set(['wedge:8b5cf6', 'squircle:ff7417', 'cloud:22c06a', 'wedge:ff4fa3', 'tablet:9b6436', 'drop:f0384a']);
 const EXTRA_COLORS = [0x8b5cf6, 0xf0384a, 0x22c06a, 0xff7417, 0x9b6436, 0xff4fa3, 0x3b82f6, 0x14b8a6, 0xf2c21b, 0x6366f1, 0x84cc16, 0x0ea5e9];
 
 function strHash(str) {
@@ -45,7 +46,10 @@ export function blobLookFor(p) {
   const name = s.project || s.title || '';
   for (const [re, k] of NAME_KEYS) if (re.test(name)) return CREW_LOOKS[k];
   const h = strHash(String(p.key || name));
-  return { shape: SHAPES[h % SHAPES.length], color: EXTRA_COLORS[(h >>> 8) % EXTRA_COLORS.length] };
+  const shape = SHAPES[h % SHAPES.length];
+  let ci = (h >>> 8) % EXTRA_COLORS.length;
+  while (RESERVED.has(shape + ':' + EXTRA_COLORS[ci].toString(16))) ci = (ci + 1) % EXTRA_COLORS.length;
+  return { shape, color: EXTRA_COLORS[ci] };
 }
 
 // Rounded polygon outline for the flat sidebar shapes (triangle / wedge).
@@ -111,6 +115,12 @@ function bodyParts(shape, mat) {
       add(sphere, [0, 0.78, -0.05], [0.56, 0.5, 0.5]);
       add(sphere, [-0.4, 0.3, 0], [0.42, 0.42, 0.42]);
       add(sphere, [0.4, 0.3, 0], [0.42, 0.42, 0.42]);
+      break;
+    case 'squircle': // orange — soft rounded square, upright
+      add(new THREE.CapsuleGeometry(0.34, 0.22, 10, 32), [0, 0.5, 0], [1.2, 0.9, 0.95]);
+      break;
+    case 'tablet': // brown — flat rounded horizontal tablet
+      add(new THREE.CapsuleGeometry(0.3, 0.5, 10, 32), [0, 0.3, 0], [1.05, 0.95, 0.85], [0, 0, Math.PI / 2]);
       break;
     case 'bean': // brown — horizontal oval
       add(sphere, [0, 0.36, 0], [1.08, 0.72, 0.74], [0, 0, 0.12]);
