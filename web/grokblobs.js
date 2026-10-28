@@ -163,15 +163,19 @@ export function buildBlob(look, height) {
   const body = new THREE.Group();
   root.add(hover); hover.add(body);
   const col = new THREE.Color(look.color);
-  const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.42, metalness: 0, emissive: col, emissiveIntensity: 0.16 });
+  const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.5, metalness: 0, emissive: col, emissiveIntensity: 0.18 });
   const parts = bodyParts(look.shape, mat);
   for (const m of parts) { m.castShadow = true; m.receiveShadow = false; body.add(m); }
   body.updateMatrixWorld(true);
 
-  // Eyes: two black vertical ovals stuck to the front surface, each with a
-  // small soft white glint (a nod to the demo's glowing eyes).
-  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x111114, roughness: 0.25 });
-  const glintMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  // Eyes: two glowing white vertical ovals (Grok Bot Office demo look), with a
+  // faint coloured rim from the body tint. ?eyes=black brings back the
+  // sidebar-style black ovals with a white glint.
+  const blackEyes = typeof location !== 'undefined' && /[?&]eyes=black\b/.test(location.search);
+  const eyeMat = blackEyes
+    ? new THREE.MeshStandardMaterial({ color: 0x111114, roughness: 0.25 })
+    : new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  const glintMat = blackEyes ? new THREE.MeshBasicMaterial({ color: 0xffffff }) : new THREE.MeshBasicMaterial({ color: col.clone().lerp(new THREE.Color(0xffffff), 0.75), transparent: true, opacity: 0 });
   const eyeGeo = new THREE.SphereGeometry(0.068, 18, 14);
   const glintGeo = new THREE.SphereGeometry(0.02, 10, 8);
   const ray = new THREE.Raycaster();

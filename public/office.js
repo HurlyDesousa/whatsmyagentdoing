@@ -89,6 +89,11 @@
   }
 
   function skyColor(d = new Date()) {
+    // Now / Day / Evening / Night control (index.html sets window.OFFICE_LIGHT)
+    const mode = window.OFFICE_LIGHT || 'now';
+    if (mode === 'day') return { sky: '#a9d4f2', night: false };
+    if (mode === 'evening') return { sky: '#f2a46e', night: false };
+    if (mode === 'night') return { sky: '#1d2350', night: true };
     const h = d.getHours() + d.getMinutes() / 60;
     if (h >= 7 && h < 17) return { sky: '#a9d4f2', night: false };
     if (h >= 5 && h < 7) return { sky: '#f3c9a8', night: false };

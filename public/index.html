@@ -200,12 +200,103 @@
   .conn { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); background: var(--error); color: #fff; padding: 6px 14px; border-radius: 999px; font-size: 12.5px; display: none; }
   .conn.on { display: block; }
 
+
+  /* ---- Hurly dashboard chrome (Grok Bot Office demo layout): dark glass,
+     Team + task detail + activity on the right, light control bottom-center. */
+  body.dash {
+    --bg: #0d0e12; --panel: #17181d; --ink: #ecebf2; --muted: #9a99a6; --faint: #66657a; --line: #2a2a33;
+    --thinking: #a48bf0; --tool: #5ea4ee; --typing: #3fc48f; --waiting: #ff8a3d; --done: #86b872; --error: #f0675d; --idle: #77768a;
+    --glass: rgba(24, 25, 32, .82); --glassLine: rgba(255,255,255,.07); --accent: #ff8a3d;
+    padding: 16px 18px 18px;
+    background: radial-gradient(1200px 700px at 30% 20%, #171a26 0%, #0d0e12 60%);
+  }
+  body.dash .wrap { max-width: 1680px; }
+  body.dash header { margin-bottom: 12px; gap: 10px 18px; }
+  body.dash h1 { font-size: 20px; font-weight: 800; display: flex; align-items: center; gap: 10px; }
+  body.dash h1 .logo { display: inline-flex; gap: 2px; }
+  body.dash h1 .logo i { width: 9px; height: 13px; border-radius: 50% 50% 45% 45%; display: inline-block; }
+  body.dash .summary { margin-left: 0; order: 3; width: 100%; gap: 8px; }
+  body.dash .controls { border-top: 0; padding-top: 0; width: auto; margin-left: auto; order: 2; }
+  body.dash .seg, body.dash .btn { background: var(--glass); border-color: var(--glassLine); }
+  .pill { display: inline-flex; align-items: baseline; gap: 7px; padding: 6px 13px; border-radius: 10px; background: var(--glass); border: 1px solid var(--glassLine); color: var(--muted); font-size: 12.5px; }
+  .pill b { color: var(--ink); font-size: 16px; font-weight: 800; }
+  .pill.warn { border-color: var(--accent); color: #ffb98a; }
+  .pill.warn b { color: var(--accent); }
+  .dashgrid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+  .dashgrid.list-mode { display: block; }
+  .dashgrid.list-mode .side { display: none; }
+  body.dash .office { height: calc(100vh - 168px); min-height: 440px; max-height: none; border-color: var(--glassLine); background: radial-gradient(900px 600px at 50% 45%, #1a1f36 0%, #10121c 70%); }
+  body.dash .tip .card { background: #1c1d24; }
+  .officebar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-top: 10px; }
+  .officebar .legend { margin: 0; font-size: 11.5px; }
+  .officebar #agentLegend { justify-self: end; }
+  body.dash .officebar #agentLegend { display: none; }
+  .trow { padding: 6px 8px; }
+  .lightseg { justify-self: center; background: var(--glass) !important; }
+  body.dash .lightseg button.on { background: #f3f1ea; color: #15151a; font-weight: 600; }
+  .side { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 168px); min-height: 440px; }
+  .glass { background: var(--glass); border: 1px solid var(--glassLine); border-radius: 14px; backdrop-filter: blur(10px); box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+  .gh { display: flex; align-items: baseline; justify-content: space-between; padding: 12px 14px 6px; font-weight: 800; font-size: 14.5px; }
+  .gh small { color: var(--faint); font-weight: 500; font-size: 11.5px; }
+  .team { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; max-height: 52%; }
+  .teamlist { overflow-y: auto; padding: 2px 6px 8px; overscroll-behavior: contain; }
+  .trow { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; padding: 7px 8px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; }
+  .trow:hover { background: rgba(255,255,255,.04); }
+  .trow.sel { background: rgba(255,255,255,.06); border-color: var(--glassLine); }
+  .trow.sel.warnrow { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+  .sw { width: 22px; height: 22px; border-radius: 8px; grid-row: span 2; position: relative; box-shadow: 0 0 12px color-mix(in srgb, var(--c) 45%, transparent); background: var(--c); }
+  .sw::before, .sw::after { content: ""; position: absolute; top: 7px; width: 3px; height: 6px; border-radius: 2px; background: #fff; }
+  .sw::before { left: 7px; } .sw::after { right: 7px; }
+  .tname { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tname small { color: var(--faint); font-weight: 500; font-size: 11px; margin-left: 5px; }
+  .tline { grid-column: 2 / 4; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600; background: rgba(255,255,255,.06); color: var(--ink); white-space: nowrap; }
+  .spill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--s); }
+  .spill.p-needs { border: 1px solid var(--accent); color: #ffc49b; background: rgba(255,138,61,.08); }
+  .detail { padding: 14px; flex: 0 0 auto; }
+  .detail .dh { display: flex; align-items: center; gap: 12px; }
+  .detail .dh .sw { width: 38px; height: 38px; border-radius: 13px; }
+  .detail .dh .sw::before, .detail .dh .sw::after { top: 12px; width: 5px; height: 10px; }
+  .detail .dh .sw::before { left: 12px; } .detail .dh .sw::after { right: 12px; }
+  .detail .dn { font-size: 17px; font-weight: 800; }
+  .detail .dm { color: var(--faint); font-size: 11.5px; }
+  .detail .dx { margin-left: auto; align-self: flex-start; border: 0; background: none; color: var(--faint); cursor: pointer; font-size: 16px; }
+  .detail .lab { margin-top: 12px; color: var(--faint); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
+  .detail .task { font-weight: 700; font-size: 13px; margin-top: 2px; }
+  .detail .txt { font-size: 12px; color: var(--muted); margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+  .detail .txt.q::before { content: "› "; } .detail .txt.r::before { content: "← "; }
+  .detail .bar { height: 4px; border-radius: 3px; background: rgba(255,255,255,.08); margin-top: 8px; overflow: hidden; }
+  .detail .bar i { display: block; height: 100%; background: var(--s); border-radius: 3px; }
+  .detail .tl { margin-top: 10px; display: grid; gap: 5px; }
+  .tlrow { display: grid; grid-template-columns: 58px 10px 1fr; gap: 6px; align-items: baseline; font-size: 11.5px; }
+  .tlrow time { color: var(--faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  .tlrow .d { width: 7px; height: 7px; border-radius: 50%; background: var(--s); }
+  .tlrow span:last-child { color: var(--ink); opacity: .9; word-break: break-word; }
+  .detail .note { margin-top: 10px; color: var(--faint); font-size: 11px; }
+  .activity { flex: 1 1 0; min-height: 150px; display: flex; flex-direction: column; background: rgba(10, 11, 15, .88); }
+  .log { flex: 1; overflow-y: auto; padding: 2px 14px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.3px; line-height: 1.55; overscroll-behavior: contain; }
+  .log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #c9c8d4; }
+  .log time { color: #5f5e72; margin-right: 7px; }
+  .log b { font-weight: 700; margin-right: 6px; }
+  .log .warnl { color: #ffc49b; }
+  body.dash .ver { display: none; }
+  @media (max-width: 980px) {
+    .dashgrid { grid-template-columns: 1fr; }
+    .side { height: auto; }
+    .team { max-height: 360px; }
+    .activity { height: 240px; flex: none; }
+    .officebar { grid-template-columns: 1fr; justify-items: center; }
+    .officebar #agentLegend { justify-self: center; }
+  }
+
   /* The PiP iframe owns its animation clock, layout, and pointer events. */
   body.pip { padding: 8px; }
   body.pip .wrap { height: calc(100dvh - 16px); display: flex; flex-direction: column; }
   body.pip header { gap: 6px; margin-bottom: 8px; flex: none; }
   body.pip h1, body.pip .newver, body.pip #legend, body.pip .ver,
   body.pip .controls > :not(#viewSeg):not(#qualSeg) { display: none !important; }
+  body.pip .side, body.pip .officebar { display: none !important; }
+  body.pip .dashgrid { display: block; flex: 1; min-height: 0; }
   body.pip .controls { width: auto; padding: 0; border: 0; }
   body.pip .chip { padding: 2px 6px; font-size: 11px; }
   body.pip .summary { gap: 4px; width: auto; margin-left: 0; }
@@ -218,10 +309,10 @@
   body.pip .grid { grid-template-columns: 1fr; }
 </style>
 </head>
-<body>
+<body class="dash">
 <div class="wrap">
   <header>
-    <h1>👀 <span data-t="title"></span></h1>
+    <h1><span class="logo" aria-hidden="true"><i style="background:#8b5cf6"></i><i style="background:#ff7417"></i><i style="background:#ff4fa3"></i></span><span>Grok Bot Office</span><small style="color:var(--faint);font-weight:500;font-size:12px">Hurly ops</small></h1>
     <div class="summary" id="summary"></div>
     <button class="newver" id="newVer" hidden></button>
     <div class="controls">
@@ -277,10 +368,22 @@
     <button class="btn" id="videoPipBtn" data-t="pip" hidden></button>
     <button class="btn" id="closePreview" data-t="pipStop"></button>
   </div>
+  <div class="dashgrid" id="dashgrid">
   <div id="officeWrap">
     <div class="office loading" id="office"><div class="office-loader"><div class="spin"></div><span id="loaderText"></span></div></div>
-    <div class="legend" id="legend"></div>
-    <div class="legend" id="agentLegend"></div>
+    <div class="officebar">
+      <div class="legend" id="legend"></div>
+      <div class="seg lightseg" id="lightSeg" role="group" aria-label="Lighting">
+        <button data-v="now">Now</button><button data-v="day">Day</button><button data-v="evening">Evening</button><button data-v="night">Night</button>
+      </div>
+      <div class="legend" id="agentLegend"></div>
+    </div>
+  </div>
+  <aside class="side" id="side">
+    <div class="glass team"><div class="gh">Team <small id="teamN"></small></div><div class="teamlist" id="teamList"></div></div>
+    <div class="glass detail" id="detail" hidden></div>
+    <div class="glass activity"><div class="gh">Activity <small>live · last 40</small></div><div class="log" id="actLog"></div></div>
+  </aside>
   </div>
   <main id="main"></main>
 </div>
@@ -312,8 +415,8 @@ function applyLang(code) {
   rtf = new Intl.RelativeTimeFormat(L.html, { numeric: 'auto', style: 'short' });
   document.querySelectorAll('[data-t]').forEach((el) => (el.textContent = L[el.dataset.t]));
   const legend = document.getElementById('legend');
-  if (legend) legend.innerHTML = ['thinking', 'tool', 'typing', 'waiting', 'done', 'error']
-    .map((k) => `<span data-s="${k}"><span class="dot" style="color:var(--s)"></span>${L[k]}</span>`).join('');
+  if (legend) legend.innerHTML = Object.entries(LEGEND_LABEL)
+    .map(([k, v]) => `<span data-s="${k}"><span class="dot" style="color:var(--s)"></span>${esc(v)}</span>`).join('');
   const sel = document.getElementById('langSel');
   if (sel) sel.options[0].textContent = `🌐 ${L.auto}`;
   if (typeof office !== 'undefined' && office) office.offDutyLabel = L.wentHome;
@@ -329,12 +432,13 @@ const store = (() => {
   return { get, set };
 })();
 
-const PREF_DEFAULTS = { view: 'office', quality: 'mid', scene: 'office', agent: 'all', showSub: false, showIdle: false, showAgent: true, lang: 'auto' };
+const PREF_DEFAULTS = { view: 'office', quality: 'mid', scene: 'office', agent: 'all', showSub: false, showIdle: false, showAgent: true, lang: 'auto', light: 'now' };
 function validPreference(k, v) {
   if (!Object.hasOwn(PREF_DEFAULTS, k)) return false;
   if (typeof PREF_DEFAULTS[k] === 'boolean') return typeof v === 'boolean';
   if (k === 'view') return ['office', 'list'].includes(v);
   if (k === 'quality') return ['mid', 'high'].includes(v);
+  if (k === 'light') return ['now', 'day', 'evening', 'night'].includes(v);
   if (k === 'agent') return ['all', ...Object.keys(OFFICE_AGENT_BADGES)].includes(v);
   if (k === 'lang') return v === 'auto' || Object.hasOwn(I18N, v);
   return typeof v === 'string' && /^[a-z0-9-]+$/.test(v);
@@ -356,7 +460,7 @@ if (PIP) document.body.classList.add('pip');
       for (const [k, v] of Object.entries(JSON.parse(q.get('prefs')) || {})) if (validPreference(k, v)) store.set(k, v);
     } catch { /* malformed preferences use the saved defaults */ }
   }
-  for (const k of ['view', 'quality', 'scene', 'lang']) if (validPreference(k, q.get(k))) store.set(k, q.get(k));
+  for (const k of ['view', 'quality', 'scene', 'lang', 'light']) if (validPreference(k, q.get(k))) store.set(k, q.get(k));
   if (location.search) history.replaceState(null, '', location.pathname + (PIP ? '?pip=1' : ''));
 }
 
@@ -369,6 +473,7 @@ const state = {
   flash: new Set(),
 };
 let popout = null;
+window.OFFICE_LIGHT = state.light;
 
 const ACTIVE = new Set(['thinking', 'tool', 'typing']);
 const AGENT_NAME = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', omp: 'OMP', grokbot: 'Grok Bot', paperclip: 'Paperclip' };
@@ -460,11 +565,16 @@ function render() {
   const all = state.data.sessions.filter((s) => (state.agent === 'all' || s.agent === state.agent) && (state.showSub || !s.subagent));
 
   const count = (f) => all.filter((s) => f(s.status)).length;
-  document.getElementById('summary').innerHTML = GROUPS.slice(0, 3).map((g) => {
-    const n = count(g.match);
-    const color = g.key === 'needsYou' ? 'var(--waiting)' : g.key === 'working' ? 'var(--tool)' : 'var(--done)';
-    return `<span class="chip"><span class="dot" style="color:${color}"></span>${L[g.key]} <b>${n}</b></span>`;
-  }).join('');
+  {
+    const desks = office?.plan?.desks?.length || 0;
+    const used = office?.deskOf?.size || 0;
+    const nWork = count((s) => ACTIVE.has(s)), nNeed = count(GROUPS[0].match), nIdle = count((s) => !ACTIVE.has(s) && !GROUPS[0].match(s));
+    document.getElementById('summary').innerHTML =
+      `<span class="pill"><b>${nWork}</b>working</span>` +
+      `<span class="pill${nNeed ? ' warn' : ''}"><b>${nNeed}</b>need you</span>` +
+      `<span class="pill"><b>${nIdle}</b>idle</span>` +
+      (desks ? `<span class="pill"><b>${Math.max(0, desks - used)}</b>free desks</span>` : '');
+  }
 
   const working = count((s) => ACTIVE.has(s));
   const needs = count(GROUPS[0].match);
@@ -472,6 +582,8 @@ function render() {
 
   const main = document.getElementById('main');
   const officeMode = state.view === 'office';
+  document.getElementById('dashgrid').classList.toggle('list-mode', !officeMode);
+  renderSide(all, now);
   document.getElementById('officeWrap').style.display = officeMode ? '' : 'none';
   // The office decides who sits at a desk and who wanders around.
   const officeList = all;
@@ -532,6 +644,7 @@ function onData(data) {
     }
     state.prev.set(s.key, s.status);
   }
+  logChanges(data.sessions, first);
   state.data = data;
   state.loaded = true;
   applyLang(chooseLang(data.lang));
@@ -631,6 +744,7 @@ const officeOpts = {
   label: (s) => s.project || AGENT_NAME[s.agent] || s.agent,
   onHover(s, at, click) {
     if (click) {
+      if (s) selectAgent(s.key);
       if (!s) return hideTip();
       tipPinned = true; tip.classList.add('pinned');
     } else if (tipPinned) return;
@@ -796,6 +910,7 @@ popout = new OfficePopout({
 window.addEventListener('storage', (e) => {
   if (e.key !== null && !Object.keys(PREF_DEFAULTS).some((k) => e.key === 'wmad.' + k)) return;
   Object.assign(state, readPreferences());
+  syncLight();
   langSel.value = state.lang;
   hideTip();
   applyLang(chooseLang(state.data.lang));
@@ -804,6 +919,134 @@ window.addEventListener('storage', (e) => {
   makeOffice();
   render();
 });
+
+// ---- Hurly dashboard: Team panel, task detail, activity log, lighting.
+const LEGEND_LABEL = { typing: 'Coding / replying', tool: 'Tool / terminal', thinking: 'Thinking', waiting: 'Needs you', error: 'Error', done: 'Done', idle: 'Idle' };
+const STATUS_HEX = { thinking: '#a48bf0', tool: '#5ea4ee', typing: '#3fc48f', waiting: '#ff8a3d', done: '#86b872', interrupted: '#77768a', error: '#f0675d', idle: '#77768a' };
+let lookFor = null; // blobLookFor from the 3D bundle (same colours as the blobs)
+import('/office3d.js').then((m) => { lookFor = m.blobLookFor; render(); }).catch(() => {});
+function agentColor(s) {
+  if (lookFor) { try { return '#' + lookFor({ s, key: s.key }).color.toString(16).padStart(6, '0'); } catch {} }
+  return STATUS_HEX[s.status] || '#888';
+}
+function pillOf(s) {
+  if (s.status === 'waiting' || s.status === 'error') return { cls: 'p-needs', txt: s.status === 'error' ? 'Error' : 'Needs you' };
+  if (ACTIVE.has(s.status)) return { cls: '', txt: { thinking: 'Thinking', tool: 'Tool', typing: 'Coding' }[s.status] || 'Working' };
+  if (s.status === 'done' || s.status === 'interrupted') return { cls: '', txt: 'Done' };
+  return { cls: '', txt: 'Idle' };
+}
+function statusLine(s) {
+  if (s.status === 'waiting') return s.activity || s.reply || 'Waiting for you';
+  if (s.status === 'error') return s.error || s.activity || 'Error';
+  if (ACTIVE.has(s.status)) return s.activity || (s.status === 'thinking' ? 'Thinking…' : s.title || L[s.status]);
+  if (s.status === 'done') return s.reply || s.title || 'Finished — free for a new task';
+  return s.title || 'Idle';
+}
+const ROLE = { grokbot: 'Grok Bot', paperclip: 'Paperclip' };
+const ORDER = (s) => (GROUPS[0].match(s.status) ? 0 : ACTIVE.has(s.status) ? 1 : s.status === 'done' ? 2 : 3);
+state.sel = null;
+function selectAgent(key) {
+  state.sel = state.sel === key ? null : key;
+  if (office) office.focusKey = state.sel;
+  render();
+}
+function renderSide(all, now) {
+  const list = all.filter((s) => !s.subagent).slice().sort((a, b) => ORDER(a) - ORDER(b) || String(a.project).localeCompare(String(b.project)));
+  document.getElementById('teamN').textContent = `${list.length} bots`;
+  document.getElementById('teamList').innerHTML = list.map((s) => {
+    const p = pillOf(s);
+    return `<div class="trow${state.sel === s.key ? ' sel' : ''}${p.cls ? ' warnrow' : ''}" data-sel="${esc(s.key)}" data-s="${esc(s.status)}" title="${esc(s.title || '')}">
+      <span class="sw" style="--c:${agentColor(s)}"></span>
+      <span class="tname">${esc(s.project || s.agent)}<small>${esc(ROLE[s.agent] || AGENT_NAME[s.agent] || s.agent)}</small></span>
+      <span class="spill ${p.cls}">${esc(p.txt)}</span>
+      <span class="tline">${esc(statusLine(s))}</span></div>`;
+  }).join('') || `<div class="tline" style="padding:8px">No sessions yet</div>`;
+  if (office) office.focusKey = state.sel;
+  const det = document.getElementById('detail');
+  const s = state.sel && all.find((x) => x.key === state.sel);
+  if (!s) { det.hidden = true; det.innerHTML = ''; return; }
+  const p = pillOf(s);
+  const prog = ACTIVE.has(s.status) ? 60 : s.status === 'waiting' ? 85 : s.status === 'done' ? 100 : 0;
+  const tl = actLog.filter((e) => e.key === s.key).slice(-4).reverse();
+  det.hidden = false;
+  det.dataset.s = s.status;
+  det.innerHTML = `
+    <div class="dh"><span class="sw" style="--c:${agentColor(s)}"></span>
+      <div><div class="dn">${esc(s.project || s.agent)}</div><div class="dm">${esc(ROLE[s.agent] || s.agent)} · updated ${esc(s.lastEventAt ? ago(s.lastEventAt, now) : '—')}</div></div>
+      <span class="spill ${p.cls}" style="margin-left:auto">${esc(p.txt)}</span><button class="dx" data-unsel title="Close">×</button></div>
+    <div class="lab">Task</div>
+    <div class="task">${esc(s.title || '—')}</div>
+    ${prog ? `<div class="bar"><i style="width:${prog}%"></i></div>` : ''}
+    ${s.activity ? `<div class="txt">${esc(s.activity)}</div>` : ''}
+    ${s.prompt ? `<div class="txt q">${esc(s.prompt)}</div>` : ''}
+    ${s.reply ? `<div class="txt r">${esc(s.reply)}</div>` : ''}
+    ${s.error ? `<div class="txt" style="color:var(--error)">${esc(s.error)}</div>` : ''}
+    ${tl.length ? `<div class="tl">${tl.map((e) => `<div class="tlrow" data-s="${esc(e.status)}"><time>${esc(e.ts)}</time><span class="d"></span><span>${esc(e.text)}</span></div>`).join('')}</div>` : ''}
+    <div class="note">${esc(s.model || '')}${s.status === 'waiting' ? ' · answer it where the agent runs (Paperclip / Grok Bot chat)' : ''}</div>`;
+}
+document.getElementById('side').addEventListener('click', (e) => {
+  if (e.target.closest('[data-unsel]')) { state.sel = null; if (office) office.focusKey = null; render(); return; }
+  const row = e.target.closest('[data-sel]');
+  if (row) { hideTip(); selectAgent(row.dataset.sel); }
+});
+
+// Activity log: derived from status / activity / reply changes between
+// snapshots (SSE). Keeps the last 40 lines.
+const actLog = [];
+const lastSeen = new Map();
+const clip = (t, n = 90) => { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+function pushAct(s, text) {
+  const d = new Date();
+  actLog.push({ key: s.key, name: s.project || s.agent, color: agentColor(s), status: s.status, text: clip(text), ts: d.toTimeString().slice(0, 8) });
+  while (actLog.length > 40) actLog.shift();
+}
+function describe(s) {
+  switch (s.status) {
+    case 'thinking': return s.activity ? `thinking · ${s.activity}` : 'thinking…';
+    case 'tool': return `tool · ${s.activity || 'running a tool'}`;
+    case 'typing': return s.activity ? `writing · ${s.activity}` : 'writing a reply';
+    case 'waiting': return `needs you · ${s.activity || s.reply || 'waiting for input'}`;
+    case 'error': return `error · ${s.error || s.activity || ''}`;
+    case 'done': return s.reply ? `done · ${s.reply}` : 'finished';
+    case 'interrupted': return 'interrupted';
+    default: return 'went idle';
+  }
+}
+function logChanges(sessions, first) {
+  const seen = new Set();
+  for (const s of sessions) {
+    if (s.subagent) continue;
+    seen.add(s.key);
+    const b = lastSeen.get(s.key);
+    if (!b) { if (first ? s.status !== 'idle' : true) pushAct(s, first ? `on shift · ${describe(s)}` : `joined · ${describe(s)}`); }
+    else if (b.status !== s.status) pushAct(s, describe(s));
+    else if (s.activity && b.activity !== s.activity) pushAct(s, s.status === 'waiting' ? `needs you · ${s.activity}` : s.activity);
+    else if (s.reply && b.reply !== s.reply) pushAct(s, `replied · ${s.reply}`);
+    else if (s.title && b.title !== s.title) pushAct(s, `now on · ${s.title}`);
+    lastSeen.set(s.key, { status: s.status, activity: s.activity, reply: s.reply, title: s.title });
+  }
+  for (const [k, b] of [...lastSeen]) if (!seen.has(k)) { pushAct({ key: k, project: b.name || k, status: 'idle' }, 'left the office'); lastSeen.delete(k); }
+  renderLog();
+}
+function renderLog() {
+  const el = document.getElementById('actLog');
+  const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  el.innerHTML = actLog.map((e) => `<div class="${e.status === 'waiting' || e.status === 'error' ? 'warnl' : ''}" title="${esc(e.text)}"><time>${esc(e.ts)}</time><b style="color:${e.color}">${esc(e.name)}</b>${esc(e.text)}</div>`).join('');
+  if (stick) el.scrollTop = el.scrollHeight;
+}
+
+// Now / Day / Evening / Night (saved in localStorage as wmad.light).
+const lightSeg = document.getElementById('lightSeg');
+function syncLight() {
+  window.OFFICE_LIGHT = state.light;
+  lightSeg.querySelectorAll('button').forEach((b) => { b.classList.toggle('on', b.dataset.v === state.light); b.setAttribute('aria-pressed', b.dataset.v === state.light); });
+}
+lightSeg.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.light = b.dataset.v; store.set('light', state.light); syncLight();
+});
+syncLight();
+
 applyLang(chooseLang(null));
 syncControls();
 scenesReady.then(() => makeOffice());

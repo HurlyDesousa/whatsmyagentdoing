@@ -6,7 +6,9 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { buildBlob, blobLookFor } from './grokblobs.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { buildBlob, blobLookFor, CREW_LOOKS } from './grokblobs.js';
+export { blobLookFor, CREW_LOOKS };
 const FURNITURE = ['desk', 'chairDesk', 'computerScreen', 'computerKeyboard', 'computerMouse', 'laptop',
   'pottedPlant', 'plantSmall1', 'plantSmall2', 'plantSmall3', 'kitchenCabinet', 'kitchenCoffeeMachine',
   'kitchenSink', 'kitchenFridgeLarge', 'kitchenMicrowave', 'stoolBar', 'tableRound', 'table',
@@ -21,7 +23,24 @@ const CHAR_HEIGHT = 1.02; // world units (≈ tiles)
 const WALL_H = 2.4;
 const SIT_FORWARD = 0.16;
 
-const dark3 = (o) => !!(o.pal && o.pal.dark);
+// Pastel room in both page themes; the Now/Day/Evening/Night lighting does the mood.
+const dark3 = () => false;
+
+// Soft "animation" palette for Kenney materials (shared names across models).
+const PASTEL_MATS = {
+  wood: 0xf3d2b3, woodDark: 0xdcae8f, metal: 0xe3e5ec, metalMedium: 0xa3a9bd, metalDark: 0x6e7387,
+  metalLight: 0xf5f1ea, carpet: 0xeaa9ac, carpetDarker: 0xd4949a, carpetBlue: 0xa6bde8, carpetWhite: 0xf3ede4,
+  plant: 0x8fcca3, lamp: 0xffe7a8, glass: 0xd9ecf5,
+};
+// Any other colour: lift it toward a soft pastel (no pure black / white slabs).
+function softColor(c) {
+  const col = new THREE.Color(c);
+  const hsl = {}; col.getHSL(hsl);
+  col.setHSL(hsl.h, Math.min(hsl.s, 0.6) * 0.72, 0.3 + hsl.l * 0.6);
+  return col;
+}
+const soft = (c) => softColor(c).getHex();
+
 
 // Turn a scene manifest into the floor plan the shared simulation uses:
 // stations play the part of desks, pois are where off-duty agents hang out.
@@ -50,12 +69,24 @@ function scenePlan(def) {
   };
 }
 
+// Lighting presets for the Now / Day / Evening / Night control. `lamp`,
+// `door`, `screen` and `ceil` scale the interior lights.
+const LIGHTS = {
+  day: { sky: 0xa9d4f2, sun: 1.75, sunCol: 0xfff3e0, amb: 1.2, hemiSky: 0xfff6ea, hemiGround: 0xc9b8a0, exposure: 1.12, lamp: 0.9, door: 1.8, halo: 0.55, screen: 1, ceil: 0, night: false },
+  dawn: { sky: 0xf3c9a8, sun: 1.15, sunCol: 0xffd9b8, amb: 0.9, hemiSky: 0xffe6d2, hemiGround: 0xb39a8c, exposure: 1.1, lamp: 1.4, door: 2.4, halo: 0.7, screen: 1.15, ceil: 0.35, night: false },
+  evening: { sky: 0xf2a46e, sun: 1.25, sunCol: 0xffa75e, amb: 0.72, hemiSky: 0xffc596, hemiGround: 0x8c6a62, exposure: 1.08, lamp: 2.2, door: 3, halo: 0.85, screen: 1.3, ceil: 0.75, night: false, evening: true },
+  night: { sky: 0x1d2350, sun: 0.32, sunCol: 0x8d96ff, amb: 0.5, hemiSky: 0x9a96ff, hemiGround: 0x2c2646, exposure: 1.05, lamp: 3.6, door: 5.2, halo: 1, screen: 1.8, ceil: 1.5, night: true },
+};
+export const LIGHT_MODES = ['now', 'day', 'evening', 'night'];
+// Mode comes from the page (window.OFFICE_LIGHT, saved in localStorage).
 function skyNow() {
+  const mode = (typeof window !== 'undefined' && window.OFFICE_LIGHT) || 'now';
+  if (mode !== 'now' && LIGHTS[mode]) return LIGHTS[mode];
   const h = new Date().getHours() + new Date().getMinutes() / 60;
-  if (h >= 7 && h < 17) return { sky: 0xa9d4f2, sun: 1.7, amb: 1.15, night: false };
-  if (h >= 5 && h < 7) return { sky: 0xf3c9a8, sun: 1.1, amb: 0.8, night: false };
-  if (h >= 17 && h < 19) return { sky: 0xf0a679, sun: 1.0, amb: 0.75, night: false };
-  return { sky: 0x1d2747, sun: 0.9, amb: 1.05, night: true };
+  if (h >= 7 && h < 17) return LIGHTS.day;
+  if (h >= 5 && h < 7) return LIGHTS.dawn;
+  if (h >= 17 && h < 19) return LIGHTS.evening;
+  return LIGHTS.night;
 }
 
 // The scene pack for the instance being constructed. The base constructor
@@ -151,8 +182,26 @@ export class Office3D extends window.Office {
       Object.assign(this.models, Object.fromEntries(got));
       for (const [, m] of got) m.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     }
-    for (const m of Object.values(this.models)) {
-      m.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    const softMats = new Map();
+    const pastel = (mt) => {
+      if (!mt || !mt.color) return mt;
+      if (softMats.has(mt)) return softMats.get(mt);
+      const c = mt.clone();
+      if (PASTEL_MATS[mt.name] != null) c.color.setHex(PASTEL_MATS[mt.name]);
+      else c.color.copy(softColor(mt.color));
+      c.roughness = Math.max(0.78, c.roughness ?? 1);
+      c.metalness = Math.min(0.08, c.metalness ?? 0);
+      softMats.set(mt, c);
+      return c;
+    };
+    for (const [name, m] of Object.entries(this.models)) {
+      const scenePack = name.startsWith('scene:');
+      m.traverse((o) => {
+        if (!o.isMesh) return;
+        o.castShadow = true; o.receiveShadow = true;
+        if (scenePack || this.sceneDef) return; // scene packs keep their own art
+        o.material = Array.isArray(o.material) ? o.material.map(pastel) : pastel(o.material);
+      });
     }
     this.loaded = true;
   }
@@ -184,7 +233,10 @@ export class Office3D extends window.Office {
 
   boxMesh(x, y, z, w, d, h, color, opts = {}) {
     const mat = opts.mat || new THREE.MeshStandardMaterial({ color, roughness: opts.rough ?? 0.8, metalness: opts.metal ?? 0, ...(opts.emissive ? { emissive: opts.emissive, emissiveIntensity: opts.ei ?? 1 } : {}) });
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    // Soft rounded edges (animation look); tiny parts stay plain boxes.
+    const r = Math.min(0.045, Math.min(w, h, d) * 0.35);
+    const geo = opts.round !== false && r > 0.008 ? new RoundedBoxGeometry(w, h, d, 3, r) : new THREE.BoxGeometry(w, h, d);
+    const m = new THREE.Mesh(geo, mat);
     m.position.set(x + w / 2, z + h / 2, y + d / 2);
     m.castShadow = opts.shadow !== false;
     m.receiveShadow = true;
@@ -223,7 +275,7 @@ export class Office3D extends window.Office {
     this.screens.clear();
     this.blinkers = [];
     const { W, D, OW, MR, PY } = plan;
-    const dark = this.pal.dark;
+    const dark = false; // pastel room in both page themes
 
     // floors
     const floor = (x, y, w, d, color, tex) => {
@@ -236,30 +288,32 @@ export class Office3D extends window.Office {
     };
     const planks = this.patternTexture((c, s) => {
       // light tan floor tiles (Grok Bot Office look)
-      c.fillStyle = dark ? '#5a4a3a' : '#e9d2a6'; c.fillRect(0, 0, s, s);
-      c.fillStyle = dark ? '#544536' : '#e2c999'; c.fillRect(0, 0, s / 2, s / 2); c.fillRect(s / 2, s / 2, s / 2, s / 2);
-      c.strokeStyle = dark ? 'rgba(0,0,0,.28)' : 'rgba(150,110,60,.22)'; c.lineWidth = 2;
+      // soft cream / tan tiles
+      c.fillStyle = dark ? '#5a4a3a' : '#f4e6cc'; c.fillRect(0, 0, s, s);
+      c.fillStyle = dark ? '#544536' : '#eedcbd'; c.fillRect(0, 0, s / 2, s / 2); c.fillRect(s / 2, s / 2, s / 2, s / 2);
+      c.strokeStyle = dark ? 'rgba(0,0,0,.28)' : 'rgba(190,150,105,.16)'; c.lineWidth = 2;
       for (let i = 0; i <= 2; i++) { c.beginPath(); c.moveTo(0, i * s / 2); c.lineTo(s, i * s / 2); c.stroke(); c.beginPath(); c.moveTo(i * s / 2, 0); c.lineTo(i * s / 2, s); c.stroke(); }
     });
     const tiles = this.patternTexture((c, s) => {
-      c.fillStyle = dark ? '#3d4044' : '#f4f4f1'; c.fillRect(0, 0, s, s);
-      c.fillStyle = dark ? '#35383c' : '#e3e4e0'; c.fillRect(0, 0, s / 2, s / 2); c.fillRect(s / 2, s / 2, s / 2, s / 2);
+      c.fillStyle = dark ? '#3d4044' : '#f3eef6'; c.fillRect(0, 0, s, s);
+      c.fillStyle = dark ? '#35383c' : '#e8e1ee'; c.fillRect(0, 0, s / 2, s / 2); c.fillRect(s / 2, s / 2, s / 2, s / 2);
     });
     planks.repeat.set(OW / 2, D / 2);
     floor(0, 0, OW, D, 0xffffff, planks);
-    floor(OW, 0, W - OW, MR, dark ? 0x33404d : 0xc9d3dc);
+    floor(OW, 0, W - OW, MR, dark ? 0x33404d : 0xdcd8e8);
     tiles.repeat.set((W - OW), (PY - MR));
     floor(OW, MR, W - OW, PY - MR, 0xffffff, tiles);
     const planks2 = planks.clone(); planks2.needsUpdate = true; planks2.repeat.set((W - OW) / 2, (D - PY) / 2);
     floor(OW, PY, W - OW, D - PY, 0xffffff, planks2);
     const pp = plan.pp;
-    const mat = new THREE.Mesh(new THREE.PlaneGeometry(pp.x1 - pp.x0 + 1.2, 2.7), new THREE.MeshStandardMaterial({ color: dark ? 0x2f4a3a : 0xbfd8c4, roughness: 1 }));
+    const mat = new THREE.Mesh(new THREE.PlaneGeometry(pp.x1 - pp.x0 + 1.2, 2.7), new THREE.MeshStandardMaterial({ color: dark ? 0x2f4a3a : 0xcde6d4, roughness: 1 }));
     mat.rotation.x = -Math.PI / 2; mat.position.set((pp.x0 + pp.x1) / 2, 0.005, pp.y - 0.05); mat.receiveShadow = true;
     this.room.add(mat);
 
     // walls: back (z=0) with windows, left (x=0) with a door
-    const wallCol = dark ? 0x3e4655 : 0x9aa5b4; // slate gray
+    const wallCol = dark ? 0x3e4655 : 0xc3bfd6; // muted lavender-gray
     const wallMat = new THREE.MeshStandardMaterial({ color: wallCol, roughness: 1 });
+    this.ceilLights = [];
     const T = 0.12;
     let cx = -T;
     const sky = skyNow();
@@ -271,8 +325,8 @@ export class Office3D extends window.Office {
       const glass = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.15), this.windowMat);
       glass.position.set(wx + 0.75, 1.425, -T / 2);
       this.room.add(glass);
-      this.boxMesh(wx + 0.73, -0.02, 0.85, 0.04, 0.04, 1.15, dark ? 0x2b2926 : 0xcfc5b3);
-      this.boxMesh(wx, -0.02, 0.83, 1.5, 0.1, 0.04, dark ? 0x2b2926 : 0xcfc5b3);
+      this.boxMesh(wx + 0.73, -0.02, 0.85, 0.04, 0.04, 1.15, dark ? 0x2b2926 : 0xf2e8da);
+      this.boxMesh(wx, -0.02, 0.83, 1.5, 0.1, 0.04, dark ? 0x2b2926 : 0xf2e8da);
       cx = wx + 1.5;
     }
     this.boxMesh(cx, -T, 0, W - cx, T, WALL_H, 0, { mat: wallMat });
@@ -280,18 +334,27 @@ export class Office3D extends window.Office {
     this.boxMesh(-T, -T, 0, T, dy - 0.6 + T, WALL_H, 0, { mat: wallMat });
     this.boxMesh(-T, dy + 0.6, 0, T, D - dy - 0.6, WALL_H, 0, { mat: wallMat });
     this.boxMesh(-T, dy - 0.6, 1.8, T, 1.2, WALL_H - 1.8, 0, { mat: wallMat });
-    this.boxMesh(-T + 0.02, dy - 0.55, 0, 0.06, 1.1, 1.78, dark ? 0x5c4431 : 0xa8825a);
-    this.boxMesh(0, dy - 0.6, 0, 0.9, 1.2, 0.01, dark ? 0x5a3b2e : 0xb9654a, { shadow: false });
+    this.boxMesh(-T + 0.02, dy - 0.55, 0, 0.06, 1.1, 1.78, dark ? 0x5c4431 : 0xdcae8c);
+    this.boxMesh(0, dy - 0.6, 0, 0.9, 1.2, 0.01, dark ? 0x5a3b2e : 0xe7a9a2, { shadow: false, round: false });
     // magenta doorway glow (demo look)
-    const doorGlow = new THREE.PointLight(0xff3fb4, 3.2, 5.5, 1.6);
+    const doorGlow = new THREE.PointLight(0xff5fc0, 2.2, 5.5, 1.6); // softer magenta; brighter at night
     doorGlow.position.set(0.6, 1.9, dy);
     this.room.add(doorGlow);
-    const halo = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 2.6), new THREE.MeshBasicMaterial({ map: this.glowTexture('255,63,180'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.doorGlow = doorGlow;
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 2.6), new THREE.MeshBasicMaterial({ map: this.glowTexture('255,95,192'), transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending }));
     halo.rotation.y = Math.PI / 2; halo.position.set(0.02, 1.2, dy);
     this.room.add(halo);
+    this.doorHalo = halo;
+    // warm ceiling lights, only on in the evening / at night
+    for (let i = 0; i < 3; i++) {
+      const l = new THREE.PointLight(0xffd6a0, 0, 7, 1.4);
+      l.position.set(1.5 + (i + 0.5) * (W - 1.5) / 3, WALL_H + 0.2, D * 0.5);
+      this.room.add(l);
+      this.ceilLights.push(l);
+    }
     // posters + whiteboard
     for (const ps of plan.posters) {
-      const m = this.textPlane(ps.text, ps.color, 0.9, 1.0);
+      const m = this.textPlane(ps.text, '#' + soft(ps.color).toString(16).padStart(6, '0'), 0.9, 1.0);
       m.rotation.y = Math.PI / 2; m.position.set(0.005, 1.45, ps.y + 0.45);
       this.room.add(m);
     }
@@ -299,7 +362,7 @@ export class Office3D extends window.Office {
     wb.position.set(OW + 3.7, 1.4, 0.005);
     this.room.add(wb);
     this.whiteboardScribbles(OW + 3.7);
-    const sign = this.textPlane('MEETING', dark ? '#3a4a5a' : '#8ea3b8', 1.3, 0.3);
+    const sign = this.textPlane('MEETING', dark ? '#3a4a5a' : '#b7a6d2', 1.3, 0.3);
     sign.position.set(OW + 1.1, 2.15, 0.005);
     this.room.add(sign);
 
@@ -328,7 +391,7 @@ export class Office3D extends window.Office {
   }
 
   potted(name, x, y, w, d, opts) {
-    return this.recolor(this.place(name, x, y, w, d, opts), { wood: 0xc8643c, woodDark: 0xa84f2e, plant: 0x3fae6a });
+    return this.recolor(this.place(name, x, y, w, d, opts), { wood: 0xf4a28f, woodDark: 0xe38f7d, plant: 0x86c99d }); // soft coral pots
   }
 
   glowTexture(rgb) {
@@ -371,9 +434,10 @@ export class Office3D extends window.Office {
 
   buildDesk(dk) {
     const { x, y } = dk;
-    this.recolor(this.place('desk', x, y, 1.4, 0.8, { h: 0.75, rot: dk.side === 's' ? 0 : Math.PI }), { wood: dark3(this) ? 0x8b8f98 : 0xf1eee8 });
+    const alt = (Math.round(x * 10) + Math.round(y * 10)) % 2;
+    this.recolor(this.place('desk', x, y, 1.4, 0.8, { h: 0.75, rot: dk.side === 's' ? 0 : Math.PI }), { wood: alt ? 0xf6d8bd : 0xf4e5c9, metal: 0xe9e4ee });
     // low divider on the far edge, so facing pairs read as pods
-    this.boxMesh(x + 0.02, dk.side === 's' ? y - 0.02 : y + 0.78, 0.75, 1.36, 0.04, 0.28, dark3(this) ? 0x56606e : 0xc9d1db, { rough: 1 });
+    this.boxMesh(x + 0.02, dk.side === 's' ? y - 0.02 : y + 0.78, 0.75, 1.36, 0.04, 0.28, 0xd9cfe8, { rough: 1 });
     const top = 0.75;
     const back = dk.side === 's' ? y + 0.12 : y + 0.48;
     const rot = dk.side === 's' ? 0 : Math.PI;
@@ -386,26 +450,26 @@ export class Office3D extends window.Office {
     if (h % 4 === 1) this.place('lampSquareTable', x + 1.1, back, 0.25, 0.25, { y0: top, h: 0.35 });
     // chair, facing the desk
     const seat = dk.seat;
-    this.place('chairDesk', seat.x - 0.3, seat.y - 0.3, 0.6, 0.6, { h: 0.9, rot: dk.side === 's' ? Math.PI : 0 });
+    this.recolor(this.place('chairDesk', seat.x - 0.3, seat.y - 0.3, 0.6, 0.6, { h: 0.9, rot: dk.side === 's' ? Math.PI : 0 }), { carpet: alt ? 0xa8dcc8 : 0xeab0b4, metalMedium: 0xb3b8c9 });
     // The monitor's own screen quad lights up in the worker's status colour.
     if (mon) {
       let quad = null;
       mon.traverse((o) => { if (o.isMesh && o.geometry.attributes.position.count === 4) quad = o; });
       if (quad) {
-        quad.material = new THREE.MeshStandardMaterial({ color: 0x1b1e24, emissive: 0x000000, roughness: 0.35 });
+        quad.material = new THREE.MeshStandardMaterial({ color: 0x3a3f52, emissive: 0x000000, roughness: 0.4 });
         this.screens.set(dk, quad);
       }
     }
   }
 
   buildProp(p) {
-    const dark = this.pal.dark;
+    const dark = false;
     switch (p.t) {
       case 'panel':
-        this.boxMesh(p.x, p.y, 0, p.w, p.d, p.h, new THREE.Color(p.color).getHex(), { rough: 1 });
+        this.boxMesh(p.x, p.y, 0, p.w, p.d, p.h, soft(p.color), { rough: 1 });
         break;
       case 'rack': {
-        this.boxMesh(p.x, p.y, 0, 0.7, 0.6, 1.9, 0x2a2d33, { metal: 0.3, rough: 0.5 });
+        this.boxMesh(p.x, p.y, 0, 0.7, 0.6, 1.9, 0x646a80, { metal: 0.05, rough: 0.8 });
         for (let r = 0; r < 7; r++) {
           for (let k = 0; k < 4; k++) {
             const led = this.boxMesh(p.x + 0.12 + k * 0.13, p.y + 0.6, 1.7 - r * 0.22, 0.05, 0.01, 0.03, 0x113322,
@@ -416,18 +480,18 @@ export class Office3D extends window.Office {
         break;
       }
       case 'printer':
-        this.boxMesh(p.x, p.y, 0, 0.75, 0.55, 0.55, dark ? 0x6e533b : 0xa8825a);
-        this.boxMesh(p.x + 0.05, p.y + 0.05, 0.55, 0.65, 0.45, 0.28, 0xe8e8e8);
-        this.boxMesh(p.x + 0.15, p.y + 0.35, 0.83, 0.45, 0.15, 0.02, 0xffffff);
+        this.boxMesh(p.x, p.y, 0, 0.75, 0.55, 0.55, 0xe6c3a2);
+        this.boxMesh(p.x + 0.05, p.y + 0.05, 0.55, 0.65, 0.45, 0.28, 0xeeeaf2);
+        this.boxMesh(p.x + 0.15, p.y + 0.35, 0.83, 0.45, 0.15, 0.02, 0xfaf6ee);
         this.place('cardboardBoxClosed', p.x - 0.7, p.y + 0.05, 0.5, 0.5, { h: 0.35 });
         break;
       case 'plant':
-        this.potted( p.x - 0.3, p.y - 0.3, 0.6, 0.6, { h: 1.0 });
+        this.potted('pottedPlant', p.x - 0.3, p.y - 0.3, 0.6, 0.6, { h: 1.0 });
         break;
       case 'pingpong': {
         const { x, y } = p;
-        for (const [lx, ly] of [[0.1, 0.1], [2.4, 0.1], [0.1, 1.2], [2.4, 1.2]]) this.boxMesh(x + lx, y + ly, 0, 0.08, 0.08, 0.7, 0x333333);
-        this.boxMesh(x, y, 0.7, 2.6, 1.4, 0.05, 0x2f7a52, { rough: 0.6 });
+        for (const [lx, ly] of [[0.1, 0.1], [2.4, 0.1], [0.1, 1.2], [2.4, 1.2]]) this.boxMesh(x + lx, y + ly, 0, 0.08, 0.08, 0.7, 0x7a7488);
+        this.boxMesh(x, y, 0.7, 2.6, 1.4, 0.05, 0x86c7aa, { rough: 0.85 });
         this.boxMesh(x + 0.04, y + 0.69, 0.751, 2.52, 0.02, 0.002, 0xffffff, { shadow: false });
         this.boxMesh(x + 1.29, y - 0.05, 0.75, 0.02, 1.5, 0.17, 0xf4f4f4, { rough: 1 });
         this.ball = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), new THREE.MeshStandardMaterial({ color: 0xffffff }));
@@ -437,7 +501,7 @@ export class Office3D extends window.Office {
         break;
       }
       case 'vending': {
-        this.boxMesh(p.x, p.y, 0, 0.7, 0.75, 1.85, new THREE.Color(p.color).getHex(), { rough: 0.5 });
+        this.boxMesh(p.x, p.y, 0, 0.7, 0.75, 1.85, soft(p.color), { rough: 0.8 });
         this.boxMesh(p.x + 0.7, p.y + 0.08, 0.7, 0.01, 0.47, 1.0, 0x0d1520, { emissive: 0x2a4a6a, ei: 0.5, shadow: false });
         const cols = [0xf2d16b, 0x5cf08a, 0xff8a65, 0x81d4fa, 0xce93d8];
         for (let r = 0; r < 4; r++) for (let k = 0; k < 3; k++) {
@@ -447,11 +511,11 @@ export class Office3D extends window.Office {
       }
       case 'foosball': {
         const { x, y } = p;
-        for (const [lx, ly] of [[0.1, 0.1], [1.42, 0.1], [0.1, 0.62], [1.42, 0.62]]) this.boxMesh(x + lx, y + ly, 0, 0.08, 0.08, 0.6, 0x5a4030);
-        this.boxMesh(x, y, 0.6, 1.6, 0.8, 0.06, 0x6e533b);
-        this.boxMesh(x + 0.05, y + 0.05, 0.66, 1.5, 0.7, 0.01, 0x2f8a4a, { shadow: false });
-        this.boxMesh(x, y, 0.66, 1.6, 0.05, 0.18, 0x6e533b);
-        this.boxMesh(x, y + 0.75, 0.66, 1.6, 0.05, 0.18, 0x6e533b);
+        for (const [lx, ly] of [[0.1, 0.1], [1.42, 0.1], [0.1, 0.62], [1.42, 0.62]]) this.boxMesh(x + lx, y + ly, 0, 0.08, 0.08, 0.6, 0xb98f6e);
+        this.boxMesh(x, y, 0.6, 1.6, 0.8, 0.06, 0xd8ae8a);
+        this.boxMesh(x + 0.05, y + 0.05, 0.66, 1.5, 0.7, 0.01, 0x94d1a4, { shadow: false });
+        this.boxMesh(x, y, 0.66, 1.6, 0.05, 0.18, 0xd8ae8a);
+        this.boxMesh(x, y + 0.75, 0.66, 1.6, 0.05, 0.18, 0xd8ae8a);
         this.rods = [];
         for (let k = 0; k < 6; k++) {
           const rod = new THREE.Group();
@@ -459,7 +523,7 @@ export class Office3D extends window.Office {
           bar.rotation.x = Math.PI / 2;
           rod.add(bar);
           for (let m = 0; m < 2; m++) {
-            const man = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.12, 0.05), new THREE.MeshStandardMaterial({ color: k % 2 ? 0xc0392b : 0x2f6fb0 }));
+            const man = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.12, 0.05), new THREE.MeshStandardMaterial({ color: k % 2 ? 0xef9a9a : 0x93b6ee, roughness: 0.8 }));
             man.position.set(0, -0.03, -0.15 + m * 0.3);
             man.castShadow = true;
             rod.add(man);
@@ -472,12 +536,12 @@ export class Office3D extends window.Office {
       }
       case 'booth': {
         const { x, y } = p;
-        const felt = new THREE.MeshStandardMaterial({ color: dark ? 0x3c4a5a : 0x9fb3c8, roughness: 1 });
+        const felt = new THREE.MeshStandardMaterial({ color: 0xc9bce0, roughness: 1 });
         this.boxMesh(x, y - 0.05, 0, 1.3, 0.05, 2.0, 0, { mat: felt });
         this.boxMesh(x - 0.05, y, 0, 0.05, 1.3, 2.0, 0, { mat: felt });
         this.boxMesh(x + 1.25, y, 0, 0.05, 1.3, 2.0, 0, { mat: this.glassMat(), shadow: false });
         this.boxMesh(x, y + 1.25, 0, 0.85, 0.05, 2.0, 0, { mat: this.glassMat(), shadow: false });
-        this.boxMesh(x - 0.05, y - 0.05, 2.0, 1.4, 1.4, 0.06, dark ? 0x4a5868 : 0xb5c4d3);
+        this.boxMesh(x - 0.05, y - 0.05, 2.0, 1.4, 1.4, 0.06, 0xd8cde8);
         this.place('stoolBar', x + 0.45, y + 0.4, 0.4, 0.4, { h: 0.5 });
         const l = new THREE.PointLight(0xffd9a0, 0.6, 2.5);
         l.position.set(x + 0.65, 1.85, y + 0.65);
@@ -487,8 +551,8 @@ export class Office3D extends window.Office {
       case 'glass':
         if (p.w === 0) this.boxMesh(p.x - 0.03, p.y, 0, 0.06, p.d, 2.1, 0, { mat: this.glassMat(), shadow: false });
         else this.boxMesh(p.x, p.y - 0.03, 0, p.w, 0.06, 2.1, 0, { mat: this.glassMat(), shadow: false });
-        if (p.w === 0) this.boxMesh(p.x - 0.04, p.y, 0, 0.08, p.d, 0.12, dark ? 0x2b2926 : 0xcfc5b3);
-        else this.boxMesh(p.x, p.y - 0.04, 0, p.w, 0.08, 0.12, dark ? 0x2b2926 : 0xcfc5b3);
+        if (p.w === 0) this.boxMesh(p.x - 0.04, p.y, 0, 0.08, p.d, 0.12, 0xe6dccd);
+        else this.boxMesh(p.x, p.y - 0.04, 0, p.w, 0.08, 0.12, 0xe6dccd);
         break;
       case 'meetingTable':
         this.place('table', p.x, p.y, p.w, p.d, { h: 0.75 });
@@ -516,7 +580,7 @@ export class Office3D extends window.Office {
         this.place('kitchenFridgeLarge', p.x, p.y, 0.85, 0.75, { h: 1.95, stretch: true });
         break;
       case 'cooler': {
-        this.boxMesh(p.x, p.y, 0, 0.42, 0.42, 0.95, 0xe8ecef, { rough: 0.4 });
+        this.boxMesh(p.x, p.y, 0, 0.42, 0.42, 0.95, 0xe9eef2, { rough: 0.7 });
         const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.42, 16),
           new THREE.MeshPhysicalMaterial({ color: 0x8ec5f2, transparent: true, opacity: 0.65, roughness: 0.1 }));
         bottle.position.set(p.x + 0.21, 0.95 + 0.21, p.y + 0.21);
@@ -553,14 +617,14 @@ export class Office3D extends window.Office {
         break;
       }
       case 'couch':
-        this.recolor(this.place('loungeSofa', p.x - 0.1, p.y - 0.15, p.w + 0.2, p.d + 0.2, { h: 0.8, stretch: true }), { carpet: 0x2aa39a });
+        this.recolor(this.place('loungeSofa', p.x - 0.1, p.y - 0.15, p.w + 0.2, p.d + 0.2, { h: 0.8, stretch: true }), { carpet: 0x7fcbc2, wood: 0xe8c3a2 }); // soft teal sofa
         break;
       case 'coffeeTable':
         this.place('tableCoffee', p.x, p.y, p.w, p.d, { h: 0.35 });
         this.place('radio', p.x + 1.0, p.y + 0.2, 0.3, 0.18, { y0: 0.35, h: 0.18 });
         break;
       case 'beanbag': {
-        const m = new THREE.Mesh(new THREE.SphereGeometry(0.42, 20, 14), new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.95 }));
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.42, 24, 16), new THREE.MeshStandardMaterial({ color: soft(p.color), roughness: 0.95 }));
         m.scale.set(1, 0.5, 1);
         m.position.set(p.x, 0.2, p.y);
         m.castShadow = m.receiveShadow = true;
@@ -569,10 +633,10 @@ export class Office3D extends window.Office {
       }
       case 'arcade': {
         const { x, y } = p;
-        this.boxMesh(x, y, 0, 0.7, 0.7, 1.75, 0x3a2a6a, { rough: 0.6 });
+        this.boxMesh(x, y, 0, 0.7, 0.7, 1.75, 0x9483c9, { rough: 0.8 });
         this.arcadeScreen = this.boxMesh(x + 0.1, y + 0.7, 1.0, 0.5, 0.01, 0.45, 0x000000, { emissive: 0xff44aa, ei: 1, shadow: false });
         this.boxMesh(x, y + 0.7, 1.55, 0.7, 0.02, 0.17, 0xffcf4a, { emissive: 0xffcf4a, ei: 0.6, shadow: false });
-        this.boxMesh(x, y + 0.7, 0.8, 0.7, 0.2, 0.08, 0x4a3a8a);
+        this.boxMesh(x, y + 0.7, 0.8, 0.7, 0.2, 0.08, 0xa898dc);
         break;
       }
       case 'lamp':
@@ -582,7 +646,7 @@ export class Office3D extends window.Office {
         this.room.add(this.lampLight);
         break;
       case 'rug':
-        this.recolor(this.place('rugRectangle', p.x, p.y, p.w, p.d, { y0: 0.004 }), { carpet: 0x3a5aa6, carpetDarker: 0x2a447f });
+        this.recolor(this.place('rugRectangle', p.x, p.y, p.w, p.d, { y0: 0.004 }), { carpet: 0x9eaad9, carpetDarker: 0x8592c6 }); // soft periwinkle rug
         break;
     }
   }
@@ -1033,7 +1097,13 @@ export class Office3D extends window.Office {
     const book = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, 0.04), new THREE.MeshStandardMaterial({ color: 0xc96442 }));
     prop.add(cup, book);
     this.scene.add(obj, prop);
-    a = { obj, blob, look, prop, cup, book, yaw: 0, last: { x: p.x, y: p.y }, hop: 0 };
+    // selection ring (Team panel / click): shown when this.focusKey matches
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.5, 40), new THREE.MeshBasicMaterial({
+      color: look.color, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide,
+    }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.02; ring.visible = false;
+    obj.add(ring);
+    a = { obj, blob, look, prop, cup, book, ring, yaw: 0, last: { x: p.x, y: p.y }, hop: 0 };
     this.actors.set(p.key, a);
     return a;
   }
@@ -1127,6 +1197,13 @@ export class Office3D extends window.Office {
       }
       a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift, p.y + Math.cos(a.yaw) * fwd);
       this.animateBlob(a, p, st, this.t / 1000, dt);
+      const focused = this.focusKey === p.key;
+      a.ring.visible = focused;
+      if (focused) {
+        const k = 1 + 0.12 * Math.sin(this.t / 220);
+        a.ring.scale.setScalar(k);
+        a.blob.glow.material.opacity = 0.9;
+      }
       // hand-held props float beside the blob
       a.cup.visible = st.act === 'coffee' || st.act === 'water' || (st.pose !== 'walk' && p.poi && p.poi.prop === 'cup');
       a.book.visible = st.act === 'read';
@@ -1212,14 +1289,23 @@ export class Office3D extends window.Office {
 
     // lighting follows the time of day
     const sky = skyNow();
+    this.sky = sky;
     this.sun.intensity = sky.sun;
+    this.sun.color.setHex(sky.sunCol);
     this.hemi.intensity = sky.amb;
+    this.hemi.color.setHex(sky.hemiSky);
+    this.hemi.groundColor.setHex(sky.hemiGround);
+    this.gl.toneMappingExposure = sky.exposure;
     if (this.windowMat) {
       this.windowMat.color.setHex(sky.sky);
       this.windowMat.emissive.setHex(sky.sky);
+      this.windowMat.emissiveIntensity = sky.night ? 0.9 : 0.6;
     }
     if (this.plan.scene) this.animateScene(t, sky);
-    if (this.lampLight) this.lampLight.intensity = sky.night ? 2.6 : 0.9;
+    if (this.lampLight) this.lampLight.intensity = sky.lamp;
+    if (this.doorGlow) this.doorGlow.intensity = sky.door * (0.92 + 0.08 * Math.sin(t * 1.3));
+    if (this.doorHalo) this.doorHalo.material.opacity = sky.halo;
+    for (const l of this.ceilLights || []) l.intensity = sky.ceil;
 
     // screens show who is working and on what
     const occupant = new Map();
@@ -1230,7 +1316,7 @@ export class Office3D extends window.Office {
       if (col) {
         const pulse = p.s.status === 'thinking' ? 0.5 + 0.35 * Math.sin(t * 3 + p.phase) : 0.8 + 0.2 * Math.sin(t * 9 + p.phase);
         scr.material.emissive.setHex(col);
-        scr.material.emissiveIntensity = pulse;
+        scr.material.emissiveIntensity = pulse * sky.screen;
       } else {
         scr.material.emissive.setHex(0x000000);
       }
