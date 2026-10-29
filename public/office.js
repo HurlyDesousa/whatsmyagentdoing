@@ -922,6 +922,7 @@
         p.leaving = false;
         if (isWorker) {
           this.release(p);
+          p.lift = null;
           const desk = desks[this.deskOf.get(s.key)];
           p.floor = desk.floor ?? 0;
           if (p.desk !== desk || p.mode !== 'work') { p.desk = desk; this.goTo(p, desk.seat); }
@@ -936,6 +937,7 @@
         if (!shown.has(k) && !p.leaving) {
           p.leaving = true;
           p.mode = 'leave';
+          p.lift = null;
           this.release(p);
           p.desk = null;
           this.goTo(p, this.plan.door);
