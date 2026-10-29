@@ -14,7 +14,7 @@ const FURNITURE = ['desk', 'chairDesk', 'computerScreen', 'computerKeyboard', 'c
   'kitchenSink', 'kitchenFridgeLarge', 'kitchenMicrowave', 'stoolBar', 'tableRound', 'table',
   'chairModernCushion', 'bookcaseOpen', 'books', 'loungeSofa', 'loungeChairRelax', 'tableCoffee', 'rugRectangle',
   'lampRoundFloor', 'lampSquareTable', 'televisionModern', 'cabinetTelevision', 'trashcan',
-  'coatRackStanding', 'radio', 'speaker', 'toaster', 'cardboardBoxClosed'];
+  'coatRackStanding', 'radio', 'speaker', 'toaster', 'cardboardBoxClosed', 'benchCushion'];
 
 const STATUS_COLOR = {
   thinking: 0x8b6be6, tool: 0x3b8ee0, typing: 0x22a874, waiting: 0xe09412, error: 0xde4b40,
@@ -505,15 +505,6 @@ export class Office3D extends window.Office {
     const sign = this.textPlane(label, fl < 0 ? '#7a90c8' : '#e089a8', 2.4, 0.42);
     sign.position.set(W * 0.55, 2.12, 0.02);
     this.floorRoot.add(sign);
-    const posters = fl < 0
-      ? [['ON CALL', '#6d84c8', 1.15], ['BLINK = OK', '#5eae8a', 3.55]]
-      : [['ASK GROK', '#e07a9a', 1.15], ['SHIP IT', '#e0a15a', 3.55]];
-    for (const [text, col, z] of posters) {
-      const board = this.textPlane(text, col, 1.2, 0.78);
-      board.rotation.y = Math.PI / 2;
-      board.position.set(0.02, 1.48, z);
-      this.floorRoot.add(board);
-    }
     for (const dk of plan.desks) if ((dk.floor ?? 0) === fl) this.buildDesk(dk);
     for (const p of plan.props) if ((p.floor ?? 0) === fl) this.buildProp(p);
   }
@@ -522,17 +513,28 @@ export class Office3D extends window.Office {
     const at = this.plan.stairsAt;
     if (!at || !this.floors3d) return;
     const x = at.x - 0.55, z = at.y - 0.7;
-    const post = 0xe8d5c0, step = 0xf2c9a8, plate = 0xf6e3cf;
-    // Each storey owns its posts, landing, and the flight that arrives at it,
+    const post = 0x6e768c, step = 0xf2c9a8, plate = 0xd5dae6, door = 0xe7ebf4, frame = 0x3a4560;
+    // Each storey owns its cab, landing, and the flight that arrives at it,
     // so culling a floor also removes the shaft above the selection.
+    // The cab sits on the shifted stairsAt (clear of the left-wall entrance).
     for (const fl of [-1, 0, 1]) {
       const g = this.floors3d[fl];
       if (!g) continue;
       const postH = WALL_H * 0.92;
       for (const [cx, cz] of [[x, z], [x + 1.2, z], [x, z + 1.4], [x + 1.2, z + 1.4]]) {
-        this.boxMesh(cx, cz, 0, 0.12, 0.12, postH, post, { group: g, rough: 0.85 });
+        this.boxMesh(cx, cz, 0, 0.12, 0.12, postH, post, { group: g, rough: 0.55, metal: 0.25 });
       }
-      this.boxMesh(x + 0.06, z + 0.06, 0.02, 1.18, 1.28, 0.06, plate, { group: g, rough: 0.9 });
+      this.boxMesh(x + 0.06, z + 0.06, 0.02, 1.18, 1.28, 0.06, plate, { group: g, rough: 0.7 });
+      // Back panel + double doors on the camera-facing side, so the shaft
+      // reads as an elevator instead of the wooden entrance door.
+      this.boxMesh(x + 0.1, z + 0.08, 0.06, 1.04, 0.06, 1.88, 0x9aa3b8, { group: g, rough: 0.55, metal: 0.15 });
+      this.boxMesh(x + 0.14, z + 1.2, 0.06, 0.44, 0.08, 1.86, door, { group: g, rough: 0.4, metal: 0.2 });
+      this.boxMesh(x + 0.62, z + 1.2, 0.06, 0.44, 0.08, 1.86, door, { group: g, rough: 0.4, metal: 0.2 });
+      this.boxMesh(x + 0.08, z + 1.16, 1.92, 1.08, 0.1, 0.2, frame, { group: g, rough: 0.5 });
+      this.boxMesh(x + 1.02, z + 1.22, 1.35, 0.08, 0.05, 0.14, 0xffd36a, { group: g, emissive: 0xffc24a, ei: 1, shadow: false });
+      const sign = this.textPlane('ELEV', '#3a4560', 0.95, 0.34);
+      sign.position.set(x + 0.6, 2.32, z + 1.42);
+      g.add(sign);
       if (fl > -1) {
         const stepN = 8;
         for (let i = 0; i < stepN; i++) {
@@ -966,6 +968,52 @@ export class Office3D extends window.Office {
       case 'coat':
         this.place('coatRackStanding', p.x - 0.2, p.y - 0.2, 0.4, 0.4, { h: 1.55 });
         break;
+      case 'zone': {
+        const mat = new THREE.MeshStandardMaterial({ color: p.color || 0xdddddd, roughness: 0.95 });
+        const tile = new THREE.Mesh(new THREE.PlaneGeometry(p.w, p.d), mat);
+        tile.rotation.x = -Math.PI / 2;
+        tile.position.set(p.x + p.w / 2, 0.01, p.y + p.d / 2);
+        tile.receiveShadow = true;
+        this.addToFloor(tile);
+        break;
+      }
+      case 'wall': {
+        const h = p.h || 1.08;
+        const col = p.color ? new THREE.Color(p.color).getHex() : 0xc5cce0;
+        if (p.glass) {
+          this.boxMesh(p.x, p.y, 0, p.w, p.d, 0.1, col, { round: false, rough: 0.7 });
+          this.boxMesh(p.x, p.y, h - 0.08, p.w, p.d, 0.08, col, { round: false, rough: 0.7 });
+          this.boxMesh(p.x, p.y, 0.1, p.w, p.d, h - 0.18, 0, { mat: this.glassMat(), shadow: false, round: false });
+        } else {
+          this.boxMesh(p.x, p.y, 0, p.w, p.d, h, col, { round: false, rough: 0.92 });
+        }
+        break;
+      }
+      case 'toilet':
+        this.boxMesh(p.x, p.y, 0, 0.42, 0.62, 0.36, 0xf7f9fc, { rough: 0.35 });
+        this.boxMesh(p.x + 0.05, p.y + 0.06, 0.36, 0.32, 0.42, 0.08, 0xe7eef6, { rough: 0.25 });
+        this.boxMesh(p.x + 0.07, p.y + 0.02, 0.44, 0.28, 0.14, 0.26, 0xf4f7fb, { rough: 0.3 });
+        break;
+      case 'basin':
+        this.boxMesh(p.x, p.y, 0, 0.62, 0.42, 0.74, 0xf4f7fb, { rough: 0.4 });
+        this.boxMesh(p.x + 0.08, p.y + 0.06, 0.74, 0.46, 0.28, 0.06, 0xd5e4f4, { rough: 0.2 });
+        this.boxMesh(p.x + 0.28, p.y + 0.02, 0.8, 0.06, 0.06, 0.16, 0xc5ccd8, { metal: 0.35, rough: 0.3 });
+        break;
+      case 'mirror':
+        this.boxMesh(p.x, p.y, 1.12, p.w || 0.55, p.d || 0.04, p.h || 0.5, 0xd7eaf8, { metal: 0.55, rough: 0.08, shadow: false, round: false });
+        break;
+      case 'sign': {
+        const board = this.textPlane(p.text, p.color || '#7a90c8', p.w || 1, p.h || 0.34);
+        const zz = p.z || 1.2;
+        if (p.face === 'x') {
+          board.rotation.y = Math.PI / 2;
+          board.position.set(p.x + 0.02, zz, p.y + (p.w || 1) / 2);
+        } else {
+          board.position.set(p.x + (p.w || 1) / 2, zz, p.y + 0.02);
+        }
+        this.addToFloor(board);
+        break;
+      }
     }
   }
 

@@ -602,7 +602,13 @@
       if (overlap(sx, sy, shaftW, shaftD, ppX0, ppY0, ppX1, ppY1)) {
         const nudged = ppY1 + 0.25;
         if (nudged + shaftD <= D - 0.15) sy = nudged;
-        else sx = Math.max(0.85, ppX0 - shaftW - 0.35);
+        else {
+          // Stay clear of the entrance door and welcome mat (left wall, x < ~1.3).
+          // Sliding left used to park the shaft on the door again.
+          const right = ppX1 + 0.35;
+          if (right + shaftW <= OW - 0.35) sx = right;
+          else sy = Math.max(0.45, ppY0 - shaftD - 0.3);
+        }
       }
       solid(sx, sy, shaftW, shaftD, 0.05);
       prop('stairs', { x: sx, y: sy, w: shaftW, d: shaftD, floor: 0 });
@@ -623,107 +629,208 @@
         prop('lamp', { x: ox + 2.9, y: oy + 1.5, floor });
         poi(ox + 1.4, oy - 0.55, 'window', 'back', { floor });
       };
-      // Basement: ops den — pastel server cage, on-call nap corner, snack bay.
-      addFloorPod(-1, 1.5, 2.2, '#8aa4c8');
-      addFloorPod(-1, 5.7, 2.2, '#9bb8a0');
-      prop('rack', { x: OW + 0.25, y: 0.28, floor: -1 });
-      prop('rack', { x: OW + 1.15, y: 0.28, floor: -1 });
-      prop('rack', { x: OW + 2.05, y: 0.28, floor: -1 });
-      prop('rug', { x: OW + 0.1, y: 0.12, w: 3.3, d: 1.35, color: '#8ea6e4', color2: '#6f8ad4', floor: -1 });
-      prop('sprout', { x: OW + 3.4, y: 0.55, kind: 'plantSmall1', floor: -1 });
-      prop('sprout', { x: OW + 3.95, y: 0.72, kind: 'plantSmall3', floor: -1 });
-      prop('shelf', { x: OW + 4.2, y: 0.22, w: 2.4, d: 0.45, floor: -1 });
-      prop('loungeChair', { x: OW + 4.35, y: 1.3, color: '#8aa4ea', rot: Math.PI, floor: -1 });
-      prop('loungeChair', { x: OW + 5.55, y: 1.3, color: '#7dcfb0', rot: Math.PI, floor: -1 });
-      prop('lamp', { x: OW + 6.55, y: 1.45, floor: -1 });
-      poi(OW + 4.9, 1.15, 'read', 'back', { floor: -1 });
-      poi(OW + 6.1, 1.15, 'read', 'back', { floor: -1 });
-      prop('cooler', { x: OW + 0.3, y: MR + 0.25, floor: -1 });
-      prop('vending', { x: OW + 1.15, y: MR + 0.18, color: '#9eb6e8', floor: -1 });
-      prop('vending', { x: OW + 1.15, y: MR + 1.08, color: '#f0b7c8', floor: -1 });
-      poi(OW + 0.55, MR + 1.15, 'water', 'back', { floor: -1 });
-      poi(OW + 2.05, MR + 0.55, 'vending', 'back', { floor: -1 });
-      poi(OW + 2.05, MR + 1.45, 'vending', 'back', { floor: -1 });
-      prop('roundTable', { x: OW + 4.5, y: MR + 2.2, floor: -1 });
-      for (const [dx, dy, face] of [[-0.95, 0, 'front'], [0.95, 0, 'front'], [0, 0.95, 'back'], [0, -0.9, 'front']]) {
-        prop('barStool', { x: OW + 4.5 + dx, y: MR + 2.2 + dy, floor: -1 });
-        poi(OW + 4.5 + dx, MR + 2.2 + dy, 'stool', face, { sit: 0.47, floor: -1 });
+      // SWA-3034: B and the loft are different floor plans (walls + rooms),
+      // not a second copy of the ground-floor open office. Half-height
+      // partitions so the rooms stay readable from the isometric camera.
+      const WT = 0.1;
+      const addWall = (floor, x, y, w, d, color, glass) => {
+        if (w < 0.08 || d < 0.08) return;
+        prop('wall', { x, y, w, d, h: 1.08, color, glass: !!glass, floor });
+        solid(x, y, w, d, 0);
+      };
+      const run = (floor, x, y, len, axis, color, glass, gapAt, gapW) => {
+        const place = (a, b) => {
+          if (b - a < 0.15) return;
+          if (axis === 'x') addWall(floor, x + a, y, b - a, WT, color, glass);
+          else addWall(floor, x, y + a, WT, b - a, color, glass);
+        };
+        if (gapW > 0) { place(0, gapAt); place(gapAt + gapW, len); }
+        else place(0, len);
+      };
+      const zone = (floor, x, y, w, d, color) => prop('zone', { x, y, w, d, color, floor });
+      const sign = (floor, x, y, text, color, face) => prop('sign', {
+        x, y, text, color, floor, face: face || 'y',
+        w: Math.max(0.72, text.length * 0.15), h: 0.34, z: 1.2,
+      });
+      const gapMid = (len) => [(len - 1.05) / 2, 1.05];
+
+      // ---- basement: ops den. Cage (back-left), snack bay, WC (back-right),
+      // nap nook (right), open desk floor in front. Elevator stays front-left.
+      {
+        const fl = -1;
+        const wallC = '#9aafd4';
+        const glassC = '#b9cbe6';
+        const cageX = 0.28, cageY = 0.28, cageW = 6.05, cageD = 4.05;
+        const bathW = 2.9, bathD = 3.15;
+        const bathX = W - bathW - 0.22, bathY = 0.28;
+        const snackX = cageX + cageW, snackY = 0.28, snackW = Math.max(2.4, bathX - snackX), snackD = 4.05;
+        const napX = Math.max(OW + 0.15, 9.3), napY = 4.55, napD = 3.45;
+        const napW = W - 0.22 - napX;
+        zone(fl, cageX, cageY, cageW, cageD, '#c9d7f4');
+        zone(fl, snackX, snackY, snackW, snackD, '#d7eee6');
+        zone(fl, bathX, bathY, bathW, bathD, '#e4eaf6');
+        zone(fl, napX, napY, napW, napD, '#ddd0f4');
+        // Cage: glass on the east and south, door in the south wall.
+        run(fl, cageX + cageW, cageY, cageD, 'y', glassC, true);
+        {
+          const [g0, gw] = gapMid(cageW);
+          run(fl, cageX, cageY + cageD, cageW, 'x', glassC, true, g0, gw);
+        }
+        sign(fl, cageX + 1.5, cageY + cageD + 0.02, 'CAGE', '#5d74b0');
+        sign(fl, cageX + 0.15, cageY + 1.15, 'BLINK = OK', '#5eae8a', 'x');
+        for (let i = 0; i < 3; i++) prop('rack', { x: cageX + 0.35 + i * 1.15, y: cageY + 0.28, floor: fl });
+        prop('rug', { x: cageX + 0.3, y: cageY + 2.15, w: 3.4, d: 1.5, color: '#8ea6e4', color2: '#6f8ad4', floor: fl });
+        prop('sprout', { x: cageX + 4.7, y: cageY + 0.55, kind: 'plantSmall1', floor: fl });
+        // Snack bay shares the cage's east glass. South wall with a door.
+        {
+          const [g0, gw] = gapMid(snackW);
+          run(fl, snackX, snackY + snackD, snackW, 'x', wallC, false, g0, gw);
+        }
+        sign(fl, snackX + 0.4, snackY + snackD + 0.02, 'SNACK', '#3e8f72');
+        prop('cooler', { x: snackX + 0.35, y: snackY + 0.35, floor: fl });
+        prop('vending', { x: snackX + 1.15, y: snackY + 0.28, color: '#9eb6e8', floor: fl });
+        prop('vending', { x: snackX + 2.15, y: snackY + 0.28, color: '#f0b7c8', floor: fl });
+        poi(snackX + 1.7, snackY + 1.35, 'water', 'back', { floor: fl });
+        poi(snackX + 2.7, snackY + 1.35, 'vending', 'back', { floor: fl });
+        const tx = snackX + snackW * 0.62, ty = snackY + 2.35;
+        prop('roundTable', { x: tx, y: ty, floor: fl });
+        for (const [dx, dy, face] of [[-0.9, 0, 'front'], [0.9, 0, 'front'], [0, 0.85, 'back']]) {
+          prop('barStool', { x: tx + dx, y: ty + dy, floor: fl });
+          poi(tx + dx, ty + dy, 'stool', face, { sit: 0.47, floor: fl });
+        }
+        // WC against the outer back-right corner. Door in the south wall.
+        run(fl, bathX, bathY, bathD, 'y', wallC, false);
+        {
+          const [g0, gw] = [0.25, 0.95];
+          run(fl, bathX, bathY + bathD, bathW, 'x', wallC, false, g0, gw);
+        }
+        sign(fl, bathX + 1.15, bathY + bathD + 0.02, 'WC', '#6d84c8');
+        prop('toilet', { x: bathX + bathW - 0.7, y: bathY + 0.35, floor: fl });
+        prop('basin', { x: bathX + 0.35, y: bathY + 0.28, floor: fl });
+        prop('mirror', { x: bathX + 0.4, y: bathY + 0.16, w: 0.55, d: 0.04, h: 0.5, floor: fl });
+        prop('sprout', { x: bathX + 0.4, y: bathY + bathD - 0.45, kind: 'plantSmall3', floor: fl });
+        // Nap nook: west and south walls, door in the west wall so it doesn't
+        // face the same way as the cage.
+        run(fl, napX, napY, napD, 'y', '#b7a6d8', false, 1.15, 1.0);
+        run(fl, napX, napY + napD, napW, 'x', '#b7a6d8', false);
+        run(fl, napX, napY, napW, 'x', '#b7a6d8', false);
+        sign(fl, napX + 0.35, napY + napD + 0.02, 'NAP', '#7a68b0');
+        sign(fl, napX + 1.7, napY + napD + 0.02, 'ON CALL', '#6d84c8');
+        prop('rug', { x: napX + 0.35, y: napY + 0.45, w: Math.min(5.4, napW - 0.7), d: napD - 0.7, color: '#b7c4f0', color2: '#8ea2e4', floor: fl });
+        prop('couch', { x: napX + 0.55, y: napY + 0.7, w: 2.8, d: 0.8, color: '#7f97e4', floor: fl });
+        prop('coffeeTable', { x: napX + 0.85, y: napY + 1.85, w: 1.5, d: 0.65, radio: false, floor: fl });
+        prop('beanbag', { x: napX + 2.7, y: napY + 2.15, color: '#8fd0c4', floor: fl });
+        prop('beanbag', { x: napX + 3.7, y: napY + 2.35, color: '#c9b6f0', floor: fl });
+        prop('lamp', { x: napX + napW - 0.7, y: napY + 0.55, floor: fl });
+        for (let k = 0; k < 2; k++) poi(napX + 1.0 + k * 0.9, napY + 1.35, 'couch', 'front', { sit: 0.36, floor: fl });
+        poi(napX + 2.7, napY + 2.15, 'beanbag', 'front', { sit: 0.18, floor: fl });
+        // Open ops floor: desks clear of the rooms and of the elevator.
+        addFloorPod(fl, 1.15, 6.45, '#8aa4c8');
+        addFloorPod(fl, 4.85, 6.45, '#7f9a88');
+        prop('foosball', { x: 0.45, y: 9.55, pair: 'fbB', floor: fl });
+        poi(0.15, 9.95, 'foosball', 'side', { pair: 'fbB', floor: fl });
+        poi(2.15, 9.95, 'foosball', 'side', { pair: 'fbB', floor: fl });
+        prop('arcade', { x: W - 1.55, y: 9.35, color: '#7f8fd4', floor: fl });
+        poi(W - 1.15, 10.35, 'arcade', 'back', { floor: fl });
+        prop('bench', { x: 3.4, y: 9.7, w: 1.4, d: 0.48, color: '#8eaae8', floor: fl });
       }
-      prop('speaker', { x: OW + 3.25, y: MR + 0.35, floor: -1 });
-      prop('speaker', { x: OW + 3.65, y: MR + 0.35, floor: -1 });
-      prop('plant', { x: W - 0.55, y: MR + 0.5, floor: -1 });
-      prop('rug', { x: OW + 0.25, y: PY + 0.35, w: 6.2, d: Math.max(3.2, D - PY - 0.95), color: '#9aafeb', color2: '#7d96e0', floor: -1 });
-      prop('couch', { x: OW + 0.55, y: PY + 0.85, w: 2.8, d: 0.8, color: '#7f97e4', floor: -1 });
-      prop('coffeeTable', { x: OW + 1.15, y: PY + 2.15, w: 1.6, d: 0.7, radio: false, floor: -1 });
-      prop('beanbag', { x: OW + 0.9, y: PY + 3.35, color: '#8fd0c4', floor: -1 });
-      prop('beanbag', { x: OW + 2.4, y: PY + 3.45, color: '#c9b6f0', floor: -1 });
-      prop('bench', { x: OW + 4.25, y: PY + 2.35, w: 1.5, d: 0.5, color: '#8eaae8', floor: -1 });
-      prop('lamp', { x: OW + 0.35, y: D - 0.65, floor: -1 });
-      prop('arcade', { x: W - 1.25, y: PY + 1.15, color: '#7f8fd4', floor: -1 });
-      prop('plant', { x: W - 0.5, y: D - 0.5, floor: -1 });
-      prop('plant', { x: OW + 5.45, y: PY + 0.55, floor: -1 });
-      for (let k = 0; k < 3; k++) poi(OW + 1.05 + k * 0.9, PY + 1.55, 'couch', 'front', { sit: 0.36, floor: -1 });
-      poi(OW + 0.9, PY + 3.35, 'beanbag', 'front', { sit: 0.18, floor: -1 });
-      poi(OW + 2.4, PY + 3.45, 'beanbag', 'front', { sit: 0.18, floor: -1 });
-      poi(W - 0.9, PY + 2.2, 'arcade', 'back', { floor: -1 });
-      prop('sprout', { x: 0.45, y: 6.6, kind: 'plantSmall2', floor: -1 });
-      prop('sprout', { x: 0.55, y: 8.4, kind: 'plantSmall1', floor: -1 });
-      prop('sprout', { x: 0.4, y: 10.2, kind: 'plantSmall3', floor: -1 });
-      prop('rug', { x: 4.05, y: 6.55, w: 2.3, d: 2.15, color: '#a9bbee', color2: '#8aa0e4', floor: -1 });
-      prop('beanbag', { x: 4.55, y: 7.15, color: '#f2c6d8', floor: -1 });
-      prop('beanbag', { x: 5.55, y: 7.95, color: '#b7e0c8', floor: -1 });
-      poi(4.55, 7.15, 'beanbag', 'front', { sit: 0.18, floor: -1 });
-      poi(5.55, 7.95, 'beanbag', 'front', { sit: 0.18, floor: -1 });
-      prop('foosball', { x: 3.55, y: 9.25, pair: 'fbB', floor: -1 });
-      poi(3.1, 9.65, 'foosball', 'side', { pair: 'fbB', floor: -1 });
-      poi(5.6, 9.65, 'foosball', 'side', { pair: 'fbB', floor: -1 });
-      // 2nd floor: prompt loft — warm pastel lounge, garden, play table.
-      addFloorPod(1, 1.5, 2.2, '#d4a0b8');
-      addFloorPod(1, 5.7, 2.2, '#c9b07a');
-      for (const [px, py, kind] of [[0.45, 0.42, 'plantSmall1'], [2.5, 0.4, 'plantSmall2'], [4.7, 0.48, 'plantSmall3'], [8.5, 0.42, 'plantSmall1']]) {
-        prop('sprout', { x: px, y: py, kind, floor: 1 });
+
+      // ---- loft: not the ops den. Plant room (back-left glass), archive
+      // (back-right), WC under the plants, prompt booth, long blush lounge.
+      {
+        const fl = 1;
+        const wallC = '#e4b3c4';
+        const glassC = '#f3c3d2';
+        const plantX = 0.28, plantY = 0.28, plantW = 4.7, plantD = 4.15;
+        const archX = Math.max(OW + 0.15, 9.45), archY = 0.28, archD = 4.15;
+        const archW = W - 0.22 - archX;
+        const wcX = 0.28, wcY = 4.7, wcW = 2.85, wcD = 2.55;
+        const boothX = 4.55, boothY = 4.7, boothW = 3.9, boothD = 2.7;
+        const loungeX = archX, loungeY = 4.7;
+        const loungeD = Math.min(7.4, Math.max(4.2, D - loungeY - 1.6));
+        const loungeW = W - 0.22 - loungeX;
+        zone(fl, plantX, plantY, plantW, plantD, '#d9f0d4');
+        zone(fl, archX, archY, archW, archD, '#f6e3c4');
+        zone(fl, wcX, wcY, wcW, wcD, '#fde7ee');
+        zone(fl, boothX, boothY, boothW, boothD, '#f8e7b8');
+        zone(fl, loungeX, loungeY, loungeW, loungeD, '#f6c9b4');
+        // Conservatory. Glass east + south, door in the south wall.
+        run(fl, plantX + plantW, plantY, plantD, 'y', glassC, true);
+        {
+          const [g0, gw] = gapMid(plantW);
+          run(fl, plantX, plantY + plantD, plantW, 'x', glassC, true, g0, gw);
+        }
+        sign(fl, plantX + 1.2, plantY + plantD + 0.02, 'PLANTS', '#5e9a6a');
+        for (const [px, py, kind] of [
+          [0.7, 0.6, 'plantSmall1'], [1.7, 0.55, 'plantSmall2'], [2.7, 0.7, 'plantSmall3'],
+          [3.7, 0.55, 'plantSmall1'], [1.1, 1.7, 'plantSmall2'], [2.4, 1.85, 'plantSmall3'],
+          [3.5, 2.4, 'plantSmall1'], [0.75, 2.7, 'plantSmall2'],
+        ]) prop('sprout', { x: plantX + px, y: plantY + py, kind, floor: fl });
+        prop('plant', { x: plantX + 4.1, y: plantY + 2.6, floor: fl });
+        prop('bench', { x: plantX + 1.3, y: plantY + 3.15, w: 1.45, d: 0.48, color: '#b7e0c2', floor: fl });
+        // Archive. West wall + south door. Shelves along the back.
+        run(fl, archX, archY, archD, 'y', wallC, false);
+        {
+          const [g0, gw] = gapMid(archW);
+          run(fl, archX, archY + archD, archW, 'x', wallC, false, g0, gw);
+        }
+        sign(fl, archX + 0.3, archY + archD + 0.02, 'ARCHIVE', '#c4894a');
+        sign(fl, archX + 2.15, archY + archD + 0.02, 'ASK GROK', '#e07a9a');
+        const shelfW = Math.min(3.3, archW - 0.8);
+        prop('shelf', { x: archX + 0.35, y: archY + 0.25, w: shelfW, d: 0.45, floor: fl });
+        prop('loungeChair', { x: archX + 0.45, y: archY + 1.45, color: '#f0c56a', rot: Math.PI, floor: fl });
+        prop('loungeChair', { x: archX + 1.7, y: archY + 1.45, color: '#ee8eae', rot: Math.PI, floor: fl });
+        prop('lamp', { x: archX + archW - 0.7, y: archY + 1.3, floor: fl });
+        prop('coat', { x: archX + archW - 0.55, y: archY + 2.7, floor: fl });
+        poi(archX + 1.1, archY + 2.3, 'read', 'back', { floor: fl });
+        poi(archX + 2.2, archY + 2.3, 'read', 'back', { floor: fl });
+        // WC under the plants. Door faces east, into the floor.
+        run(fl, wcX, wcY, wcW, 'x', wallC, false);
+        run(fl, wcX, wcY + wcD, wcW, 'x', wallC, false);
+        run(fl, wcX + wcW, wcY, wcD, 'y', wallC, false, 0.75, 0.95);
+        sign(fl, wcX + 0.85, wcY + wcD + 0.02, 'WC', '#e07a9a');
+        prop('toilet', { x: wcX + 0.35, y: wcY + 0.35, floor: fl });
+        prop('basin', { x: wcX + 1.35, y: wcY + 0.28, floor: fl });
+        prop('mirror', { x: wcX + 1.4, y: wcY + 0.16, w: 0.5, d: 0.04, h: 0.48, floor: fl });
+        // Prompt booth, open to the south.
+        run(fl, boothX, boothY, boothD, 'y', '#e0b56a', false);
+        run(fl, boothX + boothW, boothY, boothD, 'y', '#e0b56a', false);
+        run(fl, boothX, boothY, boothW, 'x', '#e0b56a', false);
+        sign(fl, boothX + 0.7, boothY + 0.02, 'BOOTH', '#c4894a');
+        const bx = boothX + boothW / 2, by = boothY + 1.45;
+        prop('roundTable', { x: bx, y: by, floor: fl });
+        for (const [dx, dy, face] of [[-0.9, 0, 'front'], [0.9, 0, 'front'], [0, 0.85, 'back']]) {
+          prop('barStool', { x: bx + dx, y: by + dy, floor: fl });
+          poi(bx + dx, by + dy, 'stool', face, { sit: 0.47, floor: fl });
+        }
+        // Blush lounge: west wall with a door, south lip, open toward the front
+        // only through that door so it reads as its own room.
+        run(fl, loungeX, loungeY, loungeD, 'y', wallC, false, 1.2, 1.05);
+        run(fl, loungeX, loungeY, loungeW, 'x', wallC, false);
+        run(fl, loungeX, loungeY + loungeD, loungeW, 'x', wallC, false, Math.max(0.4, loungeW - 1.8), 1.05);
+        sign(fl, loungeX + 0.35, loungeY + loungeD + 0.02, 'LOUNGE', '#e07a9a');
+        sign(fl, loungeX + 2.3, loungeY + loungeD + 0.02, 'SHIP IT', '#e0a15a');
+        const rugW = Math.min(5.6, loungeW - 0.6);
+        prop('rug', { x: loungeX + 0.35, y: loungeY + 0.7, w: rugW, d: Math.min(4.6, loungeD - 1.3), color: '#f2b39a', color2: '#e8927a', floor: fl });
+        prop('tv', { x: loungeX + 0.45, y: loungeY + 0.55, floor: fl });
+        prop('speaker', { x: loungeX + 1.7, y: loungeY + 0.6, floor: fl });
+        prop('couch', { x: loungeX + 0.5, y: loungeY + 1.7, w: 2.8, d: 0.8, color: '#ee7f9e', floor: fl });
+        prop('coffeeTable', { x: loungeX + 0.85, y: loungeY + 2.75, w: 1.5, d: 0.65, radio: false, floor: fl });
+        prop('beanbag', { x: loungeX + 0.7, y: loungeY + 3.7, color: '#f2b59a', floor: fl });
+        prop('beanbag', { x: loungeX + 1.9, y: loungeY + 3.85, color: '#f3d78a', floor: fl });
+        prop('beanbag', { x: loungeX + 3.1, y: loungeY + 3.55, color: '#b7e0c2', floor: fl });
+        prop('lamp', { x: loungeX + loungeW - 0.65, y: loungeY + 1.1, floor: fl });
+        prop('arcade', { x: loungeX + loungeW - 1.15, y: loungeY + loungeD - 1.5, color: '#e7a0c4', floor: fl });
+        prop('plant', { x: loungeX + loungeW - 0.55, y: loungeY + 2.4, floor: fl });
+        for (let k = 0; k < 2; k++) poi(loungeX + 0.95 + k * 0.9, loungeY + 2.35, 'couch', 'front', { sit: 0.36, floor: fl });
+        poi(loungeX + 0.7, loungeY + 3.7, 'beanbag', 'front', { sit: 0.18, floor: fl });
+        // Desks sit in the pocket under the WC and booth, clear of the elevator.
+        addFloorPod(fl, 0.55, 8.15, '#e7b0c4');
+        addFloorPod(fl, 4.35, 8.15, '#e0b56a');
+        prop('foosball', { x: 0.4, y: 10.75, pair: 'fb2', floor: fl });
+        poi(0.2, 11.15, 'foosball', 'side', { pair: 'fb2', floor: fl });
+        poi(2.05, 11.15, 'foosball', 'side', { pair: 'fb2', floor: fl });
       }
-      prop('foosball', { x: 3.35, y: 6.95, pair: 'fb2', floor: 1 });
-      poi(2.9, 7.35, 'foosball', 'side', { pair: 'fb2', floor: 1 });
-      poi(5.4, 7.35, 'foosball', 'side', { pair: 'fb2', floor: 1 });
-      prop('bench', { x: 6.35, y: 7.15, w: 1.45, d: 0.48, color: '#f0b090', floor: 1 });
-      prop('plant', { x: 6.55, y: 8.55, floor: 1 });
-      prop('loungeChair', { x: 7.55, y: 6.85, color: '#ee8eae', floor: 1 });
-      prop('loungeChair', { x: 7.55, y: 8.15, color: '#f0c56a', rot: Math.PI, floor: 1 });
-      prop('shelf', { x: OW + 0.35, y: 0.22, w: 3.1, d: 0.45, floor: 1 });
-      prop('speaker', { x: OW + 3.65, y: 0.32, floor: 1 });
-      prop('tv', { x: OW + 4.15, y: 0.22, floor: 1 });
-      prop('speaker', { x: OW + 5.45, y: 0.32, floor: 1 });
-      prop('loungeChair', { x: OW + 4.35, y: 1.55, color: '#f09a74', rot: Math.PI, floor: 1 });
-      prop('plant', { x: W - 0.5, y: 0.5, floor: 1 });
-      poi(OW + 1.2, 1.05, 'read', 'back', { floor: 1 });
-      poi(OW + 2.4, 1.05, 'read', 'back', { floor: 1 });
-      prop('coat', { x: OW + 0.45, y: MR + 0.4, floor: 1 });
-      prop('roundTable', { x: OW + 2.3, y: MR + 2.05, floor: 1 });
-      for (const [dx, dy, face] of [[-0.95, 0, 'front'], [0.95, 0, 'front'], [0, 0.95, 'back'], [0, -0.9, 'front']]) {
-        prop('barStool', { x: OW + 2.3 + dx, y: MR + 2.05 + dy, floor: 1 });
-        poi(OW + 2.3 + dx, MR + 2.05 + dy, 'stool', face, { sit: 0.47, floor: 1 });
-      }
-      prop('lamp', { x: OW + 5.7, y: MR + 1.15, floor: 1 });
-      prop('sprout', { x: OW + 4.4, y: MR + 0.45, kind: 'plantSmall2', floor: 1 });
-      prop('sprout', { x: OW + 6.3, y: MR + 2.6, kind: 'plantSmall3', floor: 1 });
-      prop('rug', { x: OW + 0.28, y: PY + 0.38, w: 6.35, d: Math.max(3.3, D - PY - 0.9), color: '#f2b39a', color2: '#e8927a', floor: 1 });
-      prop('couch', { x: OW + 0.55, y: PY + 0.9, w: 2.8, d: 0.8, color: '#ee7f9e', floor: 1 });
-      prop('coffeeTable', { x: OW + 1.15, y: PY + 2.2, w: 1.6, d: 0.7, radio: false, floor: 1 });
-      prop('beanbag', { x: OW + 0.85, y: PY + 3.4, color: '#f2b59a', floor: 1 });
-      prop('beanbag', { x: OW + 2.15, y: PY + 3.55, color: '#f3d78a', floor: 1 });
-      prop('beanbag', { x: OW + 3.4, y: PY + 3.25, color: '#b7e0c2', floor: 1 });
-      prop('bench', { x: OW + 4.15, y: PY + 2.45, w: 1.45, d: 0.48, color: '#f0c56e', floor: 1 });
-      prop('lamp', { x: OW + 0.32, y: D - 0.62, floor: 1 });
-      prop('arcade', { x: W - 1.25, y: PY + 1.15, color: '#e7a0c4', floor: 1 });
-      prop('plant', { x: W - 0.5, y: D - 0.5, floor: 1 });
-      prop('plant', { x: OW + 5.35, y: PY + 0.5, floor: 1 });
-      prop('plant', { x: OW + 5.7, y: D - 0.7, floor: 1 });
-      for (let k = 0; k < 3; k++) poi(OW + 1.05 + k * 0.9, PY + 1.6, 'couch', 'front', { sit: 0.36, floor: 1 });
-      poi(OW + 0.85, PY + 3.4, 'beanbag', 'front', { sit: 0.18, floor: 1 });
-      poi(OW + 2.15, PY + 3.55, 'beanbag', 'front', { sit: 0.18, floor: 1 });
-      poi(OW + 3.4, PY + 3.25, 'beanbag', 'front', { sit: 0.18, floor: 1 });
-      poi(W - 0.9, PY + 2.2, 'arcade', 'back', { floor: 1 });
 
       return {
         W, D, OW, OD, MR, PY, RW, grid, items, props, pois, desks, windows, posters, pp,
@@ -1119,6 +1226,204 @@
       this.poly([P(0.05, dy - 0.6), P(0.9, dy - 0.6), P(0.9, dy + 0.6), P(0.05, dy + 0.6)], pal.dark ? '#5a3b2e' : '#b9654a');
     }
 
+    // SWA-3034: basement and the loft are not the ground shell. The 2D canvas
+    // used to call drawRoom() on every floor and only paint plan.items when
+    // viewFloor === 0, so B and 2 were twin bare copies of floor 1.
+    drawExtraRoom(fl) {
+      const { W, D } = this.plan;
+      const cool = fl < 0;
+      const a = cool ? '#e7eefb' : '#fde7ee';
+      const b = cool ? '#d5e2f6' : '#f8d4e3';
+      const wall = cool ? '#c5cce0' : '#ecd0d8';
+      const wallTop = cool ? '#b7c0d8' : '#e4bcc8';
+      const P = (x, y, z) => this.iso(x, y, z);
+      for (let x = 0; x < Math.ceil(W); x++) {
+        for (let y = 0; y < Math.ceil(D); y++) {
+          const x1 = Math.min(W, x + 1), y1 = Math.min(D, y + 1);
+          this.poly([P(x, y), P(x1, y), P(x1, y1), P(x, y1)], (x + y) % 2 ? a : b);
+        }
+      }
+      this.poly([P(0, 0, 0), P(W, 0, 0), P(W, 0, WALL_H), P(0, 0, WALL_H)], wall);
+      this.poly([P(0, 0, 0), P(0, D, 0), P(0, D, WALL_H), P(0, 0, WALL_H)], this.shade(wall, -10));
+      this.poly([P(0, 0, WALL_H), P(W, 0, WALL_H), P(W, -0.15, WALL_H), P(-0.15, -0.15, WALL_H), P(-0.15, D, WALL_H), P(0, D, WALL_H)], wallTop);
+      const sky = skyColor();
+      for (const x of this.plan.windows || []) {
+        this.poly([P(x, 0, 0.85), P(x + 1.5, 0, 0.85), P(x + 1.5, 0, 2.0), P(x, 0, 2.0)], sky.sky);
+        this.poly([P(x, 0, 0.85), P(x + 1.5, 0, 0.85), P(x + 1.5, 0, 0.9), P(x, 0, 0.9)], wallTop);
+      }
+      const label = cool ? 'OPS DEN' : 'THE LOFT';
+      const labelCol = cool ? '#7a90c8' : '#e089a8';
+      this.poly([P(W * 0.42, 0, 1.95), P(W * 0.42 + 2.4, 0, 1.95), P(W * 0.42 + 2.4, 0, 2.28), P(W * 0.42, 0, 2.28)], labelCol);
+      this.onWall('y0', W * 0.42 + 0.15, 2.08, (c) => {
+        c.font = '800 11px ui-sans-serif, system-ui, sans-serif';
+        c.fillStyle = '#fff'; c.fillText(label, 0, 0);
+      });
+    }
+
+    // Shaft footprint from the shared plan (same x/y the 3D cab uses).
+    elevatorFootprint() {
+      const at = this.plan && this.plan.stairsAt;
+      if (!at) return null;
+      return { x: at.x - 0.65, y: at.y - 0.75, w: 1.35, d: 1.6 };
+    }
+
+    drawElevator(r) {
+      const { x, y, w, d } = r;
+      const metal = '#8b93a8', metalD = '#5e667c';
+      for (const [px, py] of [[0, 0], [w - 0.12, 0], [0, d - 0.12], [w - 0.12, d - 0.12]]) {
+        this.box(x + px, y + py, 0, 0.12, 0.12, 2.15, this.shade(metal, 16), metal, metalD);
+      }
+      this.box(x + 0.1, y + 0.08, 0.02, w - 0.2, d - 0.2, 0.05, '#d5dae6', '#c5cad6', '#aeb6c8');
+      const dw = (w - 0.36) / 2;
+      this.box(x + 0.14, y + d - 0.1, 0.08, dw, 0.08, 1.82, '#e7ebf4', '#d0d5e2', '#b7becf');
+      this.box(x + 0.18 + dw, y + d - 0.1, 0.08, dw, 0.08, 1.82, '#e7ebf4', '#d0d5e2', '#b7becf');
+      this.box(x + 0.1, y + d - 0.12, 1.92, w - 0.2, 0.1, 0.22, '#3a4560', '#2d3650', '#243044');
+      const p = this.iso(x + w / 2, y + d, 2.02);
+      const c = this.ctx;
+      c.save();
+      c.font = '800 9px ui-sans-serif, system-ui, sans-serif';
+      c.fillStyle = '#fff';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText('ELEV', p.x, p.y);
+      const lamp = this.iso(x + w - 0.22, y + d, 1.45);
+      c.fillStyle = '#ffd36a';
+      c.beginPath(); c.arc(lamp.x, lamp.y, 2.4, 0, Math.PI * 2); c.fill();
+      c.restore();
+    }
+
+    // Props tagged for this floor. Ground floor still uses plan.items.
+    extraFloorItems(fl) {
+      const items = [];
+      for (const p of this.plan.props) {
+        if ((p.floor ?? 0) !== fl || p.t === 'stairs') continue;
+        const depth = (p.x || 0) + (p.y || 0) + (p.t === 'zone' ? -14 : p.t === 'rug' ? -8 : 0);
+        items.push({ depth, draw: () => this.drawProp2d(p) });
+      }
+      return items;
+    }
+
+    drawProp2d(p) {
+      const col = p.color || '#c9b6c4';
+      switch (p.t) {
+        case 'panel':
+          this.box(p.x, p.y, 0, p.w, p.d, p.h || 1.15, this.shade(col, 18), col, this.shade(col, -16));
+          break;
+        case 'rack': this.serverRack(p.x, p.y); break;
+        case 'plant':
+        case 'sprout': this.plant(p.x, p.y); break;
+        case 'lamp': this.floorLamp(p.x, p.y); break;
+        case 'rug': {
+          const P = (a, b, c) => this.iso(a, b, c);
+          this.poly(
+            [P(p.x, p.y, 0.012), P(p.x + p.w, p.y, 0.012), P(p.x + p.w, p.y + p.d, 0.012), P(p.x, p.y + p.d, 0.012)],
+            p.color || '#9eaad9',
+          );
+          break;
+        }
+        case 'shelf':
+          this.box(p.x, p.y, 0, p.w, p.d, 1.4, this.shade(this.pal.deskTop, -5), this.pal.deskL, this.pal.deskR);
+          this.books(p.x + 0.05, p.x + p.w - 0.05, p.y + Math.max(0.05, p.d - 0.08));
+          break;
+        case 'loungeChair': {
+          const back = p.rot ? 0 : 0.58;
+          this.box(p.x, p.y, 0.28, 0.72, 0.7, 0.12, this.shade(col, 12), col, this.shade(col, -18));
+          this.box(p.x, p.y + back, 0.4, 0.72, 0.12, 0.42, this.shade(col, 4), col, this.shade(col, -18));
+          break;
+        }
+        case 'cooler': this.waterCooler(p.x, p.y); break;
+        case 'vending': this.vending(p.x, p.y, col); break;
+        case 'roundTable': this.roundTable(p.x, p.y); break;
+        case 'barStool': this.stool(p.x, p.y, 0.47, '#c9a24c'); break;
+        case 'speaker':
+          this.box(p.x, p.y, 0, 0.28, 0.28, 0.48, '#2c3140', '#222633', '#1a1e28');
+          break;
+        case 'couch': this.couch(p.x, p.y, col); break;
+        case 'coffeeTable': this.coffeeTable(p.x, p.y); break;
+        case 'beanbag': this.beanbag(p.x, p.y, col); break;
+        case 'bench':
+          this.box(p.x + 0.08, p.y + 0.08, 0, 0.08, (p.d || 0.48) - 0.16, 0.28, '#e8c3a2', '#d7b08e', '#c49a78');
+          this.box(p.x + (p.w || 1.4) - 0.16, p.y + 0.08, 0, 0.08, (p.d || 0.48) - 0.16, 0.28, '#e8c3a2', '#d7b08e', '#c49a78');
+          this.box(p.x, p.y, 0.28, p.w || 1.4, p.d || 0.48, 0.1, this.shade(col, 10), col, this.shade(col, -16));
+          break;
+        case 'arcade': this.arcade(p.x, p.y, p.color); break;
+        case 'foosball': this.foosball(p.x, p.y); break;
+        case 'tv':
+          this.box(p.x, p.y, 0, 1.15, 0.42, 0.38, '#e8d2b8', '#d4b89a', '#c4a484');
+          this.box(p.x + 0.12, p.y + 0.3, 0.42, 0.9, 0.06, 0.52, '#1c2433', '#111820', '#0c1218');
+          break;
+        case 'coat':
+          this.box(p.x, p.y, 0, 0.08, 0.08, 1.45, '#c4a484', '#b08c6c', '#967456');
+          this.box(p.x - 0.18, p.y, 1.32, 0.46, 0.08, 0.06, '#c4a484', '#b08c6c', '#967456');
+          this.box(p.x - 0.08, p.y + 0.02, 1.05, 0.22, 0.06, 0.28, '#e07a9a', '#c86484', '#b05070');
+          break;
+        case 'zone': {
+          const P = (a, b, c) => this.iso(a, b, c);
+          this.poly(
+            [P(p.x, p.y, 0.02), P(p.x + p.w, p.y, 0.02), P(p.x + p.w, p.y + p.d, 0.02), P(p.x, p.y + p.d, 0.02)],
+            p.color || '#dddddd',
+          );
+          break;
+        }
+        case 'wall': {
+          const h = p.h || 1.08;
+          if (p.glass) {
+            const P = (a, b, c) => this.iso(a, b, c);
+            const tint = p.color || '#c5d8ea';
+            this.box(p.x, p.y, 0, p.w, p.d, 0.1, tint, this.shade(tint, -12), this.shade(tint, -20));
+            this.box(p.x, p.y, h - 0.08, p.w, p.d, 0.08, tint, this.shade(tint, -12), this.shade(tint, -20));
+            this.poly(
+              [P(p.x, p.y, 0.1), P(p.x + p.w, p.y, 0.1), P(p.x + p.w, p.y, h - 0.08), P(p.x, p.y, h - 0.08)],
+              'rgba(190,220,235,.42)', 'rgba(90,130,160,.7)',
+            );
+            this.poly(
+              [P(p.x, p.y, 0.1), P(p.x, p.y + p.d, 0.1), P(p.x, p.y + p.d, h - 0.08), P(p.x, p.y, h - 0.08)],
+              'rgba(170,205,225,.32)', 'rgba(90,130,160,.55)',
+            );
+          } else {
+            this.box(p.x, p.y, 0, p.w, p.d, h, this.shade(col, 14), col, this.shade(col, -16));
+          }
+          break;
+        }
+        case 'toilet':
+          this.box(p.x, p.y, 0, 0.42, 0.62, 0.34, '#f7f9fc', '#e4eaf2', '#d0dae6');
+          this.box(p.x + 0.06, p.y + 0.04, 0.34, 0.3, 0.16, 0.28, '#f4f7fb', '#e7eef6', '#d5dde8');
+          break;
+        case 'basin':
+          this.box(p.x, p.y, 0, 0.62, 0.42, 0.72, '#f4f7fb', '#e3ebf4', '#d0dae6');
+          this.box(p.x + 0.08, p.y + 0.06, 0.72, 0.46, 0.28, 0.06, '#d5e4f4', '#c5d6ea', '#b7cbe2');
+          break;
+        case 'mirror':
+          this.box(p.x, p.y, 1.12, p.w || 0.55, p.d || 0.04, p.h || 0.5, '#d7eaf8', '#c5d8ea', '#b7cce2');
+          break;
+        case 'sign': {
+          const z = p.z || 1.2;
+          const w = p.w || 1;
+          const hh = p.h || 0.32;
+          const P = (a, b, c) => this.iso(a, b, c);
+          const bg = p.color || '#7a90c8';
+          let o;
+          if (p.face === 'x') {
+            this.poly([P(p.x, p.y, z), P(p.x, p.y + w, z), P(p.x, p.y + w, z + hh), P(p.x, p.y, z + hh)], bg);
+            o = this.iso(p.x, p.y + w / 2, z + hh / 2);
+          } else {
+            this.poly([P(p.x, p.y, z), P(p.x + w, p.y, z), P(p.x + w, p.y, z + hh), P(p.x, p.y, z + hh)], bg);
+            o = this.iso(p.x + w / 2, p.y, z + hh / 2);
+          }
+          const c = this.ctx;
+          c.save();
+          c.font = '800 8px ui-sans-serif, system-ui, sans-serif';
+          c.fillStyle = '#fff';
+          c.textAlign = 'center';
+          c.textBaseline = 'middle';
+          c.fillText(p.text, o.x, o.y);
+          c.restore();
+          break;
+        }
+        default: break;
+      }
+    }
+
     // ------------------------------------------------------------ furniture
 
     plant(x, y) {
@@ -1237,12 +1542,13 @@
       c.fillStyle = '#3b8ee0'; c.fillRect(tap.x - 1.5, tap.y, 3, 3);
     }
 
-    couch(x, y) {
-      const pal = this.pal;
-      this.box(x, y - 0.05, 0.32, 2.8, 0.25, 0.42, this.shade(pal.couch, 10), pal.couchD, this.shade(pal.couchD, -12));
-      this.box(x, y, 0, 2.8, 0.8, 0.32, pal.couch, pal.couchD, this.shade(pal.couchD, -12));
-      this.box(x - 0.15, y - 0.05, 0, 0.18, 0.85, 0.52, this.shade(pal.couch, 6), pal.couchD, this.shade(pal.couchD, -12));
-      this.box(x + 2.8, y - 0.05, 0, 0.18, 0.85, 0.52, this.shade(pal.couch, 6), pal.couchD, this.shade(pal.couchD, -12));
+    couch(x, y, color) {
+      const body = color || this.pal.couch;
+      const dark = color ? this.shade(color, -22) : this.pal.couchD;
+      this.box(x, y - 0.05, 0.32, 2.8, 0.25, 0.42, this.shade(body, 10), dark, this.shade(dark, -12));
+      this.box(x, y, 0, 2.8, 0.8, 0.32, body, dark, this.shade(dark, -12));
+      this.box(x - 0.15, y - 0.05, 0, 0.18, 0.85, 0.52, this.shade(body, 6), dark, this.shade(dark, -12));
+      this.box(x + 2.8, y - 0.05, 0, 0.18, 0.85, 0.52, this.shade(body, 6), dark, this.shade(dark, -12));
       this.box(x + 2.15, y + 0.12, 0.32, 0.35, 0.16, 0.28, '#e9c46a', '#d4ae52', '#c19c43');
     }
 
@@ -1282,8 +1588,9 @@
       }
     }
 
-    arcade(x, y) {
-      this.box(x, y, 0, 0.7, 0.7, 1.75, '#3a2a6a', '#2b1f52', '#221843');
+    arcade(x, y, color) {
+      const body = color || '#3a2a6a';
+      this.box(x, y, 0, 0.7, 0.7, 1.75, this.shade(body, 14), body, this.shade(body, -18));
       const P = (a, b, c) => this.iso(a, b, c);
       const hue = (this.t / 20) % 360;
       this.poly([P(x + 0.1, y + 0.7, 1.0), P(x + 0.6, y + 0.7, 1.0), P(x + 0.6, y + 0.7, 1.45), P(x + 0.1, y + 0.7, 1.45)], `hsl(${hue},70%,55%)`);
@@ -1851,14 +2158,17 @@
       c.scale(this.cam.zoom, this.cam.zoom);
 
       const vf = this.viewFloor || 0;
-      this.drawRoom();
+      if (vf === 0) this.drawRoom();
+      else this.drawExtraRoom(vf);
       const occupant = new Map();
       for (const p of this.people.values()) {
         if (this.floorOf(p) !== vf) continue;
         if (p.mode === 'work' && p.desk) occupant.set(p.desk, p);
         else if (p.napDesk) occupant.set(p.napDesk, p);
       }
-      const items = vf === 0 ? [...this.plan.items] : [];
+      const items = vf === 0 ? [...this.plan.items] : this.extraFloorItems(vf);
+      const elev = this.elevatorFootprint();
+      if (elev) items.push({ depth: elev.x + elev.w / 2 + elev.y + elev.d / 2, draw: () => this.drawElevator(elev) });
       for (const dk of this.plan.desks) {
         if ((dk.floor ?? 0) !== vf) continue;
         const p = occupant.get(dk);
@@ -1878,7 +2188,7 @@
         if (it.person) heads.push([it.person, this.person(it.person)]);
         else it.draw();
       }
-      this.pingPongBall();
+      if (vf === 0) this.pingPongBall();
       if (this.compact) {
         // Keep labels readable when the room is scaled down for PiP.
         c.save();
