@@ -527,8 +527,11 @@ export class Office3D extends window.Office {
 
   applyFloorView(resetCam) {
     const vf = this.viewFloor || 0;
+    // Cull floors above the selection; keep selected + below fully opaque (no ghost tint).
     for (const [key, g] of Object.entries(this.floors3d || {})) {
-      const on = +key === vf;
+      const fl = +key;
+      const show = fl <= vf;
+      g.visible = show;
       g.traverse((o) => {
         if (!o.isMesh || !o.material) return;
         for (const mat of Array.isArray(o.material) ? o.material : [o.material]) {
@@ -536,11 +539,11 @@ export class Office3D extends window.Office {
             mat.userData.floorO0 = mat.opacity ?? 1;
             mat.userData.floorT0 = !!mat.transparent;
           }
-          const target = on ? mat.userData.floorO0 : Math.min(0.42, mat.userData.floorO0 * 0.45);
+          const target = mat.userData.floorO0;
           const tr = mat.userData.floorT0 || target < 0.98;
           if (mat.transparent !== tr) { mat.transparent = tr; mat.needsUpdate = true; }
           mat.opacity = target;
-          mat.depthWrite = on;
+          mat.depthWrite = show;
         }
       });
     }
@@ -2030,9 +2033,12 @@ export class Office3D extends window.Office {
       }
       a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift, p.y + Math.cos(a.yaw) * fwd);
       this.animateBlob(a, p, st, this.t / 1000, dt);
-      // status-pill filter + dim agents on other floors (still visible in the stack)
-      const onFloor = fl === (this.viewFloor || 0);
-      const want2 = filterMatch(p.s, this.filter) ? (onFloor ? 1 : 0.38) : 0.16;
+      // status-pill filter + hide agents on floors above the selection
+      const vf = this.viewFloor || 0;
+      const above = fl > vf;
+      const onFloor = fl === vf;
+      const want2 = above ? 0 : (filterMatch(p.s, this.filter) ? (onFloor ? 1 : 0.55) : 0.16);
+      if (a.obj) a.obj.visible = !above && want2 > 0.02;
       a.alpha = a.alpha ?? 1;
       if (Math.abs(a.alpha - want2) > 0.005) {
         a.alpha += (want2 - a.alpha) * Math.min(1, dt * 8);

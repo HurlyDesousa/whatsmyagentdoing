@@ -592,7 +592,8 @@
       for (const q of pois) if (q.floor == null) q.floor = 0;
       for (const p of props) if (p.floor == null) p.floor = 0;
 
-      const sx = 0.55, sy = Math.max(OD + 0.4, D - 2.55);
+      // SWA-3029: shift stairs/elevator shaft right so it reads clearly from the default camera.
+      const sx = 1.55, sy = Math.max(OD + 0.4, D - 2.55);
       solid(sx, sy, 1.35, 1.6, 0.05);
       prop('stairs', { x: sx, y: sy, w: 1.35, d: 1.6, floor: 0 });
       // One stairs POI per floor (same x/y footprint) so wanderers can change levels.
@@ -612,19 +613,45 @@
         prop('lamp', { x: ox + 2.9, y: oy + 1.5, floor });
         poi(ox + 1.4, oy - 0.55, 'window', 'back', { floor });
       };
-      // Basement: cooler server-room desks + a rack.
+      // Basement: ops / infra lab — denser than the SWA-3012 shell.
       addFloorPod(-1, 1.5, 2.2, '#8aa4c8');
       addFloorPod(-1, 5.7, 2.2, '#9bb8a0');
       prop('rack', { x: OW - 1.15, y: 0.35, floor: -1 });
+      prop('rack', { x: OW - 2.05, y: 0.35, floor: -1 });
+      prop('rack', { x: 0.45, y: OD - 0.55, floor: -1 });
+      prop('shelf', { x: 0.35, y: 0.4, w: 1.6, d: 0.4, floor: -1 });
+      prop('printer', { x: OW - 3.1, y: 0.3, floor: -1 });
       prop('cooler', { x: OW + 0.4, y: MR + 0.4, floor: -1 });
+      prop('cooler', { x: OW + 1.2, y: MR + 0.4, floor: -1 });
+      prop('foosball', { x: OW + 0.5, y: PY + 0.9, floor: -1 });
+      prop('arcade', { x: W - 1.1, y: D - 1.2, floor: -1 });
+      prop('beanbag', { x: OW + 2.4, y: PY + 2.0, floor: -1 });
+      prop('beanbag', { x: OW + 3.2, y: PY + 2.4, floor: -1 });
+      prop('lamp', { x: OW + 0.3, y: 0.5, floor: -1 });
+      prop('lamp', { x: W - 0.6, y: D - 0.6, floor: -1 });
+      prop('plant', { x: 0.5, y: D - 0.5, floor: -1 });
       poi(OW + 0.65, MR + 1.25, 'water', 'back', { floor: -1 });
-      // 2nd floor: loft desks + lounge couch.
+      poi(OW + 1.0, PY + 1.4, 'play', 'front', { floor: -1 });
+      // 2nd floor: loft lounge / creative — denser than the SWA-3012 shell.
       addFloorPod(1, 1.5, 2.2, '#d4a0b8');
       addFloorPod(1, 5.7, 2.2, '#c9b07a');
       prop('couch', { x: OW + 0.6, y: PY + 1.0, w: 2.8, d: 0.8, floor: 1 });
+      prop('coffeeTable', { x: OW + 1.2, y: PY + 1.9, floor: 1 });
       prop('rug', { x: OW + 0.3, y: PY + 0.6, w: 4.0, d: Math.max(2, D - PY - 1.0), floor: 1 });
+      prop('beanbag', { x: OW + 3.4, y: PY + 1.2, floor: 1 });
+      prop('beanbag', { x: OW + 3.9, y: PY + 2.0, floor: 1 });
+      prop('booth', { x: 0.5, y: OD + 0.6, floor: 1 });
+      prop('roundTable', { x: OW + 2.8, y: MR + 0.8, floor: 1 });
+      prop('barStool', { x: OW + 2.3, y: MR + 0.5, floor: 1 });
+      prop('barStool', { x: OW + 3.3, y: MR + 0.5, floor: 1 });
+      prop('vending', { x: W - 0.9, y: 0.4, floor: 1 });
+      prop('coffee', { x: OW + 0.4, y: 0.45, floor: 1 });
       prop('plant', { x: W - 0.5, y: D - 0.5, floor: 1 });
+      prop('plant', { x: 0.45, y: 0.45, floor: 1 });
+      prop('lamp', { x: OW + 3.6, y: PY + 0.5, floor: 1 });
+      prop('shelf', { x: 0.4, y: 1.2, w: 1.4, d: 0.35, floor: 1 });
       for (let k = 0; k < 3; k++) poi(OW + 1.1 + k * 0.9, PY + 1.6, 'couch', 'front', { sit: 0.36, floor: 1 });
+      poi(OW + 2.8, MR + 1.3, 'meet', 'front', { sit: 0.4, floor: 1 });
 
       return {
         W, D, OW, OD, MR, PY, RW, grid, items, props, pois, desks, windows, posters, pp,
@@ -1753,16 +1780,6 @@
 
       const vf = this.viewFloor || 0;
       this.drawRoom();
-      // Soft tint when viewing basement / 2nd so the shared ground shell still reads.
-      if (vf !== 0) {
-        const { W, D } = this.plan;
-        const P = (x, y) => this.iso(x, y, 0);
-        c.save();
-        c.globalAlpha = 0.18;
-        c.fillStyle = vf < 0 ? '#6a8cff' : '#ff9ec4';
-        this.poly([P(0, 0), P(W, 0), P(W, D), P(0, D)], c.fillStyle);
-        c.restore();
-      }
       const occupant = new Map();
       for (const p of this.people.values()) {
         if (this.floorOf(p) !== vf) continue;
