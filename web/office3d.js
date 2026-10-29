@@ -475,7 +475,20 @@ export class Office3D extends window.Office {
     this.boxMesh(-0.12, -0.12, -0.16, W + 0.12, D + 0.12, 0.158, fl < 0 ? 0xd8e0f4 : 0xf8dde8, { rough: 0.9, shadow: false });
     this.boxMesh(-0.09, -0.09, -FLOOR_T, W + 0.06, D + 0.06, FLOOR_T - 0.15, slab, { rough: 0.95, shadow: false });
     this.boxMesh(-0.1, -0.1, -0.175, W + 0.08, D + 0.08, 0.025, rim, { rough: 0.9, shadow: false, round: false });
-    const floorMat = new THREE.MeshStandardMaterial({ color: fl < 0 ? 0xe4eaf8 : 0xfae8ef, roughness: 0.92 });
+    const tiles = this.patternTexture((c, s) => {
+      const a = fl < 0 ? '#e7eefb' : '#fde7ee';
+      const b = fl < 0 ? '#d5e2f6' : '#f8d4e3';
+      c.fillStyle = a; c.fillRect(0, 0, s, s);
+      c.fillStyle = b; c.fillRect(0, 0, s / 2, s / 2); c.fillRect(s / 2, s / 2, s / 2, s / 2);
+      c.strokeStyle = fl < 0 ? 'rgba(120,145,190,.18)' : 'rgba(210,140,165,.16)';
+      c.lineWidth = 2;
+      for (let i = 0; i <= 2; i++) {
+        c.beginPath(); c.moveTo(0, i * s / 2); c.lineTo(s, i * s / 2); c.stroke();
+        c.beginPath(); c.moveTo(i * s / 2, 0); c.lineTo(i * s / 2, s); c.stroke();
+      }
+    });
+    tiles.repeat.set(W / 2, D / 2);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: tiles, roughness: 0.92 });
     const m = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat);
     m.rotation.x = -Math.PI / 2;
     m.position.set(W / 2, 0.002, D / 2);
@@ -488,10 +501,19 @@ export class Office3D extends window.Office {
     this.boxMesh(-T, -T, 0, T, D + T, h, 0, { mat: wallMat });
     // Open front so stacked floors stay readable from the default camera.
     this.boxMesh(-T, D, 0, W + T, T, 0.35, rim, { rough: 0.9, shadow: false });
-    const label = fl < 0 ? 'BASEMENT' : '2ND FLOOR';
-    const sign = this.textPlane(label, fl < 0 ? '#7a90c8' : '#d489a8', 2.2, 0.38);
-    sign.position.set(W * 0.35, 2.05, 0.02);
+    const label = fl < 0 ? 'OPS DEN' : 'THE LOFT';
+    const sign = this.textPlane(label, fl < 0 ? '#7a90c8' : '#e089a8', 2.4, 0.42);
+    sign.position.set(W * 0.55, 2.12, 0.02);
     this.floorRoot.add(sign);
+    const posters = fl < 0
+      ? [['ON CALL', '#6d84c8', 1.15], ['BLINK = OK', '#5eae8a', 3.55]]
+      : [['ASK GROK', '#e07a9a', 1.15], ['SHIP IT', '#e0a15a', 3.55]];
+    for (const [text, col, z] of posters) {
+      const board = this.textPlane(text, col, 1.2, 0.78);
+      board.rotation.y = Math.PI / 2;
+      board.position.set(0.02, 1.48, z);
+      this.floorRoot.add(board);
+    }
     for (const dk of plan.desks) if ((dk.floor ?? 0) === fl) this.buildDesk(dk);
     for (const p of plan.props) if ((p.floor ?? 0) === fl) this.buildProp(p);
   }
@@ -499,51 +521,41 @@ export class Office3D extends window.Office {
   buildStairsShaft() {
     const at = this.plan.stairsAt;
     if (!at || !this.floors3d) return;
-    const g = new THREE.Group();
-    g.name = 'stairs';
-    this.room.add(g);
     const x = at.x - 0.55, z = at.y - 0.7;
-    // Vertical shaft columns
-    for (const [cx, cz] of [[x, z], [x + 1.2, z], [x, z + 1.4], [x + 1.2, z + 1.4]]) {
-      this.boxMesh(cx, cz, -LEVEL_H - 0.2, 0.12, 0.12, LEVEL_H * 2 + WALL_H, 0xe8d5c0, { group: g, rough: 0.85 });
-    }
-    // Step runs between levels
-    const stepN = 8;
-    for (const [from, to] of [[-1, 0], [0, 1]]) {
-      for (let i = 0; i < stepN; i++) {
-        const t = i / stepN;
-        const y0 = from * LEVEL_H + t * LEVEL_H;
-        const inset = (i / stepN) * 1.05;
-        this.boxMesh(x + 0.15 + inset * 0.15, z + 0.15, y0, 0.95 - inset * 0.1, 1.2, 0.12, 0xf2c9a8, { group: g, rough: 0.9 });
-      }
-    }
-    // Clickable floor-change pads on each landing
+    const post = 0xe8d5c0, step = 0xf2c9a8, plate = 0xf6e3cf;
+    // Each storey owns its posts, landing, and the flight that arrives at it,
+    // so culling a floor also removes the shaft above the selection.
     for (const fl of [-1, 0, 1]) {
-      if (!this.floors3d[fl]) continue;
-      const y = fl * LEVEL_H;
-      this.clickBox(x, z, y, 1.35, 1.6, 0.35, () => this.setViewFloor(fl));
+      const g = this.floors3d[fl];
+      if (!g) continue;
+      const postH = WALL_H * 0.92;
+      for (const [cx, cz] of [[x, z], [x + 1.2, z], [x, z + 1.4], [x + 1.2, z + 1.4]]) {
+        this.boxMesh(cx, cz, 0, 0.12, 0.12, postH, post, { group: g, rough: 0.85 });
+      }
+      this.boxMesh(x + 0.06, z + 0.06, 0.02, 1.18, 1.28, 0.06, plate, { group: g, rough: 0.9 });
+      if (fl > -1) {
+        const stepN = 8;
+        for (let i = 0; i < stepN; i++) {
+          const t = i / stepN;
+          const y0 = -LEVEL_H + t * LEVEL_H;
+          const inset = (1 - t) * 1.05;
+          this.boxMesh(x + 0.15 + inset * 0.15, z + 0.15, y0, 0.95 - inset * 0.1, 1.2, 0.12, step, { group: g, rough: 0.9 });
+        }
+      }
+      const pad = this.clickBox(x, z, fl * LEVEL_H, 1.35, 1.6, 0.35, () => this.setViewFloor(fl));
+      pad.userData.floor = fl;
+      this.floorPads.push(pad);
     }
   }
 
+  // Hide every floor above the picker selection. The selected floor and
+  // everything below stay fully drawn — no ghost tint.
   applyFloorView(resetCam) {
     const vf = this.viewFloor || 0;
     for (const [key, g] of Object.entries(this.floors3d || {})) {
-      const on = +key === vf;
-      g.traverse((o) => {
-        if (!o.isMesh || !o.material) return;
-        for (const mat of Array.isArray(o.material) ? o.material : [o.material]) {
-          if (mat.userData.floorO0 == null) {
-            mat.userData.floorO0 = mat.opacity ?? 1;
-            mat.userData.floorT0 = !!mat.transparent;
-          }
-          const target = on ? mat.userData.floorO0 : Math.min(0.42, mat.userData.floorO0 * 0.45);
-          const tr = mat.userData.floorT0 || target < 0.98;
-          if (mat.transparent !== tr) { mat.transparent = tr; mat.needsUpdate = true; }
-          mat.opacity = target;
-          mat.depthWrite = on;
-        }
-      });
+      g.visible = +key <= vf;
     }
+    for (const pad of this.floorPads || []) pad.visible = (pad.userData.floor ?? 0) <= vf;
     if (resetCam || this._floorCam !== vf) {
       this._floorCam = vf;
       this.fitted = false;
@@ -765,7 +777,7 @@ export class Office3D extends window.Office {
         this.boxMesh(x + 0.05, y + 0.05, 0.66, 1.5, 0.7, 0.01, 0x94d1a4, { shadow: false });
         this.boxMesh(x, y, 0.66, 1.6, 0.05, 0.18, 0xd8ae8a);
         this.boxMesh(x, y + 0.75, 0.66, 1.6, 0.05, 0.18, 0xd8ae8a);
-        this.rods = [];
+        const table = { until: 0, pair: p.pair || 'fb' };
         for (let k = 0; k < 6; k++) {
           const rod = new THREE.Group();
           const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.2, 6), new THREE.MeshStandardMaterial({ color: 0xc8ccd0, metalness: 0.7, roughness: 0.3 }));
@@ -778,10 +790,12 @@ export class Office3D extends window.Office {
             rod.add(man);
           }
           rod.position.set(x + 0.2 + k * 0.24, 0.8, y + 0.4);
+          rod.userData.baseZ = y + 0.4;
+          rod.userData.table = table;
           this.addToFloor(rod);
           this.rods.push(rod);
         }
-        this.clickBox(x, y, 0, 1.6, 0.8, 0.85, () => { this.until.fb = this.t / 1000 + 5; this.spawnFx('spark', x + 0.8, 1.0, y + 0.4, { n: 4, spread: 0.5 }); });
+        this.clickBox(x, y, 0, 1.6, 0.8, 0.85, () => { table.until = this.t / 1000 + 5; this.spawnFx('spark', x + 0.8, 1.0, y + 0.4, { n: 4, spread: 0.5 }); });
         break;
       }
       case 'booth': {
@@ -856,12 +870,13 @@ export class Office3D extends window.Office {
           // book stacks on each shelf
           b.updateMatrixWorld(true);
           const ray = new THREE.Raycaster();
+          const floorY = (this.floorRoot && this.floorRoot.position.y) || 0;
           for (let k = 0; k < 2; k++) {
             const bx = p.x + i * u + 0.2 + k * (u - 0.4) * 0.6;
-            ray.set(new THREE.Vector3(bx + 0.1, 1.6, p.y + p.d / 2), new THREE.Vector3(0, -1, 0));
+            ray.set(new THREE.Vector3(bx + 0.1, floorY + 1.6, p.y + p.d / 2), new THREE.Vector3(0, -1, 0));
             for (const hit of ray.intersectObject(b, true)) {
-              if (hit.face && hit.face.normal.y > 0.5 && hit.point.y < 1.4) {
-                this.place('books', bx, p.y + 0.06, 0.25, p.d - 0.12, { y0: hit.point.y, h: 0.14 + ((i + k) % 3) * 0.03 });
+              if (hit.face && hit.face.normal.y > 0.5 && hit.point.y < floorY + 1.4) {
+                this.place('books', bx, p.y + 0.06, 0.25, p.d - 0.12, { y0: hit.point.y - floorY, h: 0.14 + ((i + k) % 3) * 0.03 });
               }
             }
           }
@@ -869,16 +884,18 @@ export class Office3D extends window.Office {
         break;
       }
       case 'couch':
-        this.recolor(this.place('loungeSofa', p.x - 0.1, p.y - 0.15, p.w + 0.2, p.d + 0.2, { h: 0.8, stretch: true }), { carpet: 0x7fcbc2, wood: 0xe8c3a2 }); // soft teal sofa
+        this.recolor(this.place('loungeSofa', p.x - 0.1, p.y - 0.15, p.w + 0.2, p.d + 0.2, { h: 0.8, stretch: true }), { carpet: p.color ? new THREE.Color(p.color).getHex() : 0x7fcbc2, wood: 0xe8c3a2 });
         break;
       case 'coffeeTable':
         this.place('tableCoffee', p.x, p.y, p.w, p.d, { h: 0.35 });
-        this.place('radio', p.x + 1.0, p.y + 0.2, 0.3, 0.18, { y0: 0.35, h: 0.18 });
-        this.radioAt = [p.x + 1.15, 0.6, p.y + 0.29];
-        this.clickBox(p.x + 0.9, p.y + 0.1, 0.35, 0.5, 0.4, 0.35, () => {
-          const t = this.t / 1000;
-          this.until.notes = this.until.notes > t ? 0 : t + 8;
-        });
+        if (p.radio !== false) {
+          this.place('radio', p.x + 1.0, p.y + 0.2, 0.3, 0.18, { y0: 0.35, h: 0.18 });
+          this.radioAt = [p.x + 1.15, 0.6, p.y + 0.29];
+          this.clickBox(p.x + 0.9, p.y + 0.1, 0.35, 0.5, 0.4, 0.35, () => {
+            const t = this.t / 1000;
+            this.until.notes = this.until.notes > t ? 0 : t + 8;
+          });
+        }
         break;
       case 'beanbag': {
         const m = new THREE.Mesh(new THREE.SphereGeometry(0.42, 24, 16), new THREE.MeshStandardMaterial({ color: soft(p.color), roughness: 0.95 }));
@@ -893,19 +910,22 @@ export class Office3D extends window.Office {
       }
       case 'arcade': {
         const { x, y } = p;
-        this.boxMesh(x, y, 0, 0.7, 0.7, 1.75, 0x9483c9, { rough: 0.8 });
-        this.arcadeScreen = this.boxMesh(x + 0.1, y + 0.7, 1.0, 0.5, 0.01, 0.45, 0x000000, { emissive: 0xff44aa, ei: 1, shadow: false });
+        const body = p.color ? soft(p.color) : 0x9483c9;
+        this.boxMesh(x, y, 0, 0.7, 0.7, 1.75, body, { rough: 0.8 });
+        const screen = this.boxMesh(x + 0.1, y + 0.7, 1.0, 0.5, 0.01, 0.45, 0x000000, { emissive: 0xff44aa, ei: 1, shadow: false });
         this.boxMesh(x, y + 0.7, 1.55, 0.7, 0.02, 0.17, 0xffcf4a, { emissive: 0xffcf4a, ei: 0.6, shadow: false });
         this.boxMesh(x, y + 0.7, 0.8, 0.7, 0.2, 0.08, 0xa898dc);
-        {
-          const l = new THREE.PointLight(0xff5fc0, 0, 3, 1.6);
-          l.position.set(x + 0.35, 1.3, y + 1.1);
-          this.addToFloor(l);
-          this.arcadeGlow = { light: l, base: 1.6, sprite: this.haloSprite('255,95,192', x + 0.35, 1.25, y + 0.75, 1.4), sbase: 0.6 };
-          this.glows.push(this.arcadeGlow);
-        }
-        this.arcadeAt = [x + 0.35, 1.3, y + 0.8];
-        this.clickBox(x, y, 0, 0.7, 0.95, 1.8, () => { this.until.arcade = this.t / 1000 + 4.5; this.spawnFx('spark', x + 0.35, 1.6, y + 0.8, { n: 7, spread: 0.5, up: 0.9 }); });
+        const l = new THREE.PointLight(0xff5fc0, 0, 3, 1.6);
+        l.position.set(x + 0.35, 1.3, y + 1.1);
+        this.addToFloor(l);
+        const glow = { light: l, base: 1.6, sprite: this.haloSprite('255,95,192', x + 0.35, 1.25, y + 0.75, 1.4), sbase: 0.6 };
+        this.glows.push(glow);
+        const cab = { screen, glow, at: [x + 0.35, 1.3, y + 0.8], until: 0 };
+        this.arcadeScreens.push(cab);
+        this.arcadeScreen = screen;
+        this.arcadeGlow = glow;
+        this.arcadeAt = cab.at;
+        this.clickBox(x, y, 0, 0.7, 0.95, 1.8, () => { cab.until = this.t / 1000 + 4.5; this.spawnFx('spark', cab.at[0], 1.6, cab.at[2], { n: 7, spread: 0.5, up: 0.9 }); });
         break;
       }
       case 'lamp':
@@ -919,15 +939,33 @@ export class Office3D extends window.Office {
         break;
       }
       case 'rug':
-        this.recolor(this.place('rugRectangle', p.x, p.y, p.w, p.d, { y0: 0.004 }), { carpet: 0x9eaad9, carpetDarker: 0x8592c6 }); // soft periwinkle rug
+        this.recolor(this.place('rugRectangle', p.x, p.y, p.w, p.d, { y0: 0.004 }), {
+          carpet: p.color ? new THREE.Color(p.color).getHex() : 0x9eaad9,
+          carpetDarker: p.color2 ? new THREE.Color(p.color2).getHex() : 0x8592c6,
+        });
         break;
-      case 'stairs': {
-        // Landing pad on the focused floor; the shaft is built once in buildStairsShaft.
-        const { x, y, w = 1.35, d = 1.6 } = p;
-        this.boxMesh(x, y, 0, w, d, 0.08, 0xe8c4a0, { rough: 0.85 });
-        this.boxMesh(x + 0.08, y + 0.08, 0.08, 0.18, d - 0.16, 0.9, 0xd4a882, { rough: 0.9 });
+      case 'stairs':
+        // Landing + posts are built per floor in buildStairsShaft.
         break;
-      }
+      case 'sprout':
+        this.potted(p.kind || 'plantSmall2', p.x - 0.2, p.y - 0.2, 0.42, 0.42, { h: 0.55 });
+        break;
+      case 'loungeChair':
+        this.recolor(this.place('loungeChairRelax', p.x, p.y, 0.78, 0.8, { h: 0.78, rot: p.rot || 0 }), { carpet: new THREE.Color(p.color || '#f2b7c1').getHex(), wood: 0xe8c3a2 });
+        break;
+      case 'bench':
+        this.recolor(this.place('benchCushion', p.x, p.y, p.w || 1.4, p.d || 0.5, { h: 0.48, stretch: true }), { carpet: new THREE.Color(p.color || '#f6c9a8').getHex(), wood: 0xe8c3a2 });
+        break;
+      case 'tv':
+        this.place('cabinetTelevision', p.x, p.y, 1.15, 0.42, { h: 0.55 });
+        this.recolor(this.place('televisionModern', p.x + 0.18, p.y + 0.08, 0.78, 0.12, { y0: 0.55, h: 0.5 }), { metal: 0xd7dbe6 });
+        break;
+      case 'speaker':
+        this.place('speaker', p.x, p.y, 0.28, 0.28, { h: 0.48 });
+        break;
+      case 'coat':
+        this.place('coatRackStanding', p.x - 0.2, p.y - 0.2, 0.4, 0.4, { h: 1.55 });
+        break;
     }
   }
 
@@ -940,6 +978,9 @@ export class Office3D extends window.Office {
     this.clickObjs = [];             // real meshes that are clickable themselves (doors, chairs, plants)
     this.lamps = []; this.doors = []; this.plants = []; this.chairs = []; this.beans = []; this.blinds = [];
     this.coffee = null; this.fridge = null; this.arcadeGlow = null; this.arcadeAt = null; this.radioAt = null; this.butterfly = null;
+    this.arcadeScreens = [];
+    this.rods = [];
+    this.floorPads = [];
     this.until = { rally: 0, fb: 0, arcade: 0, notes: 0, notesNext: 0 };
     for (const f of this.fx || []) { this.scene.remove(f.sp); f.sp.material.dispose(); }
     this.fx = [];
@@ -1247,7 +1288,8 @@ export class Office3D extends window.Office {
   animateCat(t, dt) {
     const c = this.catObj, k = this.cat;
     if (!c || !k) return;
-    c.root.visible = !this.plan.scene;
+    const catFloor = k.floor ?? 0;
+    c.root.visible = !this.plan.scene && catFloor <= (this.viewFloor || 0);
     if (!c.root.visible) return;
     const walking = k.path.length > 0;
     if (c.last) {
@@ -1261,7 +1303,7 @@ export class Office3D extends window.Office {
     c.last = { x: k.x, y: k.y };
     c.hop = Math.max(0, c.hop - dt);
     const hopY = c.hop > 0 ? Math.sin((1 - c.hop / 0.6) * Math.PI) * 0.35 : 0;
-    c.root.position.set(k.x, hopY, k.y);
+    c.root.position.set(k.x, hopY + (this.plan.scene ? 0 : catFloor * LEVEL_H), k.y);
     c.root.rotation.y = c.yaw;
     c.sit += ((walking ? 0 : 1) - c.sit) * Math.min(1, dt * 4);
     const sw = walking ? Math.sin(t * 14) * 0.6 : 0;
@@ -1391,14 +1433,14 @@ export class Office3D extends window.Office {
     }
 
     // arcade "coin": fast rainbow flashing + a brighter glow
-    if (this.arcadeScreen) {
-      const on = t < this.until.arcade;
+    for (const cab of this.arcadeScreens || []) {
+      const on = t < cab.until;
       if (on) {
-        this.arcadeScreen.material.emissive.setHSL((t * 1.5) % 1, 0.9, 0.55);
-        this.arcadeScreen.material.emissiveIntensity = 1.5 + Math.sin(t * 30) * 0.5;
-        if (this.arcadeGlow) this.arcadeGlow.light.intensity *= 2.5;
-        if (this.arcadeAt && Math.random() < dt * 4) this.spawnFx('spark', this.arcadeAt[0], this.arcadeAt[1] + 0.3, this.arcadeAt[2], { n: 1, spread: 0.4, up: 0.7, size: 0.12 });
-      } else this.arcadeScreen.material.emissiveIntensity = 1;
+        cab.screen.material.emissive.setHSL((t * 1.5) % 1, 0.9, 0.55);
+        cab.screen.material.emissiveIntensity = 1.5 + Math.sin(t * 30) * 0.5;
+        if (cab.glow) cab.glow.light.intensity *= 2.5;
+        if (cab.at && Math.random() < dt * 4) this.spawnFx('spark', cab.at[0], cab.at[1] + 0.3, cab.at[2], { n: 1, spread: 0.4, up: 0.7, size: 0.12 });
+      } else cab.screen.material.emissiveIntensity = 1;
     }
 
     // radio: music notes while it's "playing"
@@ -1868,8 +1910,13 @@ export class Office3D extends window.Office {
 
   fitCamera3D(reset) {
     const { W, D } = this.plan;
-    const fy = (this.viewFloor || 0) * LEVEL_H;
-    const multi = !this.plan.scene && this.floors3d && Object.keys(this.floors3d).length > 1;
+    const vf = this.viewFloor || 0;
+    const ids = (this.plan.floors || [0]).filter((f) => this.plan.scene || f <= vf);
+    const lo = ids.length ? Math.min(...ids) : 0;
+    const hi = ids.length ? Math.max(...ids) : 0;
+    const fy = (this.plan.scene ? 0 : vf) * LEVEL_H;
+    const multi = !this.plan.scene && ids.length > 1;
+    const span = Math.max(0, hi - lo);
     const center = new THREE.Vector3(W / 2, fy + 0.6, D / 2);
     if (reset || !this.fitted) {
       const dist = multi ? 48 : 40;
@@ -1883,8 +1930,8 @@ export class Office3D extends window.Office {
     // Fit the room's corners into the view (include stacked floors when present).
     const inv = this.camera.matrixWorldInverse;
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    const yLo = this.plan.scene ? 0 : (multi ? -LEVEL_H - FLOOR_T : -FLOOR_T);
-    const yHi = this.plan.viewH || (multi ? LEVEL_H + WALL_H : WALL_H);
+    const yLo = this.plan.scene ? 0 : (lo * LEVEL_H - FLOOR_T);
+    const yHi = this.plan.viewH || (hi * LEVEL_H + WALL_H);
     for (const x of [0, W]) for (const y of [yLo, yHi]) for (const z of [0, D]) {
       const v = new THREE.Vector3(x, y, z).applyMatrix4(inv);
       minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x); minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
@@ -1902,7 +1949,7 @@ export class Office3D extends window.Office {
     this.sun.target.position.copy(center);
     const sc = this.sun.shadow.camera;
     const r = Math.max(W, D) * 0.75;
-    Object.assign(sc, { left: -r, right: r, top: r + (multi ? LEVEL_H : 0), bottom: -r - (multi ? LEVEL_H : 0), near: 1, far: multi ? 80 : 50 });
+    Object.assign(sc, { left: -r, right: r, top: r + span * LEVEL_H, bottom: -r - span * LEVEL_H, near: 1, far: multi ? 80 : 50 });
     sc.updateProjectionMatrix();
   }
 
@@ -2030,9 +2077,10 @@ export class Office3D extends window.Office {
       }
       a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift, p.y + Math.cos(a.yaw) * fwd);
       this.animateBlob(a, p, st, this.t / 1000, dt);
-      // status-pill filter + dim agents on other floors (still visible in the stack)
-      const onFloor = fl === (this.viewFloor || 0);
-      const want2 = filterMatch(p.s, this.filter) ? (onFloor ? 1 : 0.38) : 0.16;
+      // Floors above the picker are culled. Lower floors stay fully visible.
+      const culled = !this.plan.scene && fl > (this.viewFloor || 0);
+      a.obj.visible = !culled;
+      const want2 = culled ? 0 : (filterMatch(p.s, this.filter) ? 1 : 0.16);
       a.alpha = a.alpha ?? 1;
       if (Math.abs(a.alpha - want2) > 0.005) {
         a.alpha += (want2 - a.alpha) * Math.min(1, dt * 8);
@@ -2054,8 +2102,9 @@ export class Office3D extends window.Office {
         a.blob.glow.material.opacity = 0.9;
       }
       // hand-held props float beside the blob
-      a.cup.visible = st.act === 'coffee' || st.act === 'water' || (st.pose !== 'walk' && p.poi && p.poi.prop === 'cup');
-      a.book.visible = st.act === 'read';
+      a.cup.visible = !culled && (st.act === 'coffee' || st.act === 'water' || (st.pose !== 'walk' && p.poi && p.poi.prop === 'cup'));
+      a.book.visible = !culled && st.act === 'read';
+      a.prop.visible = a.cup.visible || a.book.visible;
       if (a.cup.visible || a.book.visible) {
         a.obj.updateMatrixWorld(true);
         const hand = new THREE.Vector3(0.3, a.blob.height * 0.45 + a.blob.hover.position.y, 0.18);
@@ -2200,9 +2249,19 @@ export class Office3D extends window.Office {
       const on = Math.sin(this.ledClock / (180 + b.r * 37 + b.k * 53) + b.r * b.k) > 0.2 && (b.r * 4 + b.k) < Math.max(4, this.deskOf.size * 3);
       b.m.material.emissiveIntensity = on ? 1.2 : 0.05;
     }
-    if (this.arcadeScreen) this.arcadeScreen.material.emissive.setHSL((t * 0.05) % 1, 0.7, 0.5);
-    const fbPlaying = this.plan.pois.filter((q) => q.pair === 'fb' && q.taken).length === 2 || (this.until && t < this.until.fb);
-    if (this.rods) this.rods.forEach((r, k) => { r.position.z = this.plan.props.find((q) => q.t === 'foosball').y + 0.4 + (fbPlaying ? Math.sin(t * 8 + k) * 0.06 : 0); r.rotation.z = fbPlaying ? Math.sin(t * 12 + k) * 0.6 : 0; });
+    for (const cab of this.arcadeScreens || []) {
+      if (t >= cab.until) cab.screen.material.emissive.setHSL((t * 0.05 + cab.at[0]) % 1, 0.7, 0.5);
+    }
+    const fbCounts = {};
+    for (const q of this.plan.pois) if (q.pair && q.taken) fbCounts[q.pair] = (fbCounts[q.pair] || 0) + 1;
+    if (this.rods) this.rods.forEach((r, k) => {
+      const table = r.userData.table;
+      const playing = (table && t < table.until) || (table && fbCounts[table.pair] >= 2);
+      const base = r.userData.baseZ;
+      if (base == null) return;
+      r.position.z = base + (playing ? Math.sin(t * 8 + k) * 0.06 : 0);
+      r.rotation.z = playing ? Math.sin(t * 12 + k) * 0.6 : 0;
+    });
     this.updateBall();
     if (!this.plan.scene) this.animateInteractive(t, dt, sky);
     else if (this.catObj) this.catObj.root.visible = false;
@@ -2218,6 +2277,8 @@ export class Office3D extends window.Office {
     for (const p of this.people.values()) {
       const a = this.actors.get(p.key);
       if (!a) continue;
+      const fl0 = this.floorOf(p);
+      if (!this.plan.scene && fl0 > (this.viewFloor || 0)) continue;
       const st = this.stateOf(p);
       const scale = p.s.subagent ? 0.8 : 1;
       const fl = this.floorOf(p);
