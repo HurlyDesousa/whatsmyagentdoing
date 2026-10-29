@@ -386,10 +386,6 @@
             <span class="setting-label" id="filterLabel" data-t="agents"></span>
             <div class="seg" id="agentSeg" role="group" aria-labelledby="filterLabel">
               <button data-v="all" class="on" data-t="all"></button>
-              <button data-v="claude"><img class="agent-logo" src="/assets/agents/claude.png" alt="">Claude</button>
-              <button data-v="codex"><img class="agent-logo" src="/assets/agents/codex.png" alt="">Codex</button>
-              <button data-v="gemini"><img class="agent-logo" src="/assets/agents/gemini.png" alt="">Gemini</button>
-              <button data-v="omp"><img class="agent-logo" src="/assets/agents/omp.svg" alt="">OMP</button>
               <button data-v="grokbot"><img class="agent-logo" src="/assets/agents/grokbot.svg" alt="">Grok Bot</button>
               <button data-v="paperclip"><img class="agent-logo" src="/assets/agents/paperclip.svg" alt="">Paperclip</button>
             </div>
@@ -577,7 +573,8 @@ function validPreference(k, v) {
   if (k === 'quality') return ['mid', 'high'].includes(v);
   if (k === 'light') return ['now', 'day', 'evening', 'night'].includes(v);
   if (k === 'floor') return [-1, 0, 1].includes(+v);
-  if (k === 'agent') return ['all', ...Object.keys(OFFICE_AGENT_BADGES)].includes(v);
+  if (k === 'agent') return ['all', 'grokbot', 'paperclip'].includes(v);
+  if (k === 'scene') return v === 'office' || v === 'cafe';
   if (k === 'lang') return v === 'auto' || Object.hasOwn(I18N, v);
   return typeof v === 'string' && /^[a-z0-9-]+$/.test(v);
 }
@@ -1080,9 +1077,12 @@ function fallbackTo2D() {
   state.quality = 'mid'; syncControls();
   setTimeout(() => makeOffice(), 1200);
 }
+// Settings → Scene: built-in Office plus Café. Other packs stay out of the menu
+// even if a copy is already installed on disk.
+const SETTINGS_SCENE_IDS = new Set(['cafe']);
 async function makeOffice() {
   const high = state.quality === 'high';
-  const scene = high && state.scene !== 'office' && state.scenes.some((x) => x.id === state.scene) ? state.scene : 'office';
+  const scene = high && SETTINGS_SCENE_IDS.has(state.scene) && state.scenes.some((x) => x.id === state.scene) ? state.scene : 'office';
   const kind = high ? `high:${scene}` : 'mid';
   if (kind === officeKind) return;
   officeKind = kind;
@@ -1148,18 +1148,19 @@ async function makeOffice() {
 }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideTip(); });
 
-// Scenes (3D only): the built-in office plus any installed scene packs.
 const sceneSel = document.getElementById('sceneSeg');
 state.available = [];
 function renderSceneSel() {
   const name = (x) => (x.name && (x.name[langCode] || x.name.en)) || x.id;
   const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-  const current = state.scenes.some((x) => x.id === state.scene) ? state.scene : 'office';
+  const installed = state.scenes.filter((x) => SETTINGS_SCENE_IDS.has(x.id));
+  const available = state.available.filter((x) => SETTINGS_SCENE_IDS.has(x.id));
+  const current = installed.some((x) => x.id === state.scene) ? state.scene : 'office';
   const btn = (v, label, title = '') =>
     `<button data-v="${esc(v)}" class="${v === current ? 'on' : ''}" aria-pressed="${v === current}"${title ? ` title="${esc(title)}"` : ''}>${label}</button>`;
   sceneSel.innerHTML = btn('office', `🏢 ${esc(L.office)}`) +
-    state.scenes.map((x) => btn(x.id, `${esc(x.icon || '🗺️')} ${esc(name(x))}`, x.credits || '')).join('') +
-    state.available.map((x) => btn(`dl:${x.id}`, `⬇ ${esc(x.icon || '')} ${esc(name(x))} <small>${kb(x.size)}</small>`, `${L.dl} ${kb(x.size)}`)).join('');
+    installed.map((x) => btn(x.id, `${esc(x.icon || '🗺️')} ${esc(name(x))}`, x.credits || '')).join('') +
+    available.map((x) => btn(`dl:${x.id}`, `⬇ ${esc(x.icon || '')} ${esc(name(x))} <small>${kb(x.size)}</small>`, `${L.dl} ${kb(x.size)}`)).join('');
 }
 function loadScenes() {
   return fetch('/api/scenes').then((r) => r.json()).then((d) => {
