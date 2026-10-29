@@ -2110,9 +2110,10 @@ export class Office3D extends window.Office {
       a.last = { x: p.x, y: p.y };
       a.obj.rotation.y = a.yaw;
       const fl = this.floorOf(p);
-      const fy = (this.plan.scene ? 0 : fl) * LEVEL_H;
-      const seatY = st.pose === 'sit' ? this.seatHeight(p.x, p.y, st.sitZ, fl)
-        : this.plan.terrain ? this.groundHeight(p.x, p.y) : fy;
+      const riding = !this.plan.scene && this.liftFloor(p);
+      const fy = this.plan.scene ? 0 : (riding != null ? riding : fl) * LEVEL_H;
+      const seatY = st.pose === 'sit' && riding == null ? this.seatHeight(p.x, p.y, st.sitZ, fl)
+        : this.plan.terrain && riding == null ? this.groundHeight(p.x, p.y) : fy;
       // The sit pose's torso leans back past its origin; slide the body
       // forward so the back rests against the backrest instead of in it.
       const fwd = st.pose === 'sit' ? SIT_FORWARD * 0.4 : 0;
@@ -2125,8 +2126,11 @@ export class Office3D extends window.Office {
       }
       a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift, p.y + Math.cos(a.yaw) * fwd);
       this.animateBlob(a, p, st, this.t / 1000, dt);
-      // Floors above the picker are culled. Lower floors stay fully visible.
-      const culled = !this.plan.scene && fl > (this.viewFloor || 0);
+      // Floors above the picker are culled. A rider stays visible while the
+      // cab is still inside the viewed shaft, including the floor they leave
+      // and the floor they arrive on.
+      const rideFl = this.plan.scene ? null : this.liftFloor(p);
+      const culled = !this.plan.scene && (rideFl != null ? rideFl : fl) > (this.viewFloor || 0) + 0.82;
       a.obj.visible = !culled;
       const want2 = culled ? 0 : (filterMatch(p.s, this.filter) ? 1 : 0.16);
       a.alpha = a.alpha ?? 1;
@@ -2326,11 +2330,12 @@ export class Office3D extends window.Office {
       const a = this.actors.get(p.key);
       if (!a) continue;
       const fl0 = this.floorOf(p);
-      if (!this.plan.scene && fl0 > (this.viewFloor || 0)) continue;
+      const rideFl0 = this.plan.scene ? null : this.liftFloor(p);
+      if (!this.plan.scene && (rideFl0 != null ? rideFl0 : fl0) > (this.viewFloor || 0) + 0.82) continue;
       const st = this.stateOf(p);
       const scale = p.s.subagent ? 0.8 : 1;
       const fl = this.floorOf(p);
-      const floorY = (this.plan.scene ? 0 : fl) * LEVEL_H;
+      const floorY = this.plan.scene ? 0 : (rideFl0 != null ? rideFl0 : fl) * LEVEL_H;
       const base = this.plan.terrain && st.pose !== 'sit' ? this.groundHeight(p.x, p.y) : floorY;
       const floatUp = st.pose !== 'walk' && p.poi && p.poi.float ? 0.45 + Math.sin((this.t / 1000 + p.phase) * 0.9) * 0.18 : 0;
       const top = (st.pose === 'sit' ? this.seatHeight(p.x, p.y, st.sitZ, fl) + CHAR_HEIGHT * 0.8 * scale : base + CHAR_HEIGHT * scale) + floatUp;

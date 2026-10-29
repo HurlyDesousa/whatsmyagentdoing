@@ -610,9 +610,13 @@
           else sy = Math.max(0.45, ppY0 - shaftD - 0.3);
         }
       }
-      solid(sx, sy, shaftW, shaftD, 0.05);
+      // Posts on three sides. The south doorway and the cab interior stay
+      // walkable so a wanderer can path in through the door, not through a wall.
+      solid(sx, sy, 0.16, shaftD, 0);
+      solid(sx + shaftW - 0.16, sy, 0.16, shaftD, 0);
+      solid(sx + 0.16, sy, shaftW - 0.32, 0.16, 0);
       prop('stairs', { x: sx, y: sy, w: shaftW, d: shaftD, floor: 0 });
-      // One stairs POI per floor (same x/y footprint) so wanderers can change levels.
+      // One stairs POI per floor (inside the cab) so wanderers can change levels.
       for (const fl of [-1, 0, 1]) {
         poi(sx + 0.65, sy + 0.75, 'stairs', 'front', { floor: fl, stairs: true });
       }
@@ -1009,6 +1013,93 @@
       const opts = [-1, 0, 1].filter((f) => Math.abs(f - cur) === 1);
       if (!opts.length) return;
       p.floor = opts[(p.h + Math.floor(this.t / 700)) % opts.length];
+    }
+
+    // Cab center and the step just outside the south doors.
+    elevatorCab() {
+      const at = this.plan && this.plan.stairsAt;
+      if (!at) return null;
+      return { x: at.x, y: at.y };
+    }
+
+    elevatorExit() {
+      const at = this.plan && this.plan.stairsAt;
+      if (!at) return null;
+      const foot = this.elevatorFootprint();
+      const y = Math.min(this.plan.D - 0.4, (foot ? foot.y + foot.d : at.y) + 0.55);
+      return { x: at.x, y };
+    }
+
+    // Fractional floor while the cab is moving; null when they're walking.
+    liftFloor(p) {
+      if (!p || !p.lift || p.lift.phase !== 'ride') return null;
+      const L = p.lift;
+      return L.from + (L.to - L.from) * (L.u || 0);
+    }
+
+    // 2D draws one floor. A rider stays visible in the cab on the floor they
+    // boarded and on the floor they're going to, then only on the destination
+    // once they walk out.
+    showsOnFloor(p, vf) {
+      const L = p && p.lift;
+      if (L && (L.phase === 'board' || L.phase === 'ride')) return L.from === vf || (L.phase === 'ride' && L.to === vf);
+      return (this.floorOf(p) ?? 0) === vf;
+    }
+
+    beginLift(p, now) {
+      const from = p.floor ?? 0;
+      const opts = [-1, 0, 1].filter((f) => Math.abs(f - from) === 1);
+      const cab = this.elevatorCab();
+      if (!opts.length || !cab) {
+        this.release(p);
+        p.until = now + 500;
+        return;
+      }
+      const to = opts[(p.h + Math.floor(this.t / 700)) % opts.length];
+      p.x = cab.x;
+      p.y = cab.y;
+      p.path = [];
+      p.floor = from;
+      p.lift = { from, to, t0: now, board: 650, ride: 1200, phase: 'board', u: 0 };
+      p.until = Infinity;
+    }
+
+    stepLift(p, now) {
+      const L = p.lift;
+      if (!L) return;
+      const cab = this.elevatorCab();
+      const elapsed = now - L.t0;
+      if (L.phase === 'board') {
+        p.floor = L.from;
+        if (cab) { p.x = cab.x; p.y = cab.y; }
+        p.path = [];
+        L.u = 0;
+        if (elapsed >= L.board) { L.phase = 'ride'; L.t0 = now; L.u = 0; }
+        return;
+      }
+      if (L.phase === 'ride') {
+        L.u = Math.min(1, elapsed / L.ride);
+        p.floor = L.from;
+        if (cab) { p.x = cab.x; p.y = cab.y; }
+        p.path = [];
+        if (L.u >= 1) {
+          L.phase = 'exit';
+          L.u = 1;
+          p.floor = L.to;
+          this.release(p);
+          p.poi = null;
+          const out = this.elevatorExit();
+          if (out) p.path = this.plan.grid.path(p.x, p.y, out.x, out.y);
+          if (!p.path.length && out) { p.x = out.x; p.y = out.y; }
+        }
+        return;
+      }
+      p.floor = L.to;
+      L.u = 1;
+      if (!p.path.length) {
+        p.lift = null;
+        p.until = now + 400;
+      }
     }
 
     setVisible(v) { this.visible = v; if (v) this.resize(); }
@@ -1801,7 +1892,10 @@
       const seated = st.pose === 'sit';
       const front = st.face !== 'back';
       const napping = st.act === 'nap';
-      const b = this.iso(p.x, p.y, st.sitZ * 0.6);
+      const rideZ = p.lift && p.lift.phase === 'ride'
+        ? Math.sin((p.lift.u || 0) * Math.PI) * 0.65 * Math.sign(p.lift.to - p.lift.from)
+        : 0;
+      const b = this.iso(p.x, p.y, st.sitZ * 0.6 + rideZ);
       const step = moving ? Math.sin(t * 12 + p.phase) : 0;
       // Blobs float a little above the floor (like the 3D office) and hop when walking.
       const hover = napping ? 0.5 : 3 + Math.sin(t * 2.2 + p.phase) * 1.2;
@@ -2125,16 +2219,12 @@
       const wall = Date.now();
       for (const [k, p] of this.people) {
         if (p.mode === 'wander') {
-          if (p.poi && !p.path.length && p.until === Infinity) {
-            if (p.poi.stairs) {
-              this.takeStairs(p);
-              this.release(p);
-              p.until = wall + 600;
-            } else {
-              p.until = wall + p.stay;
-            }
+          if (p.lift) this.stepLift(p, wall);
+          else if (p.poi && !p.path.length && p.until === Infinity) {
+            if (p.poi.stairs) this.beginLift(p, wall);
+            else p.until = wall + p.stay;
           }
-          this.wander(p, wall);
+          if (!p.lift) this.wander(p, wall);
         }
         if (p.path.length) {
           const n = p.path[0];
@@ -2162,7 +2252,7 @@
       else this.drawExtraRoom(vf);
       const occupant = new Map();
       for (const p of this.people.values()) {
-        if (this.floorOf(p) !== vf) continue;
+        if (!this.showsOnFloor(p, vf)) continue;
         if (p.mode === 'work' && p.desk) occupant.set(p.desk, p);
         else if (p.napDesk) occupant.set(p.napDesk, p);
       }
@@ -2176,7 +2266,7 @@
         items.push({ depth: dk.seat.x + dk.seat.y - 0.06, draw: () => this.chair(dk, p) });
       }
       for (const p of this.people.values()) {
-        if (this.floorOf(p) !== vf) continue;
+        if (!this.showsOnFloor(p, vf)) continue;
         items.push({ depth: p.x + p.y + 0.01, person: p });
       }
       if (vf === 0) items.push({ depth: this.cat.x + this.cat.y, draw: () => this.drawCat() });
