@@ -720,14 +720,17 @@
         run(fl, napX, napY, napW, 'x', '#b7a6d8', false);
         sign(fl, napX + 0.35, napY + napD + 0.02, 'NAP', '#7a68b0');
         sign(fl, napX + 1.7, napY + napD + 0.02, 'ON CALL', '#6d84c8');
-        prop('rug', { x: napX + 0.35, y: napY + 0.45, w: Math.min(5.4, napW - 0.7), d: napD - 0.7, color: '#b7c4f0', color2: '#8ea2e4', floor: fl });
-        prop('couch', { x: napX + 0.55, y: napY + 0.7, w: 2.8, d: 0.8, color: '#7f97e4', floor: fl });
-        prop('coffeeTable', { x: napX + 0.85, y: napY + 1.85, w: 1.5, d: 0.65, radio: false, floor: fl });
-        prop('beanbag', { x: napX + 2.7, y: napY + 2.15, color: '#8fd0c4', floor: fl });
-        prop('beanbag', { x: napX + 3.7, y: napY + 2.35, color: '#c9b6f0', floor: fl });
-        prop('lamp', { x: napX + napW - 0.7, y: napY + 0.55, floor: fl });
-        for (let k = 0; k < 2; k++) poi(napX + 1.0 + k * 0.9, napY + 1.35, 'couch', 'front', { sit: 0.36, floor: fl });
-        poi(napX + 2.7, napY + 2.15, 'beanbag', 'front', { sit: 0.18, floor: fl });
+        // Lounge sits on the east side of the nap nook. Floor 1's couch is at
+        // x≈OW and its lamp is at the front-left of that rug; these are not.
+        prop('rug', { x: napX + 2.3, y: napY + 0.28, w: Math.min(4.2, napW - 2.5), d: napD - 0.55, color: '#b7c4f0', color2: '#8ea2e4', floor: fl });
+        prop('couch', { x: napX + 3.2, y: napY + 0.42, w: 2.8, d: 0.8, color: '#7f97e4', floor: fl });
+        prop('coffeeTable', { x: napX + 3.5, y: napY + 1.5, w: 1.5, d: 0.65, radio: false, floor: fl });
+        prop('beanbag', { x: napX + 0.55, y: napY + 1.7, color: '#8fd0c4', floor: fl });
+        prop('beanbag', { x: napX + 1.55, y: napY + 2.4, color: '#c9b6f0', floor: fl });
+        prop('lamp', { x: napX + napW - 0.85, y: napY + napD - 0.75, floor: fl });
+        for (let k = 0; k < 2; k++) poi(napX + 3.6 + k * 0.9, napY + 1.45, 'couch', 'front', { sit: 0.36, floor: fl });
+        poi(napX + 0.55, napY + 1.7, 'beanbag', 'front', { sit: 0.18, floor: fl });
+        poi(napX + 1.55, napY + 2.4, 'beanbag', 'front', { sit: 0.18, floor: fl });
         // Open ops floor: desks clear of the rooms and of the elevator.
         addFloorPod(fl, 1.15, 6.45, '#8aa4c8');
         addFloorPod(fl, 4.85, 6.45, '#7f9a88');
@@ -814,20 +817,22 @@
         run(fl, loungeX, loungeY + loungeD, loungeW, 'x', wallC, false, Math.max(0.4, loungeW - 1.8), 1.05);
         sign(fl, loungeX + 0.35, loungeY + loungeD + 0.02, 'LOUNGE', '#e07a9a');
         sign(fl, loungeX + 2.3, loungeY + loungeD + 0.02, 'SHIP IT', '#e0a15a');
-        const rugW = Math.min(5.6, loungeW - 0.6);
-        prop('rug', { x: loungeX + 0.35, y: loungeY + 0.7, w: rugW, d: Math.min(4.6, loungeD - 1.3), color: '#f2b39a', color2: '#e8927a', floor: fl });
+        // Couch is forward and to the right; the lamp stands mid-room on the
+        // west side. Floor 1 keeps its lamp at the front-left of the rug.
+        prop('rug', { x: loungeX + 2.15, y: loungeY + 3.5, w: Math.min(4.3, loungeW - 2.4), d: Math.min(3.3, loungeD - 4.0), color: '#f2b39a', color2: '#e8927a', floor: fl });
         prop('tv', { x: loungeX + 0.45, y: loungeY + 0.55, floor: fl });
         prop('speaker', { x: loungeX + 1.7, y: loungeY + 0.6, floor: fl });
-        prop('couch', { x: loungeX + 0.5, y: loungeY + 1.7, w: 2.8, d: 0.8, color: '#ee7f9e', floor: fl });
-        prop('coffeeTable', { x: loungeX + 0.85, y: loungeY + 2.75, w: 1.5, d: 0.65, radio: false, floor: fl });
-        prop('beanbag', { x: loungeX + 0.7, y: loungeY + 3.7, color: '#f2b59a', floor: fl });
-        prop('beanbag', { x: loungeX + 1.9, y: loungeY + 3.85, color: '#f3d78a', floor: fl });
-        prop('beanbag', { x: loungeX + 3.1, y: loungeY + 3.55, color: '#b7e0c2', floor: fl });
-        prop('lamp', { x: loungeX + loungeW - 0.65, y: loungeY + 1.1, floor: fl });
+        prop('couch', { x: loungeX + 2.7, y: loungeY + 3.85, w: 2.8, d: 0.8, color: '#ee7f9e', floor: fl });
+        prop('coffeeTable', { x: loungeX + 3.0, y: loungeY + 4.95, w: 1.5, d: 0.65, radio: false, floor: fl });
+        prop('beanbag', { x: loungeX + 0.7, y: loungeY + 5.3, color: '#f2b59a', floor: fl });
+        prop('beanbag', { x: loungeX + 1.7, y: loungeY + 6.05, color: '#f3d78a', floor: fl });
+        prop('beanbag', { x: loungeX + 4.6, y: loungeY + 5.6, color: '#b7e0c2', floor: fl });
+        prop('lamp', { x: loungeX + 0.85, y: loungeY + 2.55, floor: fl });
         prop('arcade', { x: loungeX + loungeW - 1.15, y: loungeY + loungeD - 1.5, color: '#e7a0c4', floor: fl });
         prop('plant', { x: loungeX + loungeW - 0.55, y: loungeY + 2.4, floor: fl });
-        for (let k = 0; k < 2; k++) poi(loungeX + 0.95 + k * 0.9, loungeY + 2.35, 'couch', 'front', { sit: 0.36, floor: fl });
-        poi(loungeX + 0.7, loungeY + 3.7, 'beanbag', 'front', { sit: 0.18, floor: fl });
+        for (let k = 0; k < 2; k++) poi(loungeX + 3.15 + k * 0.9, loungeY + 4.9, 'couch', 'front', { sit: 0.36, floor: fl });
+        poi(loungeX + 0.7, loungeY + 5.3, 'beanbag', 'front', { sit: 0.18, floor: fl });
+        poi(loungeX + 1.7, loungeY + 6.05, 'beanbag', 'front', { sit: 0.18, floor: fl });
         // Desks sit in the pocket under the WC and booth, clear of the elevator.
         addFloorPod(fl, 0.55, 8.15, '#e7b0c4');
         addFloorPod(fl, 4.35, 8.15, '#e0b56a');
