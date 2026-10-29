@@ -592,9 +592,20 @@
       for (const q of pois) if (q.floor == null) q.floor = 0;
       for (const p of props) if (p.floor == null) p.floor = 0;
 
-      const sx = 0.55, sy = Math.max(OD + 0.4, D - 2.55);
-      solid(sx, sy, 1.35, 1.6, 0.05);
-      prop('stairs', { x: sx, y: sy, w: 1.35, d: 1.6, floor: 0 });
+      // SWA-3029: elevator shaft, a visible step right of the left wall / door.
+      // Nudge clear of ping-pong if a bigger crew pushes that table forward.
+      const shaftW = 1.35, shaftD = 1.6;
+      let sx = 3.35;
+      let sy = Math.max(OD + 0.4, D - 2.55);
+      const overlap = (x, y, w, d, x0, y0, x1, y1) => x < x1 && x + w > x0 && y < y1 && y + d > y0;
+      const ppX0 = 2.4, ppY0 = OD + 1.0, ppX1 = ppX0 + 2.6, ppY1 = ppY0 + 1.4;
+      if (overlap(sx, sy, shaftW, shaftD, ppX0, ppY0, ppX1, ppY1)) {
+        const nudged = ppY1 + 0.25;
+        if (nudged + shaftD <= D - 0.15) sy = nudged;
+        else sx = Math.max(0.85, ppX0 - shaftW - 0.35);
+      }
+      solid(sx, sy, shaftW, shaftD, 0.05);
+      prop('stairs', { x: sx, y: sy, w: shaftW, d: shaftD, floor: 0 });
       // One stairs POI per floor (same x/y footprint) so wanderers can change levels.
       for (const fl of [-1, 0, 1]) {
         poi(sx + 0.65, sy + 0.75, 'stairs', 'front', { floor: fl, stairs: true });
@@ -612,19 +623,107 @@
         prop('lamp', { x: ox + 2.9, y: oy + 1.5, floor });
         poi(ox + 1.4, oy - 0.55, 'window', 'back', { floor });
       };
-      // Basement: cooler server-room desks + a rack.
+      // Basement: ops den — pastel server cage, on-call nap corner, snack bay.
       addFloorPod(-1, 1.5, 2.2, '#8aa4c8');
       addFloorPod(-1, 5.7, 2.2, '#9bb8a0');
-      prop('rack', { x: OW - 1.15, y: 0.35, floor: -1 });
-      prop('cooler', { x: OW + 0.4, y: MR + 0.4, floor: -1 });
-      poi(OW + 0.65, MR + 1.25, 'water', 'back', { floor: -1 });
-      // 2nd floor: loft desks + lounge couch.
+      prop('rack', { x: OW + 0.25, y: 0.28, floor: -1 });
+      prop('rack', { x: OW + 1.15, y: 0.28, floor: -1 });
+      prop('rack', { x: OW + 2.05, y: 0.28, floor: -1 });
+      prop('rug', { x: OW + 0.1, y: 0.12, w: 3.3, d: 1.35, color: '#8ea6e4', color2: '#6f8ad4', floor: -1 });
+      prop('sprout', { x: OW + 3.4, y: 0.55, kind: 'plantSmall1', floor: -1 });
+      prop('sprout', { x: OW + 3.95, y: 0.72, kind: 'plantSmall3', floor: -1 });
+      prop('shelf', { x: OW + 4.2, y: 0.22, w: 2.4, d: 0.45, floor: -1 });
+      prop('loungeChair', { x: OW + 4.35, y: 1.3, color: '#8aa4ea', rot: Math.PI, floor: -1 });
+      prop('loungeChair', { x: OW + 5.55, y: 1.3, color: '#7dcfb0', rot: Math.PI, floor: -1 });
+      prop('lamp', { x: OW + 6.55, y: 1.45, floor: -1 });
+      poi(OW + 4.9, 1.15, 'read', 'back', { floor: -1 });
+      poi(OW + 6.1, 1.15, 'read', 'back', { floor: -1 });
+      prop('cooler', { x: OW + 0.3, y: MR + 0.25, floor: -1 });
+      prop('vending', { x: OW + 1.15, y: MR + 0.18, color: '#9eb6e8', floor: -1 });
+      prop('vending', { x: OW + 1.15, y: MR + 1.08, color: '#f0b7c8', floor: -1 });
+      poi(OW + 0.55, MR + 1.15, 'water', 'back', { floor: -1 });
+      poi(OW + 2.05, MR + 0.55, 'vending', 'back', { floor: -1 });
+      poi(OW + 2.05, MR + 1.45, 'vending', 'back', { floor: -1 });
+      prop('roundTable', { x: OW + 4.5, y: MR + 2.2, floor: -1 });
+      for (const [dx, dy, face] of [[-0.95, 0, 'front'], [0.95, 0, 'front'], [0, 0.95, 'back'], [0, -0.9, 'front']]) {
+        prop('barStool', { x: OW + 4.5 + dx, y: MR + 2.2 + dy, floor: -1 });
+        poi(OW + 4.5 + dx, MR + 2.2 + dy, 'stool', face, { sit: 0.47, floor: -1 });
+      }
+      prop('speaker', { x: OW + 3.25, y: MR + 0.35, floor: -1 });
+      prop('speaker', { x: OW + 3.65, y: MR + 0.35, floor: -1 });
+      prop('plant', { x: W - 0.55, y: MR + 0.5, floor: -1 });
+      prop('rug', { x: OW + 0.25, y: PY + 0.35, w: 6.2, d: Math.max(3.2, D - PY - 0.95), color: '#9aafeb', color2: '#7d96e0', floor: -1 });
+      prop('couch', { x: OW + 0.55, y: PY + 0.85, w: 2.8, d: 0.8, color: '#7f97e4', floor: -1 });
+      prop('coffeeTable', { x: OW + 1.15, y: PY + 2.15, w: 1.6, d: 0.7, radio: false, floor: -1 });
+      prop('beanbag', { x: OW + 0.9, y: PY + 3.35, color: '#8fd0c4', floor: -1 });
+      prop('beanbag', { x: OW + 2.4, y: PY + 3.45, color: '#c9b6f0', floor: -1 });
+      prop('bench', { x: OW + 4.25, y: PY + 2.35, w: 1.5, d: 0.5, color: '#8eaae8', floor: -1 });
+      prop('lamp', { x: OW + 0.35, y: D - 0.65, floor: -1 });
+      prop('arcade', { x: W - 1.25, y: PY + 1.15, color: '#7f8fd4', floor: -1 });
+      prop('plant', { x: W - 0.5, y: D - 0.5, floor: -1 });
+      prop('plant', { x: OW + 5.45, y: PY + 0.55, floor: -1 });
+      for (let k = 0; k < 3; k++) poi(OW + 1.05 + k * 0.9, PY + 1.55, 'couch', 'front', { sit: 0.36, floor: -1 });
+      poi(OW + 0.9, PY + 3.35, 'beanbag', 'front', { sit: 0.18, floor: -1 });
+      poi(OW + 2.4, PY + 3.45, 'beanbag', 'front', { sit: 0.18, floor: -1 });
+      poi(W - 0.9, PY + 2.2, 'arcade', 'back', { floor: -1 });
+      prop('sprout', { x: 0.45, y: 6.6, kind: 'plantSmall2', floor: -1 });
+      prop('sprout', { x: 0.55, y: 8.4, kind: 'plantSmall1', floor: -1 });
+      prop('sprout', { x: 0.4, y: 10.2, kind: 'plantSmall3', floor: -1 });
+      prop('rug', { x: 4.05, y: 6.55, w: 2.3, d: 2.15, color: '#a9bbee', color2: '#8aa0e4', floor: -1 });
+      prop('beanbag', { x: 4.55, y: 7.15, color: '#f2c6d8', floor: -1 });
+      prop('beanbag', { x: 5.55, y: 7.95, color: '#b7e0c8', floor: -1 });
+      poi(4.55, 7.15, 'beanbag', 'front', { sit: 0.18, floor: -1 });
+      poi(5.55, 7.95, 'beanbag', 'front', { sit: 0.18, floor: -1 });
+      prop('foosball', { x: 3.55, y: 9.25, pair: 'fbB', floor: -1 });
+      poi(3.1, 9.65, 'foosball', 'side', { pair: 'fbB', floor: -1 });
+      poi(5.6, 9.65, 'foosball', 'side', { pair: 'fbB', floor: -1 });
+      // 2nd floor: prompt loft — warm pastel lounge, garden, play table.
       addFloorPod(1, 1.5, 2.2, '#d4a0b8');
       addFloorPod(1, 5.7, 2.2, '#c9b07a');
-      prop('couch', { x: OW + 0.6, y: PY + 1.0, w: 2.8, d: 0.8, floor: 1 });
-      prop('rug', { x: OW + 0.3, y: PY + 0.6, w: 4.0, d: Math.max(2, D - PY - 1.0), floor: 1 });
+      for (const [px, py, kind] of [[0.45, 0.42, 'plantSmall1'], [2.5, 0.4, 'plantSmall2'], [4.7, 0.48, 'plantSmall3'], [8.5, 0.42, 'plantSmall1']]) {
+        prop('sprout', { x: px, y: py, kind, floor: 1 });
+      }
+      prop('foosball', { x: 3.35, y: 6.95, pair: 'fb2', floor: 1 });
+      poi(2.9, 7.35, 'foosball', 'side', { pair: 'fb2', floor: 1 });
+      poi(5.4, 7.35, 'foosball', 'side', { pair: 'fb2', floor: 1 });
+      prop('bench', { x: 6.35, y: 7.15, w: 1.45, d: 0.48, color: '#f0b090', floor: 1 });
+      prop('plant', { x: 6.55, y: 8.55, floor: 1 });
+      prop('loungeChair', { x: 7.55, y: 6.85, color: '#ee8eae', floor: 1 });
+      prop('loungeChair', { x: 7.55, y: 8.15, color: '#f0c56a', rot: Math.PI, floor: 1 });
+      prop('shelf', { x: OW + 0.35, y: 0.22, w: 3.1, d: 0.45, floor: 1 });
+      prop('speaker', { x: OW + 3.65, y: 0.32, floor: 1 });
+      prop('tv', { x: OW + 4.15, y: 0.22, floor: 1 });
+      prop('speaker', { x: OW + 5.45, y: 0.32, floor: 1 });
+      prop('loungeChair', { x: OW + 4.35, y: 1.55, color: '#f09a74', rot: Math.PI, floor: 1 });
+      prop('plant', { x: W - 0.5, y: 0.5, floor: 1 });
+      poi(OW + 1.2, 1.05, 'read', 'back', { floor: 1 });
+      poi(OW + 2.4, 1.05, 'read', 'back', { floor: 1 });
+      prop('coat', { x: OW + 0.45, y: MR + 0.4, floor: 1 });
+      prop('roundTable', { x: OW + 2.3, y: MR + 2.05, floor: 1 });
+      for (const [dx, dy, face] of [[-0.95, 0, 'front'], [0.95, 0, 'front'], [0, 0.95, 'back'], [0, -0.9, 'front']]) {
+        prop('barStool', { x: OW + 2.3 + dx, y: MR + 2.05 + dy, floor: 1 });
+        poi(OW + 2.3 + dx, MR + 2.05 + dy, 'stool', face, { sit: 0.47, floor: 1 });
+      }
+      prop('lamp', { x: OW + 5.7, y: MR + 1.15, floor: 1 });
+      prop('sprout', { x: OW + 4.4, y: MR + 0.45, kind: 'plantSmall2', floor: 1 });
+      prop('sprout', { x: OW + 6.3, y: MR + 2.6, kind: 'plantSmall3', floor: 1 });
+      prop('rug', { x: OW + 0.28, y: PY + 0.38, w: 6.35, d: Math.max(3.3, D - PY - 0.9), color: '#f2b39a', color2: '#e8927a', floor: 1 });
+      prop('couch', { x: OW + 0.55, y: PY + 0.9, w: 2.8, d: 0.8, color: '#ee7f9e', floor: 1 });
+      prop('coffeeTable', { x: OW + 1.15, y: PY + 2.2, w: 1.6, d: 0.7, radio: false, floor: 1 });
+      prop('beanbag', { x: OW + 0.85, y: PY + 3.4, color: '#f2b59a', floor: 1 });
+      prop('beanbag', { x: OW + 2.15, y: PY + 3.55, color: '#f3d78a', floor: 1 });
+      prop('beanbag', { x: OW + 3.4, y: PY + 3.25, color: '#b7e0c2', floor: 1 });
+      prop('bench', { x: OW + 4.15, y: PY + 2.45, w: 1.45, d: 0.48, color: '#f0c56e', floor: 1 });
+      prop('lamp', { x: OW + 0.32, y: D - 0.62, floor: 1 });
+      prop('arcade', { x: W - 1.25, y: PY + 1.15, color: '#e7a0c4', floor: 1 });
       prop('plant', { x: W - 0.5, y: D - 0.5, floor: 1 });
-      for (let k = 0; k < 3; k++) poi(OW + 1.1 + k * 0.9, PY + 1.6, 'couch', 'front', { sit: 0.36, floor: 1 });
+      prop('plant', { x: OW + 5.35, y: PY + 0.5, floor: 1 });
+      prop('plant', { x: OW + 5.7, y: D - 0.7, floor: 1 });
+      for (let k = 0; k < 3; k++) poi(OW + 1.05 + k * 0.9, PY + 1.6, 'couch', 'front', { sit: 0.36, floor: 1 });
+      poi(OW + 0.85, PY + 3.4, 'beanbag', 'front', { sit: 0.18, floor: 1 });
+      poi(OW + 2.15, PY + 3.55, 'beanbag', 'front', { sit: 0.18, floor: 1 });
+      poi(OW + 3.4, PY + 3.25, 'beanbag', 'front', { sit: 0.18, floor: 1 });
+      poi(W - 0.9, PY + 2.2, 'arcade', 'back', { floor: 1 });
 
       return {
         W, D, OW, OD, MR, PY, RW, grid, items, props, pois, desks, windows, posters, pp,
@@ -1753,16 +1852,6 @@
 
       const vf = this.viewFloor || 0;
       this.drawRoom();
-      // Soft tint when viewing basement / 2nd so the shared ground shell still reads.
-      if (vf !== 0) {
-        const { W, D } = this.plan;
-        const P = (x, y) => this.iso(x, y, 0);
-        c.save();
-        c.globalAlpha = 0.18;
-        c.fillStyle = vf < 0 ? '#6a8cff' : '#ff9ec4';
-        this.poly([P(0, 0), P(W, 0), P(W, D), P(0, D)], c.fillStyle);
-        c.restore();
-      }
       const occupant = new Map();
       for (const p of this.people.values()) {
         if (this.floorOf(p) !== vf) continue;
