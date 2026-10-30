@@ -922,7 +922,7 @@ export class Office3D extends window.Office {
         break;
       }
       case 'couch':
-        this.recolor(this.place('loungeSofa', p.x - 0.1, p.y - 0.15, p.w + 0.2, p.d + 0.2, { h: 0.8, stretch: true }), { carpet: p.color ? new THREE.Color(p.color).getHex() : 0x7fcbc2, wood: 0xe8c3a2 });
+        this.recolor(this.place('loungeSofa', p.x - 0.1, p.y - 0.15, p.w + 0.2, p.d + 0.2, { h: 0.8, stretch: true, rot: p.rot || 0 }), { carpet: p.color ? new THREE.Color(p.color).getHex() : 0x7fcbc2, wood: 0xe8c3a2 });
         break;
       case 'coffeeTable':
         this.place('tableCoffee', p.x, p.y, p.w, p.d, { h: 0.35 });
