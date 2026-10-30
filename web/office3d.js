@@ -3,6 +3,7 @@
 // Bubbles and name tags are drawn by the 2D code on a canvas overlay.
 // Source file: `npm run build` bundles it with three.js into public/office3d.js.
 import * as THREE from 'three';
+import { installFloorShadowChunk, createFloorShadowLight, mountFloorShadowLights, tagFloorShadowMaterials } from './floorshadow.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
@@ -125,6 +126,8 @@ function skyNow() {
 // builds the floor plan before our fields exist, so it's passed this way.
 let PENDING_SCENE = null;
 
+installFloorShadowChunk();
+
 export class Office3D extends window.Office {
   constructor(root, opts) {
     PENDING_SCENE = (opts && opts.scene) || null;
@@ -169,6 +172,8 @@ export class Office3D extends window.Office {
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.02;
     this.scene.add(this.sun, this.sun.target);
+    this.floorShadowLights = [];
+    this.floorShadowCount = 0;
 
     this.actors = new Map();     // person key -> { obj, blob, look, prop, cup, book }
     this.screens = new Map();    // desk -> emissive screen mesh
@@ -463,7 +468,36 @@ export class Office3D extends window.Office {
     this.buildStairsShaft();
     this.applyFloorView(true);
     this.clicks.updateMatrixWorld(true);
+    this.installFloorShadows();
     this.fitCamera3D(true);
+  }
+
+  // Stacked floors share one angled sun for colour. Its shadow map used to
+  // cover the whole building, and the slabs do not cast, so a blob on floor
+  // N darkened every floor under that XZ. Shadow-only lights (see
+  // floorshadow.js) replace that map with one volume per storey.
+  installFloorShadows() {
+    for (const light of this.floorShadowLights || []) this.scene.remove(light, light.target);
+    this.floorShadowLights = [];
+    const floors = (this.plan && this.plan.floors) || [0];
+    const multi = !this.plan.scene && floors.length > 1;
+    this.floorShadowCount = multi ? floors.length : 0;
+    this.sun.castShadow = !multi;
+    if (multi) {
+      const { W, D } = this.plan;
+      const cx = W / 2, cz = D / 2;
+      for (const fl of floors) {
+        const light = createFloorShadowLight({
+          floorY: fl * LEVEL_H, cx, cz, width: W, depth: D,
+          above: WALL_H + 0.5, below: 0.42,
+        });
+        light.name = `floor-shadow-${fl}`;
+        light.userData.floor = fl;
+        this.floorShadowLights.push(light);
+      }
+      mountFloorShadowLights(this.scene, this.floorShadowLights, this.sun);
+    }
+    tagFloorShadowMaterials(this.scene, this.floorShadowCount);
   }
 
   // Simpler stacked floors: thick slab, short walls, desks/props tagged for that floor.
@@ -1561,6 +1595,7 @@ export class Office3D extends window.Office {
       }
     }
     for (const p of def.props) this.buildSceneProp(p);
+    this.installFloorShadows();
     this.fitCamera3D(true);
   }
 
@@ -1944,7 +1979,8 @@ export class Office3D extends window.Office {
     const cxv = (minX + maxX) / 2, cyv = (minY + maxY) / 2;
     Object.assign(this.camera, { left: cxv - w / 2, right: cxv + w / 2, top: cyv + h / 2, bottom: cyv - h / 2 });
     this.camera.updateProjectionMatrix();
-    // Sun casts shadows over the whole stack.
+    // Key light stays angled. On a stacked office it does not cast; each
+    // storey has its own straight-down shadow volume (installFloorShadows).
     this.sun.position.set(center.x - 6, fy + (multi ? 18 : 14), center.z - 3);
     this.sun.target.position.copy(center);
     const sc = this.sun.shadow.camera;
@@ -1983,6 +2019,8 @@ export class Office3D extends window.Office {
     obj.add(ring);
     a = { obj, blob, look, prop, cup, book, ring, yaw: 0, last: { x: p.x, y: p.y }, hop: 0 };
     this.actors.set(p.key, a);
+    tagFloorShadowMaterials(obj, this.floorShadowCount || 0);
+    tagFloorShadowMaterials(prop, this.floorShadowCount || 0);
     return a;
   }
 
