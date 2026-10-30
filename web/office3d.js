@@ -2178,14 +2178,15 @@ export class Office3D extends window.Office {
     }
   }
 
-  // Highest surface below `limit` under (x, z). Sampled at the point and
-  // four spots around it so a gap between dock planks or sand patches
-  // doesn't read as the sea floor. World matrices must be current.
-  surfaceBelow(x, z, limit, from = 1.2) {
-    if (!this.room) return 0;
+  // Highest surface below `limit` and above `floorY` under (x, z). Sampled
+  // at the point and four spots around it so a gap between dock planks or
+  // sand patches doesn't read as the sea floor. `floorY` is that storey's
+  // slab (0 on the ground and on terrain). World matrices must be current.
+  surfaceBelow(x, z, limit, from = 1.2, floorY = 0) {
+    if (!this.room) return floorY;
     const ray = new THREE.Raycaster();
     const down = new THREE.Vector3(0, -1, 0);
-    let best = 0;
+    let best = floorY;
     for (const [dx, dz] of [[0, 0], [0.09, 0], [-0.09, 0], [0, 0.09], [0, -0.09]]) {
       ray.set(new THREE.Vector3(x + dx, from, z + dz), down);
       for (const h of ray.intersectObject(this.room, true)) {
@@ -2213,7 +2214,9 @@ export class Office3D extends window.Office {
     const key = `${x.toFixed(2)},${y.toFixed(2)},${floor}`;
     this.seats = this.seats || new Map();
     if (this.seats.has(key)) return this.seats.get(key);
-    const best = this.surfaceBelow(x, y, fy + 0.75, fy + 1.35);
+    // Start at this storey's floor. A baseline of world 0 drops every
+    // basement hit (they are below 0) and then treats 0 as the seat.
+    const best = this.surfaceBelow(x, y, fy + 0.75, fy + 1.35, fy);
     const v = best > fy + 0.05 ? best : fy + (fallback || 0);
     this.seats.set(key, v);
     return v;
