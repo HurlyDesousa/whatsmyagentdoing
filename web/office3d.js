@@ -3,7 +3,7 @@
 // Bubbles and name tags are drawn by the 2D code on a canvas overlay.
 // Source file: `npm run build` bundles it with three.js into public/office3d.js.
 import * as THREE from 'three';
-import { installFloorShadowChunk, createFloorShadowLight, mountFloorShadowLights, tagFloorShadowMaterials } from './floorshadow.js';
+import { installFloorShadowChunk, createFloorShadowLight, mountFloorShadowLights, tagFloorShadowMaterials, setFloorShadowBand, setObjectFloorLayer, bindFloorShadowPasses, floorLayerBit } from './floorshadow.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
@@ -473,9 +473,10 @@ export class Office3D extends window.Office {
   }
 
   // Stacked floors share one angled sun for colour. Its shadow map used to
-  // cover the whole building, and the slabs do not cast, so a blob on floor
-  // N darkened every floor under that XZ. Shadow-only lights (see
-  // floorshadow.js) replace that map with one volume per storey.
+  // cover the whole building, and the slabs do not cast, so anything on
+  // floor N darkened every floor under that ray. Each storey now has its
+  // own angled shadow light (see floorshadow.js); casters and receivers
+  // stay on that storey.
   installFloorShadows() {
     for (const light of this.floorShadowLights || []) this.scene.remove(light, light.target);
     this.floorShadowLights = [];
@@ -486,16 +487,19 @@ export class Office3D extends window.Office {
     if (multi) {
       const { W, D } = this.plan;
       const cx = W / 2, cz = D / 2;
-      for (const fl of floors) {
-        const light = createFloorShadowLight({
-          floorY: fl * LEVEL_H, cx, cz, width: W, depth: D,
-          above: WALL_H + 0.5, below: 0.42,
-        });
+      floors.forEach((fl, i) => {
+        const floorY = fl * LEVEL_H;
+        const light = createFloorShadowLight({ floorY, cx, cz, width: W, depth: D });
         light.name = `floor-shadow-${fl}`;
         light.userData.floor = fl;
+        light.userData.shadowLayer = 1 << floorLayerBit(fl);
+        setFloorShadowBand(i, floorY, WALL_H + 0.5, 0.45);
         this.floorShadowLights.push(light);
-      }
+        if (this.floors3d && this.floors3d[fl]) setObjectFloorLayer(this.floors3d[fl], fl);
+      });
       mountFloorShadowLights(this.scene, this.floorShadowLights, this.sun);
+      bindFloorShadowPasses(this.gl);
+      if (this.catObj) setObjectFloorLayer(this.catObj.root, (this.cat && this.cat.floor) || 0);
     }
     tagFloorShadowMaterials(this.scene, this.floorShadowCount);
   }
@@ -1338,6 +1342,7 @@ export class Office3D extends window.Office {
     c.hop = Math.max(0, c.hop - dt);
     const hopY = c.hop > 0 ? Math.sin((1 - c.hop / 0.6) * Math.PI) * 0.35 : 0;
     c.root.position.set(k.x, hopY + (this.plan.scene ? 0 : catFloor * LEVEL_H), k.y);
+    if (this.floorShadowCount) setObjectFloorLayer(c.root, catFloor);
     c.root.rotation.y = c.yaw;
     c.sit += ((walking ? 0 : 1) - c.sit) * Math.min(1, dt * 4);
     const sw = walking ? Math.sin(t * 14) * 0.6 : 0;
@@ -1980,9 +1985,19 @@ export class Office3D extends window.Office {
     Object.assign(this.camera, { left: cxv - w / 2, right: cxv + w / 2, top: cyv + h / 2, bottom: cyv - h / 2 });
     this.camera.updateProjectionMatrix();
     // Key light stays angled. On a stacked office it does not cast; each
-    // storey has its own straight-down shadow volume (installFloorShadows).
+    // storey copies this direction into its own shadow light.
     this.sun.position.set(center.x - 6, fy + (multi ? 18 : 14), center.z - 3);
     this.sun.target.position.copy(center);
+    if (this.floorShadowLights && this.floorShadowLights.length) {
+      const dx = this.sun.position.x - center.x;
+      const dy = this.sun.position.y - center.y;
+      const dz = this.sun.position.z - center.z;
+      for (const light of this.floorShadowLights) {
+        const floorY = light.userData.floor * LEVEL_H;
+        light.position.set(center.x + dx, floorY + 0.6 + dy, center.z + dz);
+        light.target.position.set(center.x, floorY + 0.6, center.z);
+      }
+    }
     const sc = this.sun.shadow.camera;
     const r = Math.max(W, D) * 0.75;
     Object.assign(sc, { left: -r, right: r, top: r + span * LEVEL_H, bottom: -r - span * LEVEL_H, near: 1, far: multi ? 80 : 50 });
@@ -2114,6 +2129,10 @@ export class Office3D extends window.Office {
         a.yaw += dt * 0.35;
       }
       a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift, p.y + Math.cos(a.yaw) * fwd);
+      if (this.floorShadowCount) {
+        setObjectFloorLayer(a.obj, fl);
+        setObjectFloorLayer(a.prop, fl);
+      }
       this.animateBlob(a, p, st, this.t / 1000, dt);
       // Floors above the picker are culled. Lower floors stay fully visible.
       const culled = !this.plan.scene && fl > (this.viewFloor || 0);

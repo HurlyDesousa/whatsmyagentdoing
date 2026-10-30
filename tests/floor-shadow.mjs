@@ -1,8 +1,8 @@
 // Synthetic cutaway of the office shadow fix.
 // Renders the old single shadow map beside per-floor volumes and checks
-// that an upper-floor caster still darkens its own floor, and no longer
-// darkens the floor below. Uses web/floorshadow.js, the same module the
-// office renderer imports.
+// that an upper-floor blob, cat, and shelf still darken their own floor
+// and do not darken the floor below. Uses web/floorshadow.js, the same
+// module the office renderer imports.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,14 +24,20 @@ const html = `<!DOCTYPE html>
 import * as THREE from 'three';
 import {
   installFloorShadowChunk, createFloorShadowLight, mountFloorShadowLights, tagFloorShadowMaterials,
+  setFloorShadowBand, setObjectFloorLayer, bindFloorShadowPasses, floorLayerBit,
 } from '/web/floorshadow.js';
 
 installFloorShadowChunk();
 
-const LEVEL = 3;
+// Same stack spacing as the office (LEVEL_H).
+const LEVEL = 2.95;
 const W = 8, D = 8;
-const UPPER = new THREE.Vector3(-1.35, LEVEL + 0.72, 0.35);
-const LOWER = new THREE.Vector3(1.55, 0.72, -0.45);
+const UPPER = new THREE.Vector3(1.15, LEVEL + 0.55, 1.05);
+const LOWER = new THREE.Vector3(2.15, 0.55, -1.55);
+// Shelf and cat sit entirely on the upper storey. Footprints are XZ only.
+const SHELF = new THREE.Vector3(-0.35, 0, -1.45);
+const CAT = new THREE.Vector3(-2.15, 0, 0.55);
+const SHELF_H = 1.7;
 
 function world() {
   const scene = new THREE.Scene();
@@ -60,6 +66,7 @@ function world() {
     wall.position.set(0, y + 0.45, -D / 2 + 0.06);
     wall.castShadow = true;
     wall.receiveShadow = true;
+    wall.userData.kind = 'wall';
     scene.add(wall);
   }
   const blob = (pos, color) => {
@@ -69,18 +76,57 @@ function world() {
     scene.add(m);
     return m;
   };
-  blob(UPPER, 0xf2c21b);
-  blob(LOWER, 0x3b82f6);
+  blob(UPPER, 0xf2c21b).userData.kind = 'upper-blob';
+  blob(LOWER, 0x3b82f6).userData.kind = 'lower-blob';
+  // Tall shelf: the long rectangle Hurly saw bleeding through the slab.
+  const shelf = new THREE.Mesh(
+    new THREE.BoxGeometry(1.35, SHELF_H, 0.38),
+    new THREE.MeshStandardMaterial({ color: 0x8d6a4a, roughness: 0.8 }),
+  );
+  shelf.position.set(SHELF.x, LEVEL + SHELF_H / 2, SHELF.z);
+  shelf.castShadow = true;
+  shelf.receiveShadow = true;
+  shelf.userData.kind = 'shelf';
+  scene.add(shelf);
+  // Cat, same idea as the office cat: a few casting meshes on one floor.
+  const cat = new THREE.Group();
+  const fur = new THREE.MeshStandardMaterial({ color: 0xc4894f, roughness: 0.7 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), fur);
+  body.scale.set(0.85, 0.7, 1.35);
+  body.position.y = 0.16;
+  body.castShadow = true;
+  body.userData.kind = 'cat';
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 10), fur);
+  head.position.set(0, 0.28, 0.16);
+  head.castShadow = true;
+  head.userData.kind = 'cat';
+  cat.add(body, head);
+  cat.position.set(CAT.x, LEVEL, CAT.z);
+  scene.add(cat);
   return { scene, sun };
 }
 
 function enableFix(scene, sun) {
   sun.castShadow = false;
-  const lights = [0, LEVEL].map((floorY) => createFloorShadowLight({
-    floorY, cx: 0, cz: 0, width: W, depth: D, above: 2.5, below: 0.4, mapSize: 1024,
-  }));
+  scene.updateMatrixWorld(true);
+  const tmp = new THREE.Vector3();
+  scene.traverse((o) => {
+    if (!o.isMesh) return;
+    setObjectFloorLayer(o, o.getWorldPosition(tmp).y >= LEVEL * 0.5 ? 1 : 0);
+  });
+  const lights = [0, LEVEL].map((floorY, i) => {
+    const light = createFloorShadowLight({
+      floorY, cx: 0, cz: 0, width: W, depth: D,
+      // Same direction as the test sun (target is 0.6 above the floor, sun sits 12.8 above its target).
+      offset: [-5, 13.4, -2.5], mapSize: 1024,
+    });
+    light.userData.shadowLayer = 1 << floorLayerBit(i);
+    setFloorShadowBand(i, floorY, 2.9, 0.45);
+    return light;
+  });
   mountFloorShadowLights(scene, lights, sun);
   tagFloorShadowMaterials(scene, lights.length);
+  scene.userData.floorLights = lights;
 }
 
 function cameraFor(floorY) {
@@ -91,23 +137,8 @@ function cameraFor(floorY) {
   return cam;
 }
 
-function glY(ndcY, h) {
-  return Math.round((ndcY + 1) * 0.5 * (h - 1));
-}
-
-function project(cam, w, h, v) {
-  const p = v.clone().project(cam);
-  return {
-    x: Math.round((p.x + 1) * 0.5 * (w - 1)),
-    y: glY(p.y, h),
-  };
-}
-
-function luma(px) {
-  return 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2];
-}
-
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+bindFloorShadowPasses(renderer);
 renderer.setPixelRatio(1);
 renderer.setSize(480, 320, false);
 renderer.shadowMap.enabled = true;
@@ -127,20 +158,6 @@ const views = [
   ['After · floor below', fixed.scene, cameraFor(0)],
 ];
 
-function sampleAt(cam, worldPos) {
-  const gl = renderer.getContext();
-  const { x, y } = project(cam, 480, 320, worldPos);
-  const px = new Uint8Array(4);
-  gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-  return { x, y, rgba: [px[0], px[1], px[2], px[3]], luma: luma(px) };
-}
-
-function rayHit(origin, through, floorY) {
-  const dir = new THREE.Vector3().subVectors(through, origin);
-  const t = (floorY + 0.02 - origin.y) / dir.y;
-  return origin.clone().add(dir.multiplyScalar(t));
-}
-
 function topCamera(floorY) {
   const cam = new THREE.OrthographicCamera(-4.3, 4.3, 4.3, -4.3, 0.05, 12);
   cam.position.set(0, floorY + 5, 0.001);
@@ -150,9 +167,22 @@ function topCamera(floorY) {
   return cam;
 }
 
-// Bake shadow maps, then hide the casters so the oval on the floor can be
-// sampled instead of the sphere that sits on top of it.
-function measure(scene, lightPos, straightDown) {
+// Lit floor is ~187. A shadow is ~102. Ignore the black background outside the slab.
+function countShadowPixels() {
+  const gl = renderer.getContext();
+  const w = 480, h = 320;
+  const buf = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+  let n = 0;
+  for (let i = 0; i < buf.length; i += 16) {
+    const y = 0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2];
+    if (y > 40 && y < 155) n++;
+  }
+  return n;
+}
+
+// One caster at a time, so a dark pixel can only be that object's shadow.
+function shadowPixels(scene, kind) {
   const casters = [];
   const floors = [];
   scene.traverse((o) => {
@@ -160,30 +190,18 @@ function measure(scene, lightPos, straightDown) {
     if (o.geometry && o.geometry.type === 'PlaneGeometry') floors.push(o);
     else casters.push(o);
   });
-  const probe = topCamera(0);
+  for (const o of casters) o.visible = o.userData.kind === kind;
   renderer.shadowMap.autoUpdate = true;
   renderer.shadowMap.needsUpdate = true;
-  renderer.render(scene, probe);
+  renderer.render(scene, topCamera(0));
   renderer.shadowMap.autoUpdate = false;
   for (const o of casters) o.visible = false;
-
-  const spot = (sphere, floorY) => straightDown
-    ? new THREE.Vector3(sphere.x, floorY + 0.02, sphere.z)
-    : rayHit(lightPos, sphere, floorY);
-  const read = (floorY, worldPos) => {
+  const out = {};
+  for (const floorY of [LEVEL, 0]) {
     for (const f of floors) f.visible = Math.abs(f.position.y - floorY) < 0.01;
-    const cam = topCamera(floorY);
-    renderer.render(scene, cam);
-    return sampleAt(cam, worldPos);
-  };
-  const away = new THREE.Vector3(3.1, 0, 3.1);
-  const out = {
-    upperContact: read(LEVEL, spot(UPPER, LEVEL)),
-    upperAway: read(LEVEL, away.clone().setY(LEVEL + 0.02)),
-    bleed: read(0, spot(UPPER, 0)),
-    lowerContact: read(0, spot(LOWER, 0)),
-    lowerAway: read(0, away),
-  };
+    renderer.render(scene, topCamera(floorY));
+    out[floorY === 0 ? 'downstairs' : 'upstairs'] = countShadowPixels();
+  }
   for (const o of casters) o.visible = true;
   for (const f of floors) f.visible = true;
   renderer.shadowMap.autoUpdate = true;
@@ -191,8 +209,19 @@ function measure(scene, lightPos, straightDown) {
   return out;
 }
 
-const before = measure(broken.scene, broken.sun.position, false);
-const after = measure(fixed.scene, null, true);
+const before = {
+  empty: shadowPixels(broken.scene, 'none'),
+  blob: shadowPixels(broken.scene, 'upper-blob'),
+  shelf: shadowPixels(broken.scene, 'shelf'),
+  cat: shadowPixels(broken.scene, 'cat'),
+};
+const after = {
+  empty: shadowPixels(fixed.scene, 'none'),
+  blob: shadowPixels(fixed.scene, 'upper-blob'),
+  shelf: shadowPixels(fixed.scene, 'shelf'),
+  cat: shadowPixels(fixed.scene, 'cat'),
+  lowerBlob: shadowPixels(fixed.scene, 'lower-blob'),
+};
 
 const board = document.createElement('canvas');
 board.width = 960;
@@ -212,14 +241,19 @@ views.forEach(([label, scene, cam], i) => {
 });
 
 const result = { before, after };
-const darker = (a, b, minDrop) => a.luma < b.luma - minDrop;
-const flat = (a, b, maxDrop) => a.luma > b.luma - maxDrop;
+const extra = (scene, kind, key) => scene[kind][key] - scene.empty[key];
 const checks = {
-  beforeUpperHasShadow: darker(before.upperContact, before.upperAway, 12),
-  beforeBleed: darker(before.bleed, before.lowerAway, 12),
-  afterUpperHasShadow: darker(after.upperContact, after.upperAway, 12),
-  afterLowerHasOwnShadow: darker(after.lowerContact, after.lowerAway, 12),
-  afterNoBleed: flat(after.bleed, after.lowerAway, 8),
+  beforeBlobCastsAndBleeds: extra(before, 'blob', 'upstairs') > 40 && extra(before, 'blob', 'downstairs') > 40,
+  beforeShelfCastsAndBleeds: extra(before, 'shelf', 'upstairs') > 40 && extra(before, 'shelf', 'downstairs') > 40,
+  beforeCatCastsAndBleeds: extra(before, 'cat', 'upstairs') > 40 && extra(before, 'cat', 'downstairs') > 40,
+  afterBlobOnOwnFloor: extra(after, 'blob', 'upstairs') > 40,
+  afterBlobNoBleed: extra(after, 'blob', 'downstairs') < 20,
+  afterShelfOnOwnFloor: extra(after, 'shelf', 'upstairs') > 40,
+  afterShelfNoBleed: extra(after, 'shelf', 'downstairs') < 20,
+  afterCatOnOwnFloor: extra(after, 'cat', 'upstairs') > 40,
+  afterCatNoBleed: extra(after, 'cat', 'downstairs') < 20,
+  afterLowerBlobOnOwnFloor: extra(after, 'lowerBlob', 'downstairs') > 40,
+  afterLowerBlobNoBleedUp: extra(after, 'lowerBlob', 'upstairs') < 20,
 };
 result.checks = checks;
 result.ok = Object.values(checks).every(Boolean);
