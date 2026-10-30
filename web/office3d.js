@@ -2055,8 +2055,13 @@ export class Office3D extends window.Office {
     } else if (act === 'nap') {
       y = 0.03; roll = 0.32; sq = 0.86;
     } else if (st.pose === 'sit') {
-      // hover just above the seat
-      y = 0.04 + Math.sin(k * 1.6) * 0.02;
+      // The raycast returns the cushion top and the blob's origin is its
+      // lowest point, which is right for a humanoid hip. A round body with
+      // only a few centimetres of clearance still sits inside the sofa
+      // arms and the cushion. About 30% of the body height puts the
+      // mass on the seat (couch, chair, stool, beanbag). Standing blobs
+      // keep their own small hover and are not lifted by this.
+      y = Math.max(0.2, height * 0.3) + Math.sin(k * 1.6) * 0.02;
       if (act === 'think') roll = Math.sin(k * 1.4) * 0.09;
       else if (act === 'type') { y += Math.abs(Math.sin(k * 11)) * 0.025; lean = 0.12; }
     } else if (act === 'station') {
