@@ -623,62 +623,71 @@
         prop('lamp', { x: ox + 2.9, y: oy + 1.5, floor });
         poi(ox + 1.4, oy - 0.55, 'window', 'back', { floor });
       };
-      // Basement: ops den — pastel server cage, on-call nap corner, snack bay.
-      addFloorPod(-1, 1.5, 2.2, '#8aa4c8');
-      addFloorPod(-1, 5.7, 2.2, '#9bb8a0');
-      prop('rack', { x: OW + 0.25, y: 0.28, floor: -1 });
-      prop('rack', { x: OW + 1.15, y: 0.28, floor: -1 });
-      prop('rack', { x: OW + 2.05, y: 0.28, floor: -1 });
-      prop('rug', { x: OW + 0.1, y: 0.12, w: 3.3, d: 1.35, color: '#8ea6e4', color2: '#6f8ad4', floor: -1 });
-      prop('sprout', { x: OW + 3.4, y: 0.55, kind: 'plantSmall1', floor: -1 });
-      prop('sprout', { x: OW + 3.95, y: 0.72, kind: 'plantSmall3', floor: -1 });
-      prop('shelf', { x: OW + 4.2, y: 0.22, w: 2.4, d: 0.45, floor: -1 });
-      prop('loungeChair', { x: OW + 4.35, y: 1.3, color: '#8aa4ea', rot: Math.PI, floor: -1 });
-      prop('loungeChair', { x: OW + 5.55, y: 1.3, color: '#7dcfb0', rot: Math.PI, floor: -1 });
-      prop('lamp', { x: OW + 6.55, y: 1.45, floor: -1 });
-      poi(OW + 4.9, 1.15, 'read', 'back', { floor: -1 });
-      poi(OW + 6.1, 1.15, 'read', 'back', { floor: -1 });
-      prop('cooler', { x: OW + 0.3, y: MR + 0.25, floor: -1 });
-      prop('vending', { x: OW + 1.15, y: MR + 0.18, color: '#9eb6e8', floor: -1 });
-      prop('vending', { x: OW + 1.15, y: MR + 1.08, color: '#f0b7c8', floor: -1 });
-      poi(OW + 0.55, MR + 1.15, 'water', 'back', { floor: -1 });
-      poi(OW + 2.05, MR + 0.55, 'vending', 'back', { floor: -1 });
-      poi(OW + 2.05, MR + 1.45, 'vending', 'back', { floor: -1 });
-      prop('roundTable', { x: OW + 4.5, y: MR + 2.2, floor: -1 });
+      // Basement (SWA-3089): real boiler-room — concrete mood, utility cages,
+      // furnace glow, storage crates, and a secret worn-in hideout lounge.
+      // Not a pastel copy of floor 1.
+      addFloorPod(-1, 1.5, 2.2, '#6e6a62');
+      addFloorPod(-1, 5.7, 2.2, '#5f6b58');
+      // Server cage along the back wall of the right bay.
+      prop('rack', { x: OW + 0.2, y: 0.22, floor: -1 });
+      prop('rack', { x: OW + 1.05, y: 0.22, floor: -1 });
+      prop('rack', { x: OW + 1.9, y: 0.22, floor: -1 });
+      prop('panel', { x: OW + 0.05, y: 0.95, w: 2.9, d: 0.08, h: 1.55, color: '#4a5560', floor: -1 });
+      prop('crate', { x: OW + 2.85, y: 0.2, w: 0.55, d: 0.5, h: 0.45, floor: -1 });
+      prop('crate', { x: OW + 3.4, y: 0.25, w: 0.5, d: 0.48, h: 0.4, stack: 1, floor: -1 });
+      prop('crate', { x: OW + 3.95, y: 0.2, w: 0.55, d: 0.5, h: 0.5, floor: -1 });
+      // The furnace — warm heart of the basement.
+      prop('boiler', { x: OW + 5.15, y: 0.35, floor: -1 });
+      prop('shelf', { x: OW + 4.55, y: 1.55, w: 1.9, d: 0.42, floor: -1 });
+      prop('crate', { x: OW + 6.35, y: 1.55, w: 0.48, d: 0.45, h: 0.38, floor: -1 });
+      poi(OW + 5.55, 1.35, 'read', 'back', { floor: -1 });
+      // Laundry / utility strip.
+      prop('washer', { x: OW + 0.25, y: MR + 0.2, floor: -1 });
+      prop('washer', { x: OW + 1.05, y: MR + 0.2, color: '#8a9098', floor: -1 });
+      prop('cooler', { x: OW + 1.95, y: MR + 0.25, floor: -1 });
+      prop('vending', { x: OW + 2.7, y: MR + 0.18, color: '#5a6470', floor: -1 });
+      poi(OW + 2.2, MR + 1.15, 'water', 'back', { floor: -1 });
+      poi(OW + 3.6, MR + 0.55, 'vending', 'back', { floor: -1 });
+      // Dusty workbench table under a hanging lamp mood (stools stay sit-capable).
+      prop('roundTable', { x: OW + 5.15, y: MR + 2.05, floor: -1 });
       for (const [dx, dy, face] of [[-0.95, 0, 'front'], [0.95, 0, 'front'], [0, 0.95, 'back'], [0, -0.9, 'front']]) {
-        prop('barStool', { x: OW + 4.5 + dx, y: MR + 2.2 + dy, floor: -1 });
-        poi(OW + 4.5 + dx, MR + 2.2 + dy, 'stool', face, { sit: 0.47, floor: -1 });
+        prop('barStool', { x: OW + 5.15 + dx, y: MR + 2.05 + dy, floor: -1 });
+        poi(OW + 5.15 + dx, MR + 2.05 + dy, 'stool', face, { sit: 0.47, floor: -1 });
       }
-      prop('speaker', { x: OW + 3.25, y: MR + 0.35, floor: -1 });
-      prop('speaker', { x: OW + 3.65, y: MR + 0.35, floor: -1 });
-      prop('plant', { x: W - 0.55, y: MR + 0.5, floor: -1 });
-      prop('rug', { x: OW + 0.25, y: PY + 0.35, w: 6.2, d: Math.max(3.2, D - PY - 0.95), color: '#9aafeb', color2: '#7d96e0', floor: -1 });
-      // Turned 90° so the long side runs down the lounge and the seat faces the arcade.
-      // Pulled back just enough that the new length clears the coffee table.
-      prop('couch', { x: OW + 1.55, y: PY - 0.85, w: 0.8, d: 2.8, rot: Math.PI / 2, color: '#7f97e4', floor: -1 });
-      prop('coffeeTable', { x: OW + 1.15, y: PY + 2.15, w: 1.6, d: 0.7, radio: false, floor: -1 });
-      prop('beanbag', { x: OW + 0.9, y: PY + 3.35, color: '#8fd0c4', floor: -1 });
-      prop('beanbag', { x: OW + 2.4, y: PY + 3.45, color: '#c9b6f0', floor: -1 });
-      prop('bench', { x: OW + 4.25, y: PY + 2.35, w: 1.5, d: 0.5, color: '#8eaae8', floor: -1 });
-      prop('lamp', { x: OW + 0.35, y: D - 0.65, floor: -1 });
-      prop('arcade', { x: W - 1.25, y: PY + 1.15, color: '#7f8fd4', floor: -1 });
-      prop('plant', { x: W - 0.5, y: D - 0.5, floor: -1 });
-      prop('plant', { x: OW + 5.45, y: PY + 0.55, floor: -1 });
+      prop('lamp', { x: OW + 6.55, y: MR + 1.05, floor: -1 });
+      prop('crate', { x: W - 0.75, y: MR + 0.35, w: 0.5, d: 0.48, h: 0.42, floor: -1 });
+      // Secret hideout lounge — mismatched, dim, under the pipes.
+      prop('rug', {
+        x: OW + 0.35, y: PY + 0.4, w: 5.9, d: Math.max(3.0, D - PY - 1.0),
+        color: '#5a4a3a', color2: '#3f3428', floor: -1,
+      });
+      prop('couch', { x: OW + 1.55, y: PY - 0.85, w: 0.8, d: 2.8, rot: Math.PI / 2, color: '#4a3f38', floor: -1 });
+      prop('coffeeTable', { x: OW + 1.15, y: PY + 2.15, w: 1.6, d: 0.7, radio: true, floor: -1 });
+      prop('beanbag', { x: OW + 0.85, y: PY + 3.4, color: '#6b5344', floor: -1 });
+      prop('beanbag', { x: OW + 2.35, y: PY + 3.5, color: '#3d4a55', floor: -1 });
+      prop('bench', { x: OW + 4.15, y: PY + 2.4, w: 1.45, d: 0.48, color: '#6e6558', floor: -1 });
+      prop('lamp', { x: OW + 0.4, y: D - 0.7, floor: -1 });
+      prop('arcade', { x: W - 1.3, y: PY + 1.2, color: '#4a5568', floor: -1 });
+      prop('crate', { x: OW + 5.35, y: PY + 0.55, w: 0.55, d: 0.5, h: 0.45, floor: -1 });
+      prop('crate', { x: OW + 5.9, y: PY + 0.55, w: 0.5, d: 0.48, h: 0.4, stack: 1, floor: -1 });
       for (let k = 0; k < 3; k++) poi(OW + 1.85, PY - 0.3 + k * 0.7, 'couch', 'front', { sit: 0.36, yaw: Math.PI / 2, floor: -1 });
-      poi(OW + 0.9, PY + 3.35, 'beanbag', 'front', { sit: 0.18, floor: -1 });
-      poi(OW + 2.4, PY + 3.45, 'beanbag', 'front', { sit: 0.18, floor: -1 });
-      poi(W - 0.9, PY + 2.2, 'arcade', 'back', { floor: -1 });
-      prop('sprout', { x: 0.45, y: 6.6, kind: 'plantSmall2', floor: -1 });
-      prop('sprout', { x: 0.55, y: 8.4, kind: 'plantSmall1', floor: -1 });
-      prop('sprout', { x: 0.4, y: 10.2, kind: 'plantSmall3', floor: -1 });
-      prop('rug', { x: 4.05, y: 6.55, w: 2.3, d: 2.15, color: '#a9bbee', color2: '#8aa0e4', floor: -1 });
-      prop('beanbag', { x: 4.55, y: 7.15, color: '#f2c6d8', floor: -1 });
-      prop('beanbag', { x: 5.55, y: 7.95, color: '#b7e0c8', floor: -1 });
-      poi(4.55, 7.15, 'beanbag', 'front', { sit: 0.18, floor: -1 });
-      poi(5.55, 7.95, 'beanbag', 'front', { sit: 0.18, floor: -1 });
+      poi(OW + 0.85, PY + 3.4, 'beanbag', 'front', { sit: 0.18, floor: -1 });
+      poi(OW + 2.35, PY + 3.5, 'beanbag', 'front', { sit: 0.18, floor: -1 });
+      poi(W - 0.95, PY + 2.25, 'arcade', 'back', { floor: -1 });
+      // Storage alley + dusty game corner on the left bay.
+      prop('crate', { x: 0.35, y: 6.4, w: 0.55, d: 0.5, h: 0.45, floor: -1 });
+      prop('crate', { x: 0.4, y: 7.1, w: 0.5, d: 0.48, h: 0.4, stack: 1, floor: -1 });
+      prop('crate', { x: 0.35, y: 8.0, w: 0.55, d: 0.5, h: 0.5, floor: -1 });
+      prop('crate', { x: 0.95, y: 6.45, w: 0.48, d: 0.45, h: 0.38, floor: -1 });
+      prop('rug', { x: 3.85, y: 6.45, w: 2.4, d: 2.2, color: '#4e453c', color2: '#3a332c', floor: -1 });
+      prop('beanbag', { x: 4.45, y: 7.05, color: '#7a5c48', floor: -1 });
+      prop('beanbag', { x: 5.45, y: 7.85, color: '#455560', floor: -1 });
+      poi(4.45, 7.05, 'beanbag', 'front', { sit: 0.18, floor: -1 });
+      poi(5.45, 7.85, 'beanbag', 'front', { sit: 0.18, floor: -1 });
       prop('foosball', { x: 3.55, y: 9.25, pair: 'fbB', floor: -1 });
       poi(3.1, 9.65, 'foosball', 'side', { pair: 'fbB', floor: -1 });
       poi(5.6, 9.65, 'foosball', 'side', { pair: 'fbB', floor: -1 });
+      prop('trash', { x: 6.6, y: 9.55, floor: -1 });
       // 2nd floor: prompt loft — warm pastel lounge, garden, play table.
       addFloorPod(1, 1.5, 2.2, '#d4a0b8');
       addFloorPod(1, 5.7, 2.2, '#c9b07a');

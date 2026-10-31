@@ -508,52 +508,135 @@ export class Office3D extends window.Office {
   buildExtraFloor(fl) {
     const plan = this.plan;
     const { W, D } = plan;
-    const slab = fl < 0 ? 0xb8c4e0 : 0xf0c4d4;
-    const rim = fl < 0 ? 0x8aa0d0 : 0xe8a0b8;
-    this.boxMesh(-0.12, -0.12, -0.16, W + 0.12, D + 0.12, 0.158, fl < 0 ? 0xd8e0f4 : 0xf8dde8, { rough: 0.9, shadow: false });
+    const basement = fl < 0;
+    // SWA-3089: basement reads as poured concrete + cinderblock, not pastel blue.
+    const slab = basement ? 0x6e736c : 0xf0c4d4;
+    const rim = basement ? 0x4f554e : 0xe8a0b8;
+    this.boxMesh(-0.12, -0.12, -0.16, W + 0.12, D + 0.12, 0.158, basement ? 0x8a9086 : 0xf8dde8, { rough: 0.9, shadow: false });
     this.boxMesh(-0.09, -0.09, -FLOOR_T, W + 0.06, D + 0.06, FLOOR_T - 0.15, slab, { rough: 0.95, shadow: false });
     this.boxMesh(-0.1, -0.1, -0.175, W + 0.08, D + 0.08, 0.025, rim, { rough: 0.9, shadow: false, round: false });
     const tiles = this.patternTexture((c, s) => {
-      const a = fl < 0 ? '#e7eefb' : '#fde7ee';
-      const b = fl < 0 ? '#d5e2f6' : '#f8d4e3';
-      c.fillStyle = a; c.fillRect(0, 0, s, s);
-      c.fillStyle = b; c.fillRect(0, 0, s / 2, s / 2); c.fillRect(s / 2, s / 2, s / 2, s / 2);
-      c.strokeStyle = fl < 0 ? 'rgba(120,145,190,.18)' : 'rgba(210,140,165,.16)';
-      c.lineWidth = 2;
+      if (basement) {
+        c.fillStyle = '#7a8078'; c.fillRect(0, 0, s, s);
+        c.fillStyle = '#6e746c'; c.fillRect(0, 0, s / 2, s / 2); c.fillRect(s / 2, s / 2, s / 2, s / 2);
+        c.fillStyle = 'rgba(55,50,40,.22)';
+        for (let i = 0; i < 18; i++) {
+          const rx = (i * 47) % s, ry = (i * 91) % s;
+          c.fillRect(rx, ry, 2 + (i % 4), 1 + (i % 3));
+        }
+        c.strokeStyle = 'rgba(30,32,28,.28)'; c.lineWidth = 3;
+      } else {
+        c.fillStyle = '#fde7ee'; c.fillRect(0, 0, s, s);
+        c.fillStyle = '#f8d4e3'; c.fillRect(0, 0, s / 2, s / 2); c.fillRect(s / 2, s / 2, s / 2, s / 2);
+        c.strokeStyle = 'rgba(210,140,165,.16)'; c.lineWidth = 2;
+      }
       for (let i = 0; i <= 2; i++) {
         c.beginPath(); c.moveTo(0, i * s / 2); c.lineTo(s, i * s / 2); c.stroke();
         c.beginPath(); c.moveTo(i * s / 2, 0); c.lineTo(i * s / 2, s); c.stroke();
       }
     });
     tiles.repeat.set(W / 2, D / 2);
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: tiles, roughness: 0.92 });
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: tiles, roughness: basement ? 0.98 : 0.92 });
     const m = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat);
     m.rotation.x = -Math.PI / 2;
     m.position.set(W / 2, 0.002, D / 2);
     m.receiveShadow = true;
     this.floorRoot.add(m);
-    const wallCol = fl < 0 ? 0xb0b8d4 : 0xd8b8c8;
-    const wallMat = new THREE.MeshStandardMaterial({ color: wallCol, roughness: 1 });
+    const wallCol = basement ? 0x8d9188 : 0xd8b8c8;
+    const wallMat = basement
+      ? new THREE.MeshStandardMaterial({
+        color: wallCol, roughness: 1,
+        map: this.patternTexture((c, s) => {
+          c.fillStyle = '#8f948b'; c.fillRect(0, 0, s, s);
+          c.strokeStyle = 'rgba(45,48,42,.35)'; c.lineWidth = 3;
+          const rows = 4, cols = 3;
+          for (let r = 0; r < rows; r++) {
+            const y = (r / rows) * s;
+            const ox = (r % 2) * (s / cols) * 0.5;
+            c.beginPath(); c.moveTo(0, y); c.lineTo(s, y); c.stroke();
+            for (let k = 0; k <= cols; k++) {
+              const x = ox + (k / cols) * s;
+              c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + s / rows); c.stroke();
+            }
+          }
+        }),
+      })
+      : new THREE.MeshStandardMaterial({ color: wallCol, roughness: 1 });
+    if (basement && wallMat.map) wallMat.map.repeat.set(W / 1.6, 1.4);
     const T = 0.12, h = WALL_H * 0.92;
     this.boxMesh(-T, -T, 0, W + T, T, h, 0, { mat: wallMat });
     this.boxMesh(-T, -T, 0, T, D + T, h, 0, { mat: wallMat });
     // Open front so stacked floors stay readable from the default camera.
     this.boxMesh(-T, D, 0, W + T, T, 0.35, rim, { rough: 0.9, shadow: false });
-    const label = fl < 0 ? 'OPS DEN' : 'THE LOFT';
-    const sign = this.textPlane(label, fl < 0 ? '#7a90c8' : '#e089a8', 2.4, 0.42);
+    const label = basement ? 'BOILER ROOM' : 'THE LOFT';
+    const sign = this.textPlane(label, basement ? '#c9a26a' : '#e089a8', basement ? 3.0 : 2.4, 0.42);
     sign.position.set(W * 0.55, 2.12, 0.02);
     this.floorRoot.add(sign);
-    const posters = fl < 0
-      ? [['ON CALL', '#6d84c8', 1.15], ['BLINK = OK', '#5eae8a', 3.55]]
+    const posters = basement
+      ? [['MIND THE PIPES', '#8a7048', 1.15], ['WATCH YOUR HEAD', '#6a7a68', 3.55], ['FOUND 2009', '#5a6570', 6.2]]
       : [['ASK GROK', '#e07a9a', 1.15], ['SHIP IT', '#e0a15a', 3.55]];
     for (const [text, col, z] of posters) {
-      const board = this.textPlane(text, col, 1.2, 0.78);
+      const board = this.textPlane(text, col, basement ? 1.35 : 1.2, 0.78);
       board.rotation.y = Math.PI / 2;
       board.position.set(0.02, 1.48, z);
       this.floorRoot.add(board);
     }
+    if (basement) this.buildBasementInfrastructure(W, D);
     for (const dk of plan.desks) if ((dk.floor ?? 0) === fl) this.buildDesk(dk);
     for (const p of plan.props) if ((p.floor ?? 0) === fl) this.buildProp(p);
+  }
+
+  // Exposed ducts, hanging pipes, and a dim amber utility light — basement only.
+  // Geometry stays on this storey so floor-shadow layers do not bleed.
+  buildBasementInfrastructure(W, D) {
+    const pipeMat = { metal: 0.55, rough: 0.45 };
+    const duct = 0x7a8278;
+    const copper = 0xb87333;
+    const iron = 0x6a7078;
+    // Main ceiling duct runs front→back along the open bay.
+    this.boxMesh(1.1, 0.4, 2.05, 0.55, D - 1.0, 0.32, duct, { rough: 0.85, metal: 0.15 });
+    this.boxMesh(1.2, 0.55, 1.95, 0.35, 0.55, 0.18, duct, { rough: 0.85, metal: 0.15 });
+    this.boxMesh(1.2, D * 0.45, 1.95, 0.35, 0.55, 0.18, duct, { rough: 0.85, metal: 0.15 });
+    this.boxMesh(1.2, D * 0.78, 1.95, 0.35, 0.55, 0.18, duct, { rough: 0.85, metal: 0.15 });
+    // Lateral duct over the right bay.
+    this.boxMesh(W * 0.42, 0.35, 2.08, W * 0.52, 0.42, 0.28, duct, { rough: 0.85, metal: 0.15 });
+    // Copper supply + iron return along the back wall.
+    for (const [x0, x1, z, col, r] of [
+      [0.2, W - 0.4, 1.78, copper, 0.055],
+      [0.2, W - 0.55, 1.62, iron, 0.07],
+      [0.35, W * 0.62, 1.48, copper, 0.045],
+    ]) {
+      const len = x1 - x0;
+      const cyl = new THREE.Mesh(
+        new THREE.CylinderGeometry(r, r, len, 10),
+        new THREE.MeshStandardMaterial({ color: col, metalness: pipeMat.metal, roughness: pipeMat.rough }),
+      );
+      cyl.rotation.z = Math.PI / 2;
+      cyl.position.set(x0 + len / 2, z, 0.18);
+      cyl.castShadow = true;
+      this.floorRoot.add(cyl);
+    }
+    // Vertical risers near the furnace corner and laundry.
+    for (const [x, y, col] of [[W - 1.55, 0.55, copper], [W - 1.35, 0.7, iron], [W * 0.55, D * 0.42, copper]]) {
+      const riser = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, 2.05, 8),
+        new THREE.MeshStandardMaterial({ color: col, metalness: 0.5, roughness: 0.4 }),
+      );
+      riser.position.set(x, 1.05, y);
+      riser.castShadow = true;
+      this.floorRoot.add(riser);
+    }
+    // Hung utility bulbs — amber pools, not pastel ceiling cans.
+    for (const [x, z] of [[2.4, D * 0.35], [W * 0.62, D * 0.28], [W * 0.55, D * 0.78], [4.2, D * 0.62]]) {
+      this.boxMesh(x - 0.04, z - 0.04, 2.15, 0.08, 0.08, 0.12, 0x3a3a3a, { rough: 0.9, shadow: false });
+      const bulb = this.boxMesh(x - 0.06, z - 0.06, 2.02, 0.12, 0.12, 0.1, 0xffc878, {
+        emissive: 0xffb14a, ei: 0.85, shadow: false, round: false,
+      });
+      const l = new THREE.PointLight(0xffb15a, 0.55, 5.5, 1.8);
+      l.position.set(x, 1.85, z);
+      this.floorRoot.add(l);
+      this.glows.push({ light: l, base: 0.7, sprite: this.haloSprite('255,177,90', x, 1.95, z, 1.8), sbase: 0.45, m: bulb, ei: 0.85 });
+    }
   }
 
   buildStairsShaft() {
@@ -1003,6 +1086,59 @@ export class Office3D extends window.Office {
         break;
       case 'coat':
         this.place('coatRackStanding', p.x - 0.2, p.y - 0.2, 0.4, 0.4, { h: 1.55 });
+        break;
+      case 'crate': {
+        // Stacked cardboard / storage — basement clutter.
+        const w = p.w || 0.5, d = p.d || 0.48, h = p.h || 0.42;
+        const y0 = p.stack ? h * 0.92 : 0;
+        this.place('cardboardBoxClosed', p.x, p.y, w, d, { y0, h });
+        if (p.stack) this.place('cardboardBoxClosed', p.x + 0.04, p.y + 0.03, w * 0.92, d * 0.92, { y0: 0, h: h * 0.85 });
+        break;
+      }
+      case 'boiler': {
+        // Fat furnace with a warm peephole — the basement surprise.
+        const { x, y } = p;
+        this.boxMesh(x, y, 0, 1.35, 1.1, 1.55, 0x4a5058, { metal: 0.35, rough: 0.55 });
+        this.boxMesh(x + 0.08, y + 0.08, 1.55, 1.19, 0.94, 0.18, 0x3a4048, { metal: 0.4, rough: 0.5 });
+        // Chimney / flue
+        this.boxMesh(x + 0.95, y + 0.35, 1.7, 0.28, 0.28, 0.55, 0x5a6068, { metal: 0.45, rough: 0.45 });
+        // Door + glowing fire window
+        this.boxMesh(x + 0.25, y + 1.08, 0.35, 0.85, 0.04, 0.95, 0x2e3238, { metal: 0.3, rough: 0.6 });
+        const glow = this.boxMesh(x + 0.4, y + 1.1, 0.55, 0.55, 0.02, 0.45, 0xff8a3a, {
+          emissive: 0xff6a1a, ei: 1.2, shadow: false, round: false,
+        });
+        const l = new THREE.PointLight(0xff7a28, 0, 4.2, 1.5);
+        l.position.set(x + 0.7, 1.0, y + 1.35);
+        this.addToFloor(l);
+        this.glows.push({
+          light: l, base: 1.9,
+          sprite: this.haloSprite('255,122,40', x + 0.7, 0.95, y + 1.15, 2.2), sbase: 0.75,
+          m: glow, ei: 1.2,
+        });
+        // Leg pads + pressure gauges
+        for (const [dx, dy] of [[0.08, 0.08], [1.1, 0.08], [0.08, 0.85], [1.1, 0.85]]) {
+          this.boxMesh(x + dx, y + dy, 0, 0.16, 0.16, 0.08, 0x2a2e34, { metal: 0.5, rough: 0.5 });
+        }
+        this.boxMesh(x + 0.15, y + 1.05, 1.25, 0.12, 0.05, 0.12, 0xc9cdd4, { metal: 0.6, rough: 0.35, shadow: false });
+        this.boxMesh(x + 0.35, y + 1.05, 1.25, 0.12, 0.05, 0.12, 0xc9cdd4, { metal: 0.6, rough: 0.35, shadow: false });
+        this.clickBox(x, y, 0, 1.35, 1.2, 1.8, () => {
+          this.spawnFx('spark', x + 0.7, 1.1, y + 1.1, { n: 8, spread: 0.55, up: 0.7 });
+        });
+        break;
+      }
+      case 'washer': {
+        const body = p.color ? soft(p.color) : 0xb8bec6;
+        this.boxMesh(p.x, p.y, 0, 0.72, 0.7, 0.95, body, { rough: 0.55, metal: 0.15 });
+        this.boxMesh(p.x + 0.08, p.y + 0.68, 0.35, 0.56, 0.03, 0.56, 0x1a222c, { rough: 0.3, metal: 0.2 });
+        // Door glass ring
+        this.boxMesh(p.x + 0.18, p.y + 0.7, 0.45, 0.36, 0.02, 0.36, 0x7ec8e8, {
+          emissive: 0x3a90b8, ei: 0.25, shadow: false, round: false,
+        });
+        this.boxMesh(p.x + 0.12, p.y + 0.05, 0.95, 0.48, 0.55, 0.08, 0x9aa2aa, { rough: 0.5, metal: 0.2 });
+        break;
+      }
+      case 'trash':
+        this.place('trashcan', p.x - 0.18, p.y - 0.18, 0.36, 0.36, { h: 0.55 });
         break;
     }
   }
