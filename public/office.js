@@ -653,7 +653,9 @@
       prop('speaker', { x: OW + 3.65, y: MR + 0.35, floor: -1 });
       prop('plant', { x: W - 0.55, y: MR + 0.5, floor: -1 });
       prop('rug', { x: OW + 0.25, y: PY + 0.35, w: 6.2, d: Math.max(3.2, D - PY - 0.95), color: '#9aafeb', color2: '#7d96e0', floor: -1 });
-      prop('couch', { x: OW + 0.55, y: PY + 0.85, w: 2.8, d: 0.8, color: '#7f97e4', floor: -1 });
+      // Turned 90° so the long side runs down the lounge and the seat faces the arcade.
+      // Pulled back just enough that the new length clears the coffee table.
+      prop('couch', { x: OW + 1.55, y: PY - 0.85, w: 0.8, d: 2.8, rot: Math.PI / 2, color: '#7f97e4', floor: -1 });
       prop('coffeeTable', { x: OW + 1.15, y: PY + 2.15, w: 1.6, d: 0.7, radio: false, floor: -1 });
       prop('beanbag', { x: OW + 0.9, y: PY + 3.35, color: '#8fd0c4', floor: -1 });
       prop('beanbag', { x: OW + 2.4, y: PY + 3.45, color: '#c9b6f0', floor: -1 });
@@ -662,7 +664,7 @@
       prop('arcade', { x: W - 1.25, y: PY + 1.15, color: '#7f8fd4', floor: -1 });
       prop('plant', { x: W - 0.5, y: D - 0.5, floor: -1 });
       prop('plant', { x: OW + 5.45, y: PY + 0.55, floor: -1 });
-      for (let k = 0; k < 3; k++) poi(OW + 1.05 + k * 0.9, PY + 1.55, 'couch', 'front', { sit: 0.36, floor: -1 });
+      for (let k = 0; k < 3; k++) poi(OW + 1.85, PY - 0.3 + k * 0.7, 'couch', 'front', { sit: 0.36, yaw: Math.PI / 2, floor: -1 });
       poi(OW + 0.9, PY + 3.35, 'beanbag', 'front', { sit: 0.18, floor: -1 });
       poi(OW + 2.4, PY + 3.45, 'beanbag', 'front', { sit: 0.18, floor: -1 });
       poi(W - 0.9, PY + 2.2, 'arcade', 'back', { floor: -1 });

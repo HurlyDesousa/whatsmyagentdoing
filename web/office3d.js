@@ -3,6 +3,7 @@
 // Bubbles and name tags are drawn by the 2D code on a canvas overlay.
 // Source file: `npm run build` bundles it with three.js into public/office3d.js.
 import * as THREE from 'three';
+import { installFloorShadowChunk, createFloorShadowLight, mountFloorShadowLights, tagFloorShadowMaterials, setFloorShadowBand, setObjectFloorLayer, bindFloorShadowPasses, floorLayerBit } from './floorshadow.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
@@ -125,6 +126,8 @@ function skyNow() {
 // builds the floor plan before our fields exist, so it's passed this way.
 let PENDING_SCENE = null;
 
+installFloorShadowChunk();
+
 export class Office3D extends window.Office {
   constructor(root, opts) {
     PENDING_SCENE = (opts && opts.scene) || null;
@@ -169,6 +172,8 @@ export class Office3D extends window.Office {
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.02;
     this.scene.add(this.sun, this.sun.target);
+    this.floorShadowLights = [];
+    this.floorShadowCount = 0;
 
     this.actors = new Map();     // person key -> { obj, blob, look, prop, cup, book }
     this.screens = new Map();    // desk -> emissive screen mesh
@@ -463,7 +468,40 @@ export class Office3D extends window.Office {
     this.buildStairsShaft();
     this.applyFloorView(true);
     this.clicks.updateMatrixWorld(true);
+    this.installFloorShadows();
     this.fitCamera3D(true);
+  }
+
+  // Stacked floors share one angled sun for colour. Its shadow map used to
+  // cover the whole building, and the slabs do not cast, so anything on
+  // floor N darkened every floor under that ray. Each storey now has its
+  // own angled shadow light (see floorshadow.js); casters and receivers
+  // stay on that storey.
+  installFloorShadows() {
+    for (const light of this.floorShadowLights || []) this.scene.remove(light, light.target);
+    this.floorShadowLights = [];
+    const floors = (this.plan && this.plan.floors) || [0];
+    const multi = !this.plan.scene && floors.length > 1;
+    this.floorShadowCount = multi ? floors.length : 0;
+    this.sun.castShadow = !multi;
+    if (multi) {
+      const { W, D } = this.plan;
+      const cx = W / 2, cz = D / 2;
+      floors.forEach((fl, i) => {
+        const floorY = fl * LEVEL_H;
+        const light = createFloorShadowLight({ floorY, cx, cz, width: W, depth: D });
+        light.name = `floor-shadow-${fl}`;
+        light.userData.floor = fl;
+        light.userData.shadowLayer = 1 << floorLayerBit(fl);
+        setFloorShadowBand(i, floorY, WALL_H + 0.5, 0.45);
+        this.floorShadowLights.push(light);
+        if (this.floors3d && this.floors3d[fl]) setObjectFloorLayer(this.floors3d[fl], fl);
+      });
+      mountFloorShadowLights(this.scene, this.floorShadowLights, this.sun);
+      bindFloorShadowPasses(this.gl);
+      if (this.catObj) setObjectFloorLayer(this.catObj.root, (this.cat && this.cat.floor) || 0);
+    }
+    tagFloorShadowMaterials(this.scene, this.floorShadowCount);
   }
 
   // Simpler stacked floors: thick slab, short walls, desks/props tagged for that floor.
@@ -884,7 +922,7 @@ export class Office3D extends window.Office {
         break;
       }
       case 'couch':
-        this.recolor(this.place('loungeSofa', p.x - 0.1, p.y - 0.15, p.w + 0.2, p.d + 0.2, { h: 0.8, stretch: true }), { carpet: p.color ? new THREE.Color(p.color).getHex() : 0x7fcbc2, wood: 0xe8c3a2 });
+        this.recolor(this.place('loungeSofa', p.x - 0.1, p.y - 0.15, p.w + 0.2, p.d + 0.2, { h: 0.8, stretch: true, rot: p.rot || 0 }), { carpet: p.color ? new THREE.Color(p.color).getHex() : 0x7fcbc2, wood: 0xe8c3a2 });
         break;
       case 'coffeeTable':
         this.place('tableCoffee', p.x, p.y, p.w, p.d, { h: 0.35 });
@@ -1304,6 +1342,7 @@ export class Office3D extends window.Office {
     c.hop = Math.max(0, c.hop - dt);
     const hopY = c.hop > 0 ? Math.sin((1 - c.hop / 0.6) * Math.PI) * 0.35 : 0;
     c.root.position.set(k.x, hopY + (this.plan.scene ? 0 : catFloor * LEVEL_H), k.y);
+    if (this.floorShadowCount) setObjectFloorLayer(c.root, catFloor);
     c.root.rotation.y = c.yaw;
     c.sit += ((walking ? 0 : 1) - c.sit) * Math.min(1, dt * 4);
     const sw = walking ? Math.sin(t * 14) * 0.6 : 0;
@@ -1561,6 +1600,7 @@ export class Office3D extends window.Office {
       }
     }
     for (const p of def.props) this.buildSceneProp(p);
+    this.installFloorShadows();
     this.fitCamera3D(true);
   }
 
@@ -1944,9 +1984,20 @@ export class Office3D extends window.Office {
     const cxv = (minX + maxX) / 2, cyv = (minY + maxY) / 2;
     Object.assign(this.camera, { left: cxv - w / 2, right: cxv + w / 2, top: cyv + h / 2, bottom: cyv - h / 2 });
     this.camera.updateProjectionMatrix();
-    // Sun casts shadows over the whole stack.
+    // Key light stays angled. On a stacked office it does not cast; each
+    // storey copies this direction into its own shadow light.
     this.sun.position.set(center.x - 6, fy + (multi ? 18 : 14), center.z - 3);
     this.sun.target.position.copy(center);
+    if (this.floorShadowLights && this.floorShadowLights.length) {
+      const dx = this.sun.position.x - center.x;
+      const dy = this.sun.position.y - center.y;
+      const dz = this.sun.position.z - center.z;
+      for (const light of this.floorShadowLights) {
+        const floorY = light.userData.floor * LEVEL_H;
+        light.position.set(center.x + dx, floorY + 0.6 + dy, center.z + dz);
+        light.target.position.set(center.x, floorY + 0.6, center.z);
+      }
+    }
     const sc = this.sun.shadow.camera;
     const r = Math.max(W, D) * 0.75;
     Object.assign(sc, { left: -r, right: r, top: r + span * LEVEL_H, bottom: -r - span * LEVEL_H, near: 1, far: multi ? 80 : 50 });
@@ -1983,6 +2034,8 @@ export class Office3D extends window.Office {
     obj.add(ring);
     a = { obj, blob, look, prop, cup, book, ring, yaw: 0, last: { x: p.x, y: p.y }, hop: 0 };
     this.actors.set(p.key, a);
+    tagFloorShadowMaterials(obj, this.floorShadowCount || 0);
+    tagFloorShadowMaterials(prop, this.floorShadowCount || 0);
     return a;
   }
 
@@ -2002,8 +2055,13 @@ export class Office3D extends window.Office {
     } else if (act === 'nap') {
       y = 0.03; roll = 0.32; sq = 0.86;
     } else if (st.pose === 'sit') {
-      // hover just above the seat
-      y = 0.04 + Math.sin(k * 1.6) * 0.02;
+      // The raycast returns the cushion top and the blob's origin is its
+      // lowest point, which is right for a humanoid hip. A round body with
+      // only a few centimetres of clearance still sits inside the sofa
+      // arms and the cushion. About 30% of the body height puts the
+      // mass on the seat (couch, chair, stool, beanbag). Standing blobs
+      // keep their own small hover and are not lifted by this.
+      y = Math.max(0.2, height * 0.3) + Math.sin(k * 1.6) * 0.02;
       if (act === 'think') roll = Math.sin(k * 1.4) * 0.09;
       else if (act === 'type') { y += Math.abs(Math.sin(k * 11)) * 0.025; lean = 0.12; }
     } else if (act === 'station') {
@@ -2076,6 +2134,10 @@ export class Office3D extends window.Office {
         a.yaw += dt * 0.35;
       }
       a.obj.position.set(p.x + Math.sin(a.yaw) * fwd, seatY + lift, p.y + Math.cos(a.yaw) * fwd);
+      if (this.floorShadowCount) {
+        setObjectFloorLayer(a.obj, fl);
+        setObjectFloorLayer(a.prop, fl);
+      }
       this.animateBlob(a, p, st, this.t / 1000, dt);
       // Floors above the picker are culled. Lower floors stay fully visible.
       const culled = !this.plan.scene && fl > (this.viewFloor || 0);
@@ -2116,14 +2178,15 @@ export class Office3D extends window.Office {
     }
   }
 
-  // Highest surface below `limit` under (x, z). Sampled at the point and
-  // four spots around it so a gap between dock planks or sand patches
-  // doesn't read as the sea floor. World matrices must be current.
-  surfaceBelow(x, z, limit, from = 1.2) {
-    if (!this.room) return 0;
+  // Highest surface below `limit` and above `floorY` under (x, z). Sampled
+  // at the point and four spots around it so a gap between dock planks or
+  // sand patches doesn't read as the sea floor. `floorY` is that storey's
+  // slab (0 on the ground and on terrain). World matrices must be current.
+  surfaceBelow(x, z, limit, from = 1.2, floorY = 0) {
+    if (!this.room) return floorY;
     const ray = new THREE.Raycaster();
     const down = new THREE.Vector3(0, -1, 0);
-    let best = 0;
+    let best = floorY;
     for (const [dx, dz] of [[0, 0], [0.09, 0], [-0.09, 0], [0, 0.09], [0, -0.09]]) {
       ray.set(new THREE.Vector3(x + dx, from, z + dz), down);
       for (const h of ray.intersectObject(this.room, true)) {
@@ -2151,7 +2214,9 @@ export class Office3D extends window.Office {
     const key = `${x.toFixed(2)},${y.toFixed(2)},${floor}`;
     this.seats = this.seats || new Map();
     if (this.seats.has(key)) return this.seats.get(key);
-    const best = this.surfaceBelow(x, y, fy + 0.75, fy + 1.35);
+    // Start at this storey's floor. A baseline of world 0 drops every
+    // basement hit (they are below 0) and then treats 0 as the seat.
+    const best = this.surfaceBelow(x, y, fy + 0.75, fy + 1.35, fy);
     const v = best > fy + 0.05 ? best : fy + (fallback || 0);
     this.seats.set(key, v);
     return v;
