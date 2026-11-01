@@ -428,7 +428,7 @@
         <button data-v="now">Now</button><button data-v="day">Day</button><button data-v="evening">Evening</button><button data-v="night">Night</button>
       </div>
       <div class="seg floorseg" id="floorSeg" role="group" aria-label="Floor">
-        <button data-v="-1" title="Basement">B</button>
+        <button data-v="-1" title="Boiler room">B</button>
         <button data-v="0" class="on" title="Ground">1</button>
         <button data-v="1" title="2nd floor">2</button>
       </div>
@@ -608,6 +608,7 @@ if (!PIP && store.get('q3dRetry', null) !== 2995) {
     } catch { /* malformed preferences use the saved defaults */ }
   }
   for (const k of ['view', 'quality', 'scene', 'lang', 'light']) if (validPreference(k, q.get(k))) store.set(k, q.get(k));
+  if (q.has('floor') && validPreference('floor', q.get('floor'))) store.set('floor', +q.get('floor'));
   if (location.search) history.replaceState(null, '', location.pathname + (PIP ? '?pip=1' : ''));
 }
 
