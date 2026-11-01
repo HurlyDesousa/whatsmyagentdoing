@@ -10,6 +10,9 @@
   const WORKING = new Set(['thinking', 'tool', 'typing', 'waiting', 'error']);
   const MAX_WANDERERS = 7;
   const SPEED = 2.1; // tiles / second
+  // SWA-3107: idle / wander retargets use dwellFor(). Hangout intervals are
+  // 10× the old 8–60s bands so auto actions fire about one-tenth as often.
+  const AUTO_STAY_SCALE = 10;
 
   const SKIN = ['#f3cfb0', '#e5b38f', '#c98d66', '#9a6646', '#6e4630', '#f7dcc7'];
   const HAIR = ['#2a2019', '#4b3020', '#8a4b2a', '#c99a5b', '#1c1c1c', '#8c8c8c', '#a33a2c', '#3d3550'];
@@ -357,7 +360,15 @@
       this.ro.observe(root);
       this.canvas.addEventListener('mousemove', (e) => this.pointer(e));
       this.canvas.addEventListener('click', (e) => this.pointer(e, true));
+      this.canvas.addEventListener('contextmenu', (e) => this.onBlobContext(e));
+      this.canvas.addEventListener('pointerdown', (e) => { this._down = { x: e.clientX, y: e.clientY }; });
       this.canvas.addEventListener('mouseleave', () => { this.hoverKey = null; this.onHover(null); });
+      this._onMenuDoc = (e) => {
+        if (this._blobMenu && !this._blobMenu.hidden && !this._blobMenu.contains(e.target)) this.hideBlobMenu();
+      };
+      this._onMenuKey = (e) => { if (e.key === 'Escape') this.hideBlobMenu(); };
+      document.addEventListener('pointerdown', this._onMenuDoc, true);
+      document.addEventListener('keydown', this._onMenuKey);
       this.resize();
       this.last = performance.now();
       // Resolves true once a few frames have been drawn with data in place,
@@ -373,6 +384,10 @@
       cancelAnimationFrame(this.raf);
       this.ro.disconnect();
       this.theme.removeEventListener('change', this.onTheme);
+      document.removeEventListener('pointerdown', this._onMenuDoc, true);
+      document.removeEventListener('keydown', this._onMenuKey);
+      this.hideBlobMenu();
+      if (this._blobMenu) this._blobMenu.remove();
       this.canvas.remove();
     }
 
@@ -830,6 +845,9 @@
         if (!p) { p = this.newPerson(s); this.people.set(s.key, p); }
         p.s = s;
         p.leaving = false;
+        // A right-click "send to…" holds the blob on that errand. Session
+        // ticks must not yank a worker back to their desk until it ends.
+        if (p.errandUntil && Date.now() < p.errandUntil) continue;
         if (isWorker) {
           this.release(p);
           const desk = desks[this.deskOf.get(s.key)];
@@ -883,7 +901,18 @@
       p.path = this.plan.grid.path(p.x, p.y, target.x, target.y);
     }
 
+    // How long a blob stays at a hangout before the next auto retarget.
+    // SWA-3107 scales every band by AUTO_STAY_SCALE (10×).
+    dwellFor(choice) {
+      const base = choice.act === 'nap' ? rand(25, 60)
+        : choice.act === 'pingpong' ? rand(15, 30)
+        : choice.stairs ? rand(1.2, 2.2)
+        : rand(8, 20);
+      return base * 1000 * AUTO_STAY_SCALE;
+    }
+
     wander(p, now) {
+      if (p.errandUntil && now < p.errandUntil) return;
       if (p.path.length) return;
       if (p.poi && now < p.until) return;
       this.release(p);
@@ -914,8 +943,251 @@
       choice.taken = p.key;
       p.poi = choice;
       p.until = Infinity; // set on arrival
-      p.stay = (choice.act === 'nap' ? rand(25, 60) : choice.act === 'pingpong' ? rand(15, 30) : choice.stairs ? rand(1.2, 2.2) : rand(8, 20)) * 1000;
+      p.stay = this.dwellFor(choice);
       this.goTo(p, choice);
+    }
+
+    // Which send-to targets exist on a floor. Missing furniture disables
+    // the menu item; it never throws.
+    blobTargets(floor) {
+      const fl = floor ?? 0;
+      const desks = (this.plan.desks || []).some((d) => (d.floor ?? 0) === fl);
+      const acts = new Set((this.plan.pois || []).filter((q) => (q.floor ?? 0) === fl).map((q) => q.act));
+      return { computer: desks, fridge: acts.has('fridge'), couch: acts.has('couch') };
+    }
+
+    workingDesk(d) {
+      for (const i of this.deskOf.values()) if (this.plan.desks[i] === d) return true;
+      return false;
+    }
+
+    nearest(list, p, xy) {
+      let best = list[0], bestD = Infinity;
+      for (const q of list) {
+        const pt = xy(q);
+        const d = Math.hypot(pt.x - p.x, pt.y - p.y);
+        if (d < bestD) { best = q; bestD = d; }
+      }
+      return best;
+    }
+
+    // Desk seat in front of a monitor. Same point naps already use, but the
+    // pose is an upright sit (act 'type') so they look at the computer.
+    computerSpot(p, fl) {
+      const desks = this.plan.desks.filter((d) => (d.floor ?? 0) === fl);
+      if (!desks.length) return null;
+      const free = desks.filter((d) => !this.workingDesk(d) && (!d.napper || d.napper === p.key));
+      const idle = desks.filter((d) => !this.workingDesk(d));
+      const pool = free.length ? free : (idle.length ? idle : desks);
+      const best = this.nearest(pool, p, (d) => d.seat);
+      return {
+        x: best.seat.x, y: best.seat.y, act: 'type',
+        face: best.side === 'n' ? 'front' : 'back', sit: 0.34,
+        yaw: best.yaw, desk: best, floor: best.floor ?? fl,
+      };
+    }
+
+    // Fridge / couch interact points already on this floor. Prefer a free
+    // seat and claim it; if every seat is taken, copy the nearest point
+    // without stealing the other blob's claim.
+    hangoutSpot(p, kind, fl) {
+      const spots = this.plan.pois.filter((q) => (q.floor ?? 0) === fl && q.act === kind && !q.stairs);
+      if (!spots.length) return null;
+      const free = spots.filter((q) => !q.taken || q.taken === p.key);
+      const pool = free.length ? free : spots;
+      const best = this.nearest(pool, p, (q) => q);
+      if (free.length) return best;
+      return {
+        x: best.x, y: best.y, act: best.act, face: best.face,
+        sit: best.sit || 0, yaw: best.yaw, floor: best.floor ?? fl,
+      };
+    }
+
+    spotFor(p, kind, floor) {
+      const fl = floor ?? 0;
+      if (kind === 'computer') return this.computerSpot(p, fl);
+      if (kind === 'fridge' || kind === 'couch') return this.hangoutSpot(p, kind, fl);
+      return null;
+    }
+
+    // Path the blob to a computer, fridge, or couch on its current floor.
+    // Returns false when that floor has no such target.
+    sendBlob(key, kind) {
+      const p = this.people.get(key);
+      if (!p || p.leaving) return false;
+      const fl = this.floorOf(p);
+      const spot = this.spotFor(p, kind, fl);
+      if (!spot) return false;
+      this.release(p);
+      p.mode = 'wander';
+      p.desk = null;
+      p.floor = fl;
+      p.poi = spot;
+      if (spot.desk && !this.workingDesk(spot.desk)) {
+        spot.desk.napper = p.key;
+        p.napDesk = spot.desk;
+      } else if (!spot.desk && this.plan.pois.includes(spot)) {
+        spot.taken = p.key;
+      }
+      p.until = Infinity;
+      p.stay = this.dwellFor(spot);
+      p.errandUntil = Infinity; // pinned until arrival, then set to p.until
+      p.placeOnArrive = false;
+      this.goTo(p, spot);
+      return true;
+    }
+
+    // Squash-stretch for a left-click. u=0 is the impact squash; it
+    // rebounds tall and damps out. Volume stays roughly constant.
+    jellyScale(p) {
+      if (!p || !p.jelly) return { sx: 1, sy: 1 };
+      const u = Math.min(1, (p.jellyT || 0) / p.jelly);
+      if (u >= 1) return { sx: 1, sy: 1 };
+      const wob = -Math.cos(u * Math.PI * 2.35) * Math.pow(1 - u, 1.05);
+      let amp = 0.28;
+      try { if (matchMedia('(prefers-reduced-motion: reduce)').matches) amp = 0.08; } catch (_) {}
+      const sy = 1 + wob * amp;
+      const sx = 1 / Math.sqrt(Math.max(0.35, sy));
+      return { sx, sy };
+    }
+
+    // Short generated click-wobble. No sample asset; a damped sine drop.
+    playBlobSfx() {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const now = performance.now();
+      if (now - (this._sfxAt || 0) < 50) return;
+      this._sfxAt = now;
+      try {
+        const ctx = this._blobAudio || (this._blobAudio = new AC());
+        if (ctx.state === 'suspended') ctx.resume();
+        const t0 = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(320, t0);
+        osc.frequency.exponentialRampToValueAtTime(92, t0 + 0.16);
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(0.16, t0 + 0.016);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t0);
+        osc.stop(t0 + 0.22);
+        const body = ctx.createOscillator();
+        const bodyGain = ctx.createGain();
+        body.type = 'triangle';
+        body.frequency.setValueAtTime(180, t0);
+        body.frequency.exponentialRampToValueAtTime(70, t0 + 0.12);
+        bodyGain.gain.setValueAtTime(0.0001, t0);
+        bodyGain.gain.exponentialRampToValueAtTime(0.05, t0 + 0.012);
+        bodyGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+        body.connect(bodyGain);
+        bodyGain.connect(ctx.destination);
+        body.start(t0);
+        body.stop(t0 + 0.16);
+      } catch (_) {}
+    }
+
+    pokeBlob(p) {
+      if (!p) return;
+      p.jelly = 0.58;
+      p.jellyT = 0;
+      this.playBlobSfx();
+    }
+
+    personKeyAt(e) {
+      const r = this.canvas.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      for (let i = this.hit.length - 1; i >= 0; i--) {
+        const h = this.hit[i];
+        if (mx >= h.x0 && mx <= h.x1 && my >= h.y0 && my <= h.y1) return h.key;
+      }
+      return null;
+    }
+
+    onBlobContext(e) {
+      const key = this.personKeyAt(e);
+      if (!key || !this.people.get(key)) { this.hideBlobMenu(); return; }
+      e.preventDefault();
+      this.showBlobMenu(key, e.clientX, e.clientY);
+    }
+
+    ensureBlobMenu() {
+      if (this._blobMenu) return;
+      if (!document.getElementById('blob-menu-style')) {
+        const css = document.createElement('style');
+        css.id = 'blob-menu-style';
+        css.textContent = [
+          '.blob-menu{position:fixed;z-index:40;min-width:188px;padding:6px;border-radius:10px;',
+          'border:1px solid var(--line,#e4e3dd);background:var(--panel,#fff);color:var(--ink,#1c1c1a);',
+          'box-shadow:0 10px 28px rgba(0,0,0,.16);font:13px/1.3 ui-sans-serif,system-ui,sans-serif;}',
+          '.blob-menu[hidden]{display:none;}',
+          '.blob-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;',
+          'color:inherit;font:inherit;padding:7px 10px;border-radius:7px;cursor:pointer;}',
+          '.blob-menu button:hover:not(:disabled){background:var(--bg,#f6f6f3);}',
+          '.blob-menu button:disabled{opacity:.38;cursor:default;}',
+        ].join('');
+        document.head.appendChild(css);
+      }
+      const menu = document.createElement('div');
+      menu.className = 'blob-menu';
+      menu.hidden = true;
+      menu.setAttribute('role', 'menu');
+      menu.addEventListener('contextmenu', (ev) => ev.preventDefault());
+      const items = [
+        ['computer', 'Send to computer'],
+        ['fridge', 'Send to fridge'],
+        ['couch', 'Send to couch'],
+      ];
+      menu._btns = {};
+      for (const [kind, label] of items) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.dest = kind;
+        b.textContent = label;
+        b.setAttribute('role', 'menuitem');
+        b.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (b.disabled) return;
+          this.sendBlob(menu.dataset.key, kind);
+          this.hideBlobMenu();
+        });
+        menu.appendChild(b);
+        menu._btns[kind] = b;
+      }
+      document.body.appendChild(menu);
+      this._blobMenu = menu;
+    }
+
+    showBlobMenu(key, clientX, clientY) {
+      const p = this.people.get(key);
+      if (!p) return;
+      this.ensureBlobMenu();
+      const avail = this.blobTargets(this.floorOf(p));
+      const menu = this._blobMenu;
+      menu.dataset.key = p.key;
+      for (const kind of ['computer', 'fridge', 'couch']) {
+        const b = menu._btns[kind];
+        b.disabled = !avail[kind];
+        b.title = b.disabled ? 'Not on this floor' : '';
+      }
+      menu.hidden = false;
+      const pad = 8;
+      const w = 200, h = 132;
+      let x = clientX, y = clientY;
+      const vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+      if (x + w > vw - pad) x = Math.max(pad, vw - w - pad);
+      if (y + h > vh - pad) y = Math.max(pad, vh - h - pad);
+      menu.style.left = x + 'px';
+      menu.style.top = y + 'px';
+    }
+
+    hideBlobMenu() {
+      if (!this._blobMenu) return;
+      this._blobMenu.hidden = true;
+      this._blobMenu.dataset.key = '';
     }
 
     takeStairs(p) {
@@ -972,15 +1244,12 @@
     }
 
     pointer(e, click) {
-      const r = this.canvas.getBoundingClientRect();
-      const mx = e.clientX - r.left, my = e.clientY - r.top;
-      let found = null;
-      for (let i = this.hit.length - 1; i >= 0; i--) {
-        const h = this.hit[i];
-        if (mx >= h.x0 && mx <= h.x1 && my >= h.y0 && my <= h.y1) { found = h; break; }
-      }
-      const key = found ? found.key : null;
+      const key = this.personKeyAt(e);
       this.canvas.style.cursor = key ? 'pointer' : 'default';
+      // Orbit drags also emit click; only a real press pokes the blob.
+      // Selection / focus still runs for every click, including a drag release.
+      const dragged = !!(click && this._down && Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y) > 6);
+      if (click && key && !dragged) this.pokeBlob(this.people.get(key));
       if (key !== this.hoverKey || click) {
         this.hoverKey = key;
         const p = key && this.people.get(key);
@@ -1687,6 +1956,9 @@
       if (st.act === 'wave') lean = Math.sin(t * 8 + p.phase) * 0.12;
       if (napping) { sy = 0.72; sx = 1.18; }
       if (seated && !napping) { sy *= 0.94; sx *= 1.03; }
+      const jelly = this.jellyScale(p);
+      sx *= jelly.sx;
+      sy *= jelly.sy;
 
       c.save();
       c.translate(x, y);
@@ -1976,6 +2248,10 @@
     step(dt) {
       const wall = Date.now();
       for (const [k, p] of this.people) {
+        if (p.jelly > 0) {
+          p.jellyT = (p.jellyT || 0) + dt;
+          if (p.jellyT >= p.jelly) { p.jelly = 0; p.jellyT = 0; }
+        }
         if (p.mode === 'wander') {
           if (p.poi && !p.path.length && p.until === Infinity) {
             if (p.poi.stairs) {
@@ -1984,6 +2260,7 @@
               p.until = wall + 600;
             } else {
               p.until = wall + p.stay;
+              if (p.errandUntil === Infinity) p.errandUntil = p.until;
             }
           }
           this.wander(p, wall);

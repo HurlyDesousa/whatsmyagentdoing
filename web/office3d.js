@@ -163,6 +163,13 @@ export class Office3D extends window.Office {
     this.controls.screenSpacePanning = true;
     this.controls.zoomToCursor = true;
     this.canvas.addEventListener('pointerdown', (e) => { this._down = { x: e.clientX, y: e.clientY }; });
+    // Right-click on a blob opens the send-to menu. Swallow it before
+    // OrbitControls treats the press as a pan.
+    this._blobRightDown = (e) => {
+      if (e.button !== 2 || !this.personKeyAt(e)) return;
+      e.stopPropagation();
+    };
+    this.canvas.addEventListener('pointerdown', this._blobRightDown, true);
 
     this.hemi = new THREE.HemisphereLight(0xfff4e2, 0x9a8468, 1.05);
     this.scene.add(this.hemi);
@@ -189,6 +196,7 @@ export class Office3D extends window.Office {
   }
 
   destroy() {
+    if (this._blobRightDown && this.canvas) this.canvas.removeEventListener('pointerdown', this._blobRightDown, true);
     super.destroy();
     if (!this.gl) return;
     this.controls.dispose();
@@ -2421,7 +2429,11 @@ export class Office3D extends window.Office {
     hover.position.y = y;
     hover.rotation.x += (lean - hover.rotation.x) * Math.min(1, dt * 8);
     hover.rotation.z += (roll - hover.rotation.z) * Math.min(1, dt * 8);
-    hover.scale.set(1 / Math.sqrt(sq), sq, 1 / Math.sqrt(sq));
+    // Left-click jelly: scale from the feet so the squash stays planted.
+    const jelly = this.jellyScale(p);
+    const sy = sq * jelly.sy;
+    const sxz = (1 / Math.sqrt(sq)) * jelly.sx;
+    hover.scale.set(sxz, sy, sxz);
     // blink every few seconds; closed while napping
     const blink = act === 'nap' ? 0.12 : ((k * 0.31) % 1 < 0.035 ? 0.15 : 1);
     for (const e of eyes) e.scale.y = blink;
