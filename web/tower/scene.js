@@ -54,9 +54,9 @@ let resizeObserver = null;
 let sceneVisible = true;
 // Debug/test switches: ?floor=<id> forces the active floor, ?from=<id> starts there first, ?intro=0 skips the load
 // animation, ?hold=<s> fast-forwards that long after the (last) switch and freezes time, ?cam=x,z,zoom snaps the camera.
-// This copy is the in-app 4D tower: centred (no wallpaper side panels) with pan, zoom and select left on.
+// Full dashboard: the building sits between the floor list and the team card, same as the wallpaper site.
 const WALLPAPER = false;
-const CENTERED = true;
+const CENTERED = false;
 const WALLPAPER_TAGS = false;
 const WALLPAPER_FRAME_MS = 1000 / 30;
 const WALLPAPER_FRAMING = 0.9;                        // < 1 = closer: the side panels' space is not needed, so the tower fills more
@@ -110,7 +110,7 @@ export function initScene(el, cbs = {}) {
 
   daylight = createDaylight({ scene, renderer });
   document.documentElement.dataset.sky = 'studio';        // white backdrop at every hour: the UI stays on light glass (web/styles.css)
-  container.style.background = studioCss();               // the same backdrop as the post pass draws, for the first moments
+  container.style.background = studioCss(towerDark);               // the same backdrop as the post pass draws, for the first moments
 
   camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 240);
   camera.position.copy(ISO_DIR).multiplyScalar(80);
@@ -129,6 +129,7 @@ export function initScene(el, cbs = {}) {
   });
 
   post = createPost(renderer, scene, camera);
+  if (towerDark && post.setDark) post.setDark(true);
 
   addPointerHandlers();
   resizeObserver = new ResizeObserver(resize);
@@ -283,6 +284,14 @@ function switchFloor(id, first) {
   }
   switchedAt = nowSec;
   if (first) { building.prewarm(camera); hideLoader(); }
+}
+
+let towerDark = false;
+
+export function setTowerTheme(dark) {
+  towerDark = !!dark;
+  if (container) container.style.background = studioCss(towerDark);
+  if (post && post.setDark) post.setDark(towerDark);
 }
 
 export function sceneCanvas() {

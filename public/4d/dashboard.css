@@ -1,0 +1,105 @@
+/* Full-bleed wallpaper dashboard. Tokens and overlay positions apply only while 4D owns the page. */
+
+body.tower-site {
+  --gutter: 24px;
+  --top: 22px;
+  --below-top: 96px;
+  --floors-w: 212px;
+  --panel-w: 352px;
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding: 0 !important;
+  height: 100dvh;
+  overflow: hidden;
+  background: radial-gradient(70% 70% at 42% 38%, #ffffff 0%, #f3f4f6 55%, #e7e9ed 100%);
+}
+
+body.tower-site .wrap > header,
+body.tower-site .side,
+body.tower-site .officebar,
+body.tower-site #main,
+body.tower-site .summary,
+body.tower-site .pip-error,
+body.tower-site .pip-preview,
+body.tower-site .ver,
+body.tower-site .conn { display: none !important; }
+
+body.tower-site .wrap,
+body.tower-site .dashgrid,
+body.tower-site #officeWrap {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+body.tower-site #office {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 0;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+body.tower-site .office-loader { color: #6e6e73; }
+
+body:not(.tower-site) :is(#topbar, #floors, #panel, #feed, .bhq-zoom, .bhq-dock, .bhq-sheet, .bhq-qual) {
+  display: none !important;
+}
+
+#topbar {
+  position: fixed; z-index: 20; top: var(--top, 22px); left: var(--gutter, 24px); right: var(--gutter, 24px);
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 16px;
+  pointer-events: none;
+}
+#topbar > * { pointer-events: auto; }
+#floors {
+  position: fixed; z-index: 20; left: var(--gutter, 24px); top: var(--below-top, 96px);
+  width: var(--floors-w, 212px); max-height: calc(100vh - var(--below-top, 96px) - 210px);
+}
+#panel {
+  position: fixed; z-index: 20; right: var(--gutter, 24px); top: var(--below-top, 96px);
+  width: min(var(--panel-w, 352px), calc(100vw - 2 * var(--gutter, 24px)));
+  max-height: calc(100vh - var(--below-top, 96px) - var(--gutter, 24px));
+  display: flex; flex-direction: column; pointer-events: none;
+}
+#feed {
+  position: fixed; z-index: 20; left: var(--gutter, 24px); bottom: var(--gutter, 24px);
+  width: min(372px, calc(100vw - 2 * var(--gutter, 24px)));
+}
+@media (max-width: 1100px) {
+  #feed { display: none; }
+}
+
+/* Quiet way back to the Kenney floors. Sits in the dashboard's top-right cluster. */
+.bhq-qual {
+  display: inline-flex; align-items: center; gap: 2px; height: 40px; padding: 4px;
+  border-radius: 20px; pointer-events: auto;
+}
+.bhq-qual button {
+  height: 32px; padding: 0 12px; border-radius: 16px; cursor: pointer;
+  font: 800 12px/1 var(--bhq-round, Nunito, system-ui, sans-serif); color: #b4b4ba;
+}
+.bhq-qual button.on { background: rgba(255, 255, 255, .14); color: #f2f2f7; }
+html[data-theme="dark"] body.tower-site {
+  background: radial-gradient(70% 70% at 42% 38%, #1b2240 0%, #10162b 55%, #080b18 100%);
+}
+html[data-theme="dark"] .bhq-surface {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .18),
+    inset 0 0 0 1px rgba(255, 255, 255, .1),
+    0 12px 32px rgba(0, 0, 0, .48);
+}
+.bhq-theme {
+  height: 40px; padding: 0 14px; border-radius: 20px; pointer-events: auto; cursor: pointer;
+  font: 800 12px/1 var(--bhq-round, Nunito, system-ui, sans-serif); color: #f2f2f7;
+}

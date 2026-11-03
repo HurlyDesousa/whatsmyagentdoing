@@ -75,6 +75,7 @@ export function createPost(renderer, scene, camera) {
       this.base = 1.05 * renderer.getPixelRatio();
       h.uniforms.strength.value = v.uniforms.strength.value = this.base;
     },
+    setDark(dark) { studio.setTheme(!!dark); },
     render(focusV, dt, intensity = 1) {
       h.uniforms.focus.value = v.uniforms.focus.value = focusV;
       h.uniforms.strength.value = v.uniforms.strength.value = this.base * intensity;

@@ -29,9 +29,15 @@ export const STUDIO = {
 const srgb = (c) => { const k = new THREE.Color(); k.setStyle(c, THREE.LinearSRGBColorSpace); return new THREE.Vector3(k.r, k.g, k.b); };   // raw sRGB numbers, no decoding
 
 // The same backdrop as CSS, for the moment before the first frame and for the page behind the canvas.
-export function studioCss() {
+const DARK_STUDIO = {
+  stops: [[0, '#243056'], [0.5, '#141A2E'], [1, '#080B18']],
+  shadow: '#000000',
+};
+
+export function studioCss(dark = false) {
+  const src = dark ? DARK_STUDIO : STUDIO;
   const [cx, cy] = STUDIO.centre, [rx, ry] = STUDIO.radii;
-  const st = STUDIO.stops.map(([t, c]) => `${c} ${(t * 100).toFixed(1)}%`).join(', ');
+  const st = src.stops.map(([t, c]) => `${c} ${(t * 100).toFixed(1)}%`).join(', ');
   return `radial-gradient(ellipse ${rx * 100}% ${ry * 100}% at ${cx * 100}% ${cy * 100}%, ${st})`;
 }
 
@@ -119,6 +125,16 @@ export class StudioPass extends Pass {
     this.t = null;
     this.size = new THREE.Vector2(1, 1);
     this.setSize(1, 1);
+  }
+
+  setTheme(dark) {
+    const src = dark ? DARK_STUDIO : STUDIO;
+    const u = this.composeMat.uniforms;
+    u.stop0.value.copy(srgb(src.stops[0][1]));
+    u.stop1.value.copy(srgb(src.stops[1][1]));
+    u.stop2.value.copy(srgb(src.stops[2][1]));
+    u.shadowC.value.copy(srgb(src.shadow));
+    this.dark = !!dark;
   }
 
   // w, h = drawing-buffer pixels. Targets: silhouette + contact pair at 1/4, penumbra pair at 1/8, ambient at 1/32

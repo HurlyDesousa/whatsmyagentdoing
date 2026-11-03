@@ -74,9 +74,9 @@ With no feed configured, the office keeps its own crew colours. **4D** still use
 
 ## 4D tower
 
-The quality control is **2D**, **3D**, and **4D**. **4D** is the default when this browser has no saved quality. A saved 2D (`mid`) or 3D (`high`) choice stays until you pick something else.
+The quality control is **2D**, **3D**, and **4D**. **4D** is the default when this browser has no saved quality. A saved 2D (`mid`) or 3D (`high`) choice stays until you pick something else. **Dark** / **Light** (saved as `wmad.theme`) follows the same browser store. With no saved theme it follows the system, the same way the 2D floor does. An explicit choice stays after reload and tints the tower backdrop as well as the Kenney floor.
 
-**4D** draws the wallpaper tower: glossy blobs on stacked floors (one floor per feed group, otherwise Ops / Infra / Watch / Swart Ops), not the Kenney rooms on B / 1 / 2. It uses the same feed the rest of the page already reads. Paperclip still owns the seat: a bot who is working in Paperclip sits at a desk even if the feed says done. Feed-only bots use the feed's status. 2D and 3D are unchanged, including Berlin sun, hop / ding / done, and Share PNG.
+**4D** is the wallpaper dashboard across the whole window: glossy blobs, stacked floors, and the glass panels (floors, waiting, finished, routines, activity, the floor team, the live clock, usage). It is the default when this browser has no saved quality. Pick **2D** or **3D** on that dashboard (top right) to come back to the Kenney floors and the Swart Ops chrome. A saved 2D or 3D choice stays. Paperclip still owns the seat when the feed disagrees. The topic stays in the browser.
 
 The tower renderer is the wallpaper scene, served from this origin (`/office4d.js`, assets under `/4d/`). The topic is still only in the browser.
 

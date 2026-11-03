@@ -191,7 +191,8 @@
   };
 
   function palette() {
-    const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+    const forced = typeof document !== 'undefined' && document.documentElement && document.documentElement.dataset.theme;
+    const dark = forced === 'dark' || (forced !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
     return dark ? {
       dark: true,
       wood1: '#4a3f35', wood2: '#453a31', woodLine: 'rgba(0,0,0,.22)',
