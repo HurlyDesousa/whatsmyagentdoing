@@ -180,6 +180,7 @@
   .office-canvas { display: block; }
   .office canvas { transition: opacity .35s; }
   .office.loading canvas { opacity: 0; }
+  .office.loading .hq-loading { display: none; }
   .office-loader { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--muted); font-size: 13px; z-index: 2; }
   .office.loading .office-loader { display: flex; }
   .office-loader .spin { width: 26px; height: 26px; border: 3px solid var(--line); border-top-color: var(--tool); border-radius: 50%; animation: spin .8s linear infinite; }
@@ -401,6 +402,7 @@
       <div class="seg" id="qualSeg">
         <button data-v="mid" data-t="qMid"></button>
         <button data-v="high" data-t="qHigh"></button>
+        <button data-v="4d" data-t="q4d"></button>
       </div>
       <span class="toolbar-space" aria-hidden="true"></span>
       <button class="btn" id="pipBtn" hidden></button>
@@ -614,12 +616,12 @@ const store = (() => {
   return { get, set };
 })();
 
-const PREF_DEFAULTS = { view: 'office', quality: 'high', scene: 'office', agent: 'all', showSub: false, showIdle: true, showAgent: true, lang: 'auto', light: 'now', showAll: false, floor: 0 };
+const PREF_DEFAULTS = { view: 'office', quality: WallpaperFeed.DEFAULT_QUALITY, scene: 'office', agent: 'all', showSub: false, showIdle: true, showAgent: true, lang: 'auto', light: 'now', showAll: false, floor: 0 };
 function validPreference(k, v) {
   if (!Object.hasOwn(PREF_DEFAULTS, k)) return false;
   if (typeof PREF_DEFAULTS[k] === 'boolean') return typeof v === 'boolean';
   if (k === 'view') return ['office', 'list'].includes(v);
-  if (k === 'quality') return ['mid', 'high'].includes(v);
+  if (k === 'quality') return WallpaperFeed.resolveQuality(v) === v;
   if (k === 'light') return ['now', 'day', 'evening', 'night'].includes(v);
   if (k === 'floor') return [-1, 0, 1].includes(+v);
   if (k === 'agent') return ['all', ...Object.keys(OFFICE_AGENT_BADGES)].includes(v);
@@ -637,8 +639,9 @@ const PIP = new URLSearchParams(location.search).get('pip') === '1';
 if (PIP) document.body.classList.add('pip');
 
 // SWA-2995: 1679b7f saved quality='mid' every time 3D timed out, pinning the
-// browser to the (then endless) 2D loader. Forget that auto-saved value once
-// so 3D gets a fresh try; an explicit ?quality= below still wins.
+// browser to the (then endless) 2D loader. Forget that auto-saved value once.
+// An explicit ?quality= below still wins. A later explicit 2D or 3D choice
+// (saved after this flag) is kept; a visit with no saved quality uses 4D.
 if (!PIP && store.get('q3dRetry', null) !== 2995) {
   if (store.get('quality', null) === 'mid') store.set('quality', PREF_DEFAULTS.quality);
   store.set('q3dRetry', 2995);
@@ -665,6 +668,8 @@ const state = {
   prev: new Map(),
   flash: new Set(),
 };
+state.towerFloor = typeof store.get('towerFloor', null) === 'string' ? store.get('towerFloor', null) : null;
+state.towerFloors = [];
 let popout = null;
 window.OFFICE_LIGHT = state.light;
 
@@ -995,6 +1000,13 @@ document.getElementById('qualSeg').addEventListener('click', (e) => {
 });
 document.getElementById('floorSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
+  if (state.quality === '4d') {
+    state.towerFloor = b.dataset.v;
+    store.set('towerFloor', state.towerFloor);
+    if (office && typeof office.setTowerFloor === 'function') office.setTowerFloor(state.towerFloor);
+    syncControls();
+    return;
+  }
   const fl = +b.dataset.v;
   state.floor = fl; store.set('floor', fl);
   try { localStorage.setItem('officeFloor', String(fl)); } catch {}
@@ -1021,11 +1033,8 @@ function syncControls() {
   document.querySelectorAll('#agentSeg button').forEach((b) => b.classList.toggle('on', b.dataset.v === state.agent));
   document.querySelectorAll('#viewSeg button').forEach((b) => b.classList.toggle('on', b.dataset.v === state.view));
   document.querySelectorAll('#qualSeg button').forEach((b) => b.classList.toggle('on', b.dataset.v === state.quality));
-  document.querySelectorAll('#floorSeg button').forEach((b) => b.classList.toggle('on', +b.dataset.v === +state.floor));
   document.getElementById('qualSeg').style.display = state.view === 'office' ? '' : 'none';
-  // Floor picker is for the built-in office only (scene packs stay single-level).
-  const floorSeg = document.getElementById('floorSeg');
-  floorSeg.style.display = state.view === 'office' && state.scene === 'office' ? '' : 'none';
+  renderFloorSeg();
   document.getElementById('sceneGroup').hidden = state.view !== 'office' || state.quality !== 'high';
   const activeFilter = document.getElementById('activeFilter');
   activeFilter.hidden = state.agent === 'all';
@@ -1068,9 +1077,34 @@ function refreshTip() {
   placeTip();
 }
 function hideTip() { tipKey = null; tipPinned = false; tip.style.display = 'none'; tip.classList.remove('pinned'); }
+const KENNEY_FLOORS = '<button data-v="-1" title="Boiler room">B</button><button data-v="0" title="Ground">1</button><button data-v="1" title="2nd floor">2</button>';
+function renderFloorSeg() {
+  const el = document.getElementById('floorSeg');
+  const tower = state.view === 'office' && state.quality === '4d';
+  el.style.display = state.view === 'office' && (tower || state.scene === 'office') ? '' : 'none';
+  if (!tower) {
+    if (el.dataset.mode === 'tower') {
+      el.dataset.mode = 'kenney';
+      delete el.dataset.sig;
+      el.innerHTML = KENNEY_FLOORS;
+    }
+    el.querySelectorAll('button').forEach((b) => b.classList.toggle('on', +b.dataset.v === +state.floor));
+    return;
+  }
+  const floors = state.towerFloors || [];
+  const sig = floors.map((f) => f.id).join('|');
+  if (el.dataset.mode !== 'tower' || el.dataset.sig !== sig) {
+    el.dataset.mode = 'tower';
+    el.dataset.sig = sig;
+    el.innerHTML = floors.map((f) => `<button data-v="${esc(f.id)}" title="${esc(f.name)}">${esc(f.name)}</button>`).join('');
+  }
+  const cur = state.towerFloor && floors.some((f) => f.id === state.towerFloor) ? state.towerFloor : (floors[0] && floors[0].id);
+  el.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === cur));
+}
 const officeOpts = {
   compact: PIP,
   onFrame: (renderer) => popout?.drawPreview(renderer),
+  onFloors(floors) { state.towerFloors = floors; if (state.quality === '4d') renderFloorSeg(); },
   label: (s) => s.project || AGENT_NAME[s.agent] || s.agent,
   onHover(s, at, click) {
     if (click) {
@@ -1128,22 +1162,32 @@ let markDataReady;
 const dataReady = new Promise((ok) => (markDataReady = ok));
 // Automatic fallback is for this page load only: don't save 'mid' (a slow
 // network once would otherwise pin the browser to 2D for good).
-function fallbackTo2D() {
-  setLoading(true, L.failed3d);
+function fallbackTo2D(why) {
+  setLoading(true, why || L.failed3d);
   state.quality = 'mid'; syncControls();
   setTimeout(() => makeOffice(), 1200);
 }
 async function makeOffice() {
+  const tower = state.quality === '4d';
   const high = state.quality === 'high';
   const scene = high && state.scene !== 'office' && state.scenes.some((x) => x.id === state.scene) ? state.scene : 'office';
-  const kind = high ? `high:${scene}` : 'mid';
+  const kind = tower ? '4d' : high ? `high:${scene}` : 'mid';
   if (kind === officeKind) return;
   officeKind = kind;
-  setLoading(true, high ? L.loading3d : L.loading2d);
-  const deadline = performance.now() + (high ? OFFICE3D_TIMEOUT_MS : OFFICE2D_TIMEOUT_MS);
+  setLoading(true, tower ? (L.loading4d || 'Loading the tower office…') : high ? L.loading3d : L.loading2d);
+  const deadline = performance.now() + ((high || tower) ? OFFICE3D_TIMEOUT_MS : OFFICE2D_TIMEOUT_MS);
   let Cls = window.Office;
-  const opts = { ...officeOpts, showAgent: state.showAgent };
-  if (high) {
+  const opts = { ...officeOpts, showAgent: state.showAgent, towerFloor: state.towerFloor };
+  if (tower) {
+    let failed = false;
+    try {
+      const mod = await withDeadline(import('/office4d.js'), deadline);
+      if (mod === TIMED_OUT) throw new Error('office4d.js import timed out');
+      Cls = mod.Office4D;
+    } catch (e) { console.error(e); failed = true; }
+    if (officeKind !== kind) return;
+    if (failed) { fallbackTo2D(L.failed4d); return; }
+  } else if (high) {
     let failed = false;
     try {
       const mod = await withDeadline(import('/office3d.js'), deadline);
@@ -1164,7 +1208,7 @@ async function makeOffice() {
     mine = new Cls(officeEl, opts);
   } catch (e) {
     console.error(e);
-    if (high) { state.quality = 'mid'; officeKind = 'mid'; syncControls(); }
+    if (high || tower) { state.quality = 'mid'; officeKind = 'mid'; syncControls(); }
     try { mine = new window.Office(officeEl, officeOpts); } catch (e2) { console.error(e2); setLoading(false); return; }
   }
   office = mine;
@@ -1173,7 +1217,7 @@ async function makeOffice() {
     state.floor = fl; store.set('floor', fl);
     syncControls();
   };
-  if (typeof office.setViewFloor === 'function' && state.scene === 'office') {
+  if (typeof office.setViewFloor === 'function' && state.scene === 'office' && state.quality !== '4d') {
     office.setViewFloor(+state.floor || 0);
   }
   render();
@@ -1189,12 +1233,13 @@ async function makeOffice() {
   let ok = await withDeadline(mine.ready || true, deadline);
   if (office !== mine) return;
   if (ok === TIMED_OUT) {
-    console.warn(`${high ? '3D' : '2D'} office not ready after ${high ? OFFICE3D_TIMEOUT_MS : OFFICE2D_TIMEOUT_MS} ms`);
-    ok = !high; // 2D: it's already drawing the floor, just show it
+    const label = tower ? '4D' : high ? '3D' : '2D';
+    console.warn(`${label} office not ready after ${(high || tower) ? OFFICE3D_TIMEOUT_MS : OFFICE2D_TIMEOUT_MS} ms`);
+    ok = !(high || tower); // 2D: it's already drawing the floor, just show it
   }
-  if (!ok && high) {
-    // 3D failed or hung (no WebGL, missing/slow files…): fall back to the 2D office.
-    fallbackTo2D();
+  if (!ok && (high || tower)) {
+    // 3D / 4D failed or hung (no WebGL, missing/slow files…): fall back to the 2D office.
+    fallbackTo2D(tower ? L.failed4d : L.failed3d);
     return;
   }
   setLoading(false);
@@ -1615,6 +1660,7 @@ function berlinLightKey() {
 function syncLight() {
   window.OFFICE_LIGHT = state.light;
   lightSeg.querySelectorAll('button').forEach((b) => { b.classList.toggle('on', b.dataset.v === state.light); b.setAttribute('aria-pressed', b.dataset.v === state.light); });
+  if (office && typeof office.syncLight === 'function') office.syncLight();
   const nowBtn = lightSeg.querySelector('[data-v="now"]');
   if (nowBtn) {
     const key = berlinLightKey();

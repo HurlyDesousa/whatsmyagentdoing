@@ -71,7 +71,7 @@ async function drawnLogos(target) {
    window.Notification=class {static permission='granted';constructor(title,options){window.__notifications.push({title,options})}};
   },sessions);
   context.on('page',p=>p.on('pageerror',e=>errors.push(String(e))));
-  const page=await context.newPage();await page.goto(base);await stable(page);
+  const page=await context.newPage();await page.goto(base+'/?quality=high');await stable(page);
   assert.equal(await page.locator('h1 [data-t]').innerText(),"What's my agent doing");
   assert.equal(await page.locator('#showAgent').isChecked(),true);
   assert.deepEqual([...new Set(await badges(page))].sort(),['Cl','Cx','G','OMP']);
@@ -180,7 +180,7 @@ async function drawnLogos(target) {
   check('video fallback captures 3D + overlay, survives renderer changes and releases media tracks on stop');
   await fallback.click('#viewSeg [data-v=list]');assert.equal(await fallback.locator('#pipBtn').isVisible(),false);
   check('view-only fallback is offered only for office mode');
-  const compact=await context.newPage();await compact.goto(base+'/?pip=1&view=list');
+  const compact=await context.newPage();await compact.goto(base+'/?pip=1&view=list&quality=mid');
   await compact.waitForFunction(()=>state.loaded);
   await compact.evaluate(()=>{__events.close();onData({now:Date.now(),sessions:[]})});
   assert.match(await compact.locator('#main').innerText(),/目前沒有|No agents/);
