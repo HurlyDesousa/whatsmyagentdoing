@@ -111,15 +111,33 @@ const LIGHTS = {
   night: { sky: 0x1d2350, sun: 0.32, sunCol: 0x8d96ff, amb: 0.5, hemiSky: 0x9a96ff, hemiGround: 0x2c2646, exposure: 1.05, lamp: 3.6, door: 5.2, halo: 1, screen: 2.1, ceil: 1.1, glow: 1.5, night: true },
 };
 export const LIGHT_MODES = ['now', 'day', 'evening', 'night'];
-// Mode comes from the page (window.OFFICE_LIGHT, saved in localStorage).
-function skyNow() {
+// "Now" follows Europe/Berlin (office.js). Day / Evening / Night stay manual.
+function fallbackLightKey(date) {
   const mode = (typeof window !== 'undefined' && window.OFFICE_LIGHT) || 'now';
-  if (mode !== 'now' && LIGHTS[mode]) return LIGHTS[mode];
-  const h = new Date().getHours() + new Date().getMinutes() / 60;
-  if (h >= 7 && h < 17) return LIGHTS.day;
-  if (h >= 5 && h < 7) return LIGHTS.dawn;
-  if (h >= 17 && h < 19) return LIGHTS.evening;
-  return LIGHTS.night;
+  if (mode !== 'now' && LIGHTS[mode]) return mode;
+  const h = date.getHours() + date.getMinutes() / 60;
+  if (h >= 7 && h < 17) return 'day';
+  if (h >= 5 && h < 7) return 'dawn';
+  if (h >= 17 && h < 19) return 'evening';
+  return 'night';
+}
+function skyNow(date = new Date()) {
+  const key = (typeof window !== 'undefined' && typeof window.officeLightKey === 'function')
+    ? window.officeLightKey(date)
+    : fallbackLightKey(date);
+  return LIGHTS[key] || LIGHTS.night;
+}
+function sunHourNow(date = new Date()) {
+  if (typeof window !== 'undefined' && typeof window.officeSunHour === 'function') return window.officeSunHour(date);
+  const mode = (typeof window !== 'undefined' && window.OFFICE_LIGHT) || 'now';
+  if (mode === 'day') return 12;
+  if (mode === 'evening') return 18.25;
+  if (mode === 'night') return 22;
+  return date.getHours() + date.getMinutes() / 60;
+}
+function sunOffsetNow(hour) {
+  if (typeof window !== 'undefined' && typeof window.officeSunOffset === 'function') return window.officeSunOffset(hour);
+  return { x: -6, y: 16, z: -3 };
 }
 
 // The scene pack for the instance being constructed. The base constructor
@@ -136,7 +154,7 @@ export class Office3D extends window.Office {
     this.compact = !!opts?.compact;
     this.canvas.classList.add('office-overlay');
     try {
-      this.gl = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      this.gl = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     } catch (e) {
       // No WebGL here; the page falls back to the 2D office.
       this.loadError = 'WebGL unavailable';
@@ -2340,24 +2358,45 @@ export class Office3D extends window.Office {
     const cxv = (minX + maxX) / 2, cyv = (minY + maxY) / 2;
     Object.assign(this.camera, { left: cxv - w / 2, right: cxv + w / 2, top: cyv + h / 2, bottom: cyv - h / 2 });
     this.camera.updateProjectionMatrix();
-    // Key light stays angled. On a stacked office it does not cast; each
-    // storey copies this direction into its own shadow light.
-    this.sun.position.set(center.x - 6, fy + (multi ? 18 : 14), center.z - 3);
-    this.sun.target.position.copy(center);
-    if (this.floorShadowLights && this.floorShadowLights.length) {
-      const dx = this.sun.position.x - center.x;
-      const dy = this.sun.position.y - center.y;
-      const dz = this.sun.position.z - center.z;
-      for (const light of this.floorShadowLights) {
-        const floorY = light.userData.floor * LEVEL_H;
-        light.position.set(center.x + dx, floorY + 0.6 + dy, center.z + dz);
-        light.target.position.set(center.x, floorY + 0.6, center.z);
-      }
-    }
+    // Key light direction comes from placeSun (Berlin clock or the manual
+    // preset). On a stacked office the sun does not cast; each storey
+    // copies that direction into its own shadow light.
+    this.sun.target.position.set(center.x, center.y, center.z);
     const sc = this.sun.shadow.camera;
     const r = Math.max(W, D) * 0.75;
     Object.assign(sc, { left: -r, right: r, top: r + span * LEVEL_H, bottom: -r - span * LEVEL_H, near: 1, far: multi ? 80 : 50 });
     sc.updateProjectionMatrix();
+    this.placeSun(true);
+  }
+
+  // Moves the key light with the Berlin hour (or the manual preset's
+  // anchor). Floor shadow lights keep the same direction so each slab's
+  // shadow matches the sun that colours the room.
+  placeSun(force) {
+    if (!this.sun || !this.plan) return;
+    const hour = this._sunHour != null ? this._sunHour : sunHourNow();
+    const off = sunOffsetNow(hour);
+    const { W, D } = this.plan;
+    const vf = this.viewFloor || 0;
+    const fy = (this.plan.scene ? 0 : vf) * LEVEL_H;
+    const cx = W / 2;
+    const cy = fy + 0.6;
+    const cz = D / 2;
+    const key = `${Math.round(off.x * 20)},${Math.round(off.y * 20)},${Math.round(off.z * 20)},${vf}`;
+    if (!force && this._sunKey === key) return;
+    this._sunKey = key;
+    this.sun.position.set(cx + off.x, cy + off.y, cz + off.z);
+    this.sun.target.position.set(cx, cy, cz);
+    for (const light of this.floorShadowLights || []) {
+      const floorY = (light.userData.floor || 0) * LEVEL_H;
+      light.position.set(cx + off.x, floorY + 0.6 + off.y, cz + off.z);
+      light.target.position.set(cx, floorY + 0.6, cz);
+      const cam = light.shadow && light.shadow.camera;
+      if (cam) {
+        const far = off.y + 28;
+        if (cam.far < far) { cam.far = far; cam.updateProjectionMatrix(); }
+      }
+    }
   }
 
   resize() {
@@ -2426,6 +2465,8 @@ export class Office3D extends window.Office {
     } else if (act && act !== 'idle') {
       y += Math.abs(Math.sin(k * 4)) * 0.05; lean = 0.08;
     }
+    y += this.hopLift(p);
+    if (st.pose !== 'walk') y += this.workHop(p, t);
     hover.position.y = y;
     hover.rotation.x += (lean - hover.rotation.x) * Math.min(1, dt * 8);
     hover.rotation.z += (roll - hover.rotation.z) * Math.min(1, dt * 8);
@@ -2523,6 +2564,11 @@ export class Office3D extends window.Office {
         a.ring.scale.setScalar(k);
         a.blob.glow.material.opacity = 0.9;
       }
+      const flash = this.flashAmt(p);
+      if (a.blob.mat) a.blob.mat.emissiveIntensity = 0.18 + flash * 1.15;
+      if (flash > 0 && a.blob.glow) {
+        a.blob.glow.material.opacity = Math.min(1, (focused ? 0.9 : 0.4) + flash * 0.55);
+      }
       // hand-held props float beside the blob
       a.cup.visible = !culled && (st.act === 'coffee' || st.act === 'water' || (st.pose !== 'walk' && p.poi && p.poi.prop === 'cup'));
       a.book.visible = !culled && st.act === 'read';
@@ -2611,9 +2657,11 @@ export class Office3D extends window.Office {
     const dt = Math.min(0.05, this.clock.getDelta());
     const t = this.t / 1000;
 
-    // lighting follows the time of day
+    // lighting follows Europe/Berlin unless Day / Evening / Night is pinned
     const sky = skyNow();
     this.sky = sky;
+    this._sunHour = sunHourNow();
+    this.placeSun(false);
     this.sun.intensity = sky.sun;
     this.sun.color.setHex(sky.sunCol);
     this.hemi.intensity = sky.amb;

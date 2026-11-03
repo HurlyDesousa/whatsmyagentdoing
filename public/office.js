@@ -213,17 +213,67 @@
     };
   }
 
+  // Europe/Berlin from the viewer's clock. The office container uses this
+  // zone, so "Now" follows Berlin morning / sunset / night even if the
+  // browser is somewhere else. Manual Day / Dawn / Evening / Night still win.
+  const OFFICE_TZ = 'Europe/Berlin';
+  const CUE_WORK = new Set(['thinking', 'tool', 'typing', 'working', 'active', 'running']);
+  const CUE_WAIT = new Set(['waiting', 'waiting_user', 'needs_user', 'needs_you', 'needs-you']);
+  const CUE_DONE = new Set(['done', 'completed', 'complete', 'succeeded', 'success']);
+
+  function berlinParts(date = new Date()) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: OFFICE_TZ, hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
+      }).formatToParts(date);
+      const num = (type) => {
+        const v = parts.find((p) => p.type === type);
+        return v ? Number(v.value) : NaN;
+      };
+      const hour = num('hour');
+      const minute = num('minute');
+      if (Number.isFinite(hour) && Number.isFinite(minute)) return { hour, minute };
+    } catch (_) {}
+    return { hour: date.getHours(), minute: date.getMinutes() };
+  }
+  function berlinHour(date = new Date()) {
+    const p = berlinParts(date);
+    return p.hour + p.minute / 60;
+  }
+  function officeLightKey(date = new Date()) {
+    const mode = (typeof window !== 'undefined' && window.OFFICE_LIGHT) || 'now';
+    if (mode === 'day' || mode === 'dawn' || mode === 'evening' || mode === 'night') return mode;
+    const h = berlinHour(date);
+    if (h >= 7 && h < 17) return 'day';
+    if (h >= 5 && h < 7) return 'dawn';
+    if (h >= 17 && h < 19) return 'evening';
+    return 'night';
+  }
+  // Anchor hours for a manual preset. "Now" keeps the real Berlin hour so
+  // the sun actually travels, instead of snapping to four still pictures.
+  function officeSunHour(date = new Date()) {
+    const mode = (typeof window !== 'undefined' && window.OFFICE_LIGHT) || 'now';
+    if (mode === 'day') return 12;
+    if (mode === 'dawn') return 6;
+    if (mode === 'evening') return 18.25;
+    if (mode === 'night') return 22;
+    return berlinHour(date);
+  }
+  // Offset from the floor centre. East is -x at dawn, west is +x at sunset.
+  function officeSunOffset(hour) {
+    const h = ((Number(hour) % 24) + 24) % 24;
+    if (h < 5 || h >= 19) return { x: 2.5, y: 9, z: -7 };
+    const t = (h - 5) / 14;
+    const elev = Math.sin(t * Math.PI);
+    const az = (t - 0.5) * Math.PI;
+    return { x: Math.sin(az) * 8, y: 6 + elev * 12, z: -4 * Math.cos(az) };
+  }
   function skyColor(d = new Date()) {
-    // Now / Day / Evening / Night control (index.html sets window.OFFICE_LIGHT)
-    const mode = window.OFFICE_LIGHT || 'now';
-    if (mode === 'day') return { sky: '#a9d4f2', night: false };
-    if (mode === 'evening') return { sky: '#f2a46e', night: false };
-    if (mode === 'night') return { sky: '#1d2350', night: true };
-    const h = d.getHours() + d.getMinutes() / 60;
-    if (h >= 7 && h < 17) return { sky: '#a9d4f2', night: false };
-    if (h >= 5 && h < 7) return { sky: '#f3c9a8', night: false };
-    if (h >= 17 && h < 19) return { sky: '#f0a679', night: false };
-    return { sky: '#1d2747', night: true };
+    const key = officeLightKey(d);
+    if (key === 'day') return { sky: '#a9d4f2', night: false, key };
+    if (key === 'dawn') return { sky: '#f3c9a8', night: false, key };
+    if (key === 'evening') return { sky: '#f2a46e', night: false, key };
+    return { sky: '#1d2350', night: true, key };
   }
 
   // ---------------------------------------------------------------- A* grid
@@ -369,6 +419,17 @@
       this._onMenuKey = (e) => { if (e.key === 'Escape') this.hideBlobMenu(); };
       document.addEventListener('pointerdown', this._onMenuDoc, true);
       document.addEventListener('keydown', this._onMenuKey);
+      // Status dings are not themselves a click. Arm the same generated-tone
+      // context on the first gesture so a later cue is allowed to play.
+      this._unlockAudio = () => {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        try {
+          const ctx = this._blobAudio || (this._blobAudio = new AC());
+          if (ctx.state === 'suspended') ctx.resume();
+        } catch (_) {}
+      };
+      document.addEventListener('pointerdown', this._unlockAudio);
       this.resize();
       this.last = performance.now();
       // Resolves true once a few frames have been drawn with data in place,
@@ -386,6 +447,7 @@
       this.theme.removeEventListener('change', this.onTheme);
       document.removeEventListener('pointerdown', this._onMenuDoc, true);
       document.removeEventListener('keydown', this._onMenuKey);
+      document.removeEventListener('pointerdown', this._unlockAudio);
       this.hideBlobMenu();
       if (this._blobMenu) this._blobMenu.remove();
       this.canvas.remove();
@@ -842,9 +904,16 @@
         if (!isWorker && WORKING.has(s.status)) continue; // no desk left
         shown.add(s.key);
         let p = this.people.get(s.key);
+        const born = !p;
         if (!p) { p = this.newPerson(s); this.people.set(s.key, p); }
+        const prevCue = p.cueStatus;
         p.s = s;
         p.leaving = false;
+        // Hop / ding / done flash follow the status the office already
+        // consumes. The first snapshot stays quiet so a page load doesn't
+        // chime the whole floor.
+        if (!this.first && !born && prevCue && prevCue !== s.status) this.cueStatus(p, prevCue, s.status);
+        p.cueStatus = s.status;
         // A right-click "send to…" holds the blob on that errand. Session
         // ticks must not yank a worker back to their desk until it ends.
         if (p.errandUntil && Date.now() < p.errandUntil) continue;
@@ -1051,6 +1120,89 @@
       return { sx, sy };
     }
 
+    motionScale() {
+      try { if (matchMedia('(prefers-reduced-motion: reduce)').matches) return 0.28; } catch (_) {}
+      return 1;
+    }
+
+    // working / active -> hop. waiting_user / needs you -> ding.
+    // done / completed -> flash. Same-family changes (thinking -> tool) stay quiet.
+    statusCue(prev, next) {
+      const n = String(next || '').toLowerCase();
+      const p = String(prev || '').toLowerCase();
+      if (!n || n === p) return null;
+      if (CUE_DONE.has(n) && !CUE_DONE.has(p)) return 'done';
+      if (CUE_WAIT.has(n) && !CUE_WAIT.has(p)) return 'ding';
+      if (CUE_WORK.has(n) && !CUE_WORK.has(p)) return 'hop';
+      return null;
+    }
+
+    cueStatus(p, prev, next) {
+      const kind = this.statusCue(prev, next);
+      if (!kind || !p) return null;
+      if (kind === 'hop') { p.hop = 0.62; p.hopT = 0; }
+      else if (kind === 'done') { p.flash = 1.2; p.flashT = 0; }
+      this.playCue(kind);
+      return kind;
+    }
+
+    // One-shot hop height in world units (0 at takeoff and landing).
+    hopLift(p) {
+      if (!p || !p.hop) return 0;
+      const u = Math.min(1, (p.hopT || 0) / p.hop);
+      if (u >= 1) return 0;
+      return Math.sin(u * Math.PI) * 0.16 * this.motionScale();
+    }
+
+    // Gentle per-bot hop while the status stays working, so each blob
+    // has its own beat instead of bouncing in unison.
+    workHop(p, t) {
+      const st = p && p.s && String(p.s.status || '').toLowerCase();
+      if (!CUE_WORK.has(st) || (p.hop > 0)) return 0;
+      const u = (((Number(t) || 0) + (p.phase || 0)) * 0.42) % 1;
+      if (u < 0 || u >= 0.2) return 0;
+      return Math.sin((u / 0.2) * Math.PI) * 0.05 * this.motionScale();
+    }
+
+    flashAmt(p) {
+      if (!p || !p.flash) return 0;
+      const u = Math.min(1, (p.flashT || 0) / p.flash);
+      if (u >= 1) return 0;
+      return Math.sin(u * Math.PI) * (1 - u * 0.2);
+    }
+
+    playCue(kind) {
+      const now = performance.now();
+      if (now - (this._cueAt || 0) < 180) return;
+      this._cueAt = now;
+      if (kind === 'ding') this.playChirp(880, 1175, 0.2, 0.09);
+      else if (kind === 'done') this.playChirp(523, 784, 0.24, 0.08, 'triangle');
+      else if (kind === 'hop') this.playChirp(494, 659, 0.11, 0.045);
+    }
+
+    // Same generated-tone path as the click wobble. No sample assets.
+    playChirp(freq, freq2, dur, vol, type = 'sine') {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      try {
+        const ctx = this._blobAudio || (this._blobAudio = new AC());
+        if (ctx.state === 'suspended') ctx.resume();
+        const t0 = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(Math.max(40, freq), t0);
+        osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq2), t0 + dur * 0.85);
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t0 + 0.018);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t0);
+        osc.stop(t0 + dur + 0.02);
+      } catch (_) {}
+    }
+
     // Short generated click-wobble. No sample asset; a damped sine drop.
     playBlobSfx() {
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -1094,6 +1246,71 @@
       p.jelly = 0.58;
       p.jellyT = 0;
       this.playBlobSfx();
+    }
+
+    shareBackdrop(sky) {
+      const c = sky && sky.sky;
+      if (typeof c === 'number' && Number.isFinite(c)) return '#' + c.toString(16).padStart(6, '0');
+      if (typeof c === 'string' && c) return c;
+      return '#10121c';
+    }
+
+    // Clean still for X. The 3D path copies the WebGL view only, so name
+    // tags, task bubbles and the page chrome are not in the picture.
+    // 2D redraws into an offscreen canvas with those labels skipped.
+    captureShare() {
+      if (this.gl && this.loaded && this.scene && this.camera) {
+        const rings = [];
+        if (this.actors) {
+          for (const a of this.actors.values()) {
+            if (a.ring && a.ring.visible) { rings.push(a.ring); a.ring.visible = false; }
+          }
+        }
+        try {
+          this.gl.render(this.scene, this.camera);
+          return this._blitShare(this.gl.domElement, this.sky);
+        } finally {
+          for (const r of rings) r.visible = true;
+        }
+      }
+      if (!this.canvas) return null;
+      const sky = skyColor();
+      const snap = document.createElement('canvas');
+      snap.width = this.canvas.width || this.cw || 0;
+      snap.height = this.canvas.height || this.ch || 0;
+      const ctx = snap.getContext('2d');
+      if (!ctx || typeof ctx.setTransform !== 'function') {
+        this._shareFrame = true;
+        try { this.draw(); }
+        finally { this._shareFrame = false; }
+        return this._blitShare(this.canvas, sky);
+      }
+      const live = this.ctx;
+      this.ctx = ctx;
+      this._shareFrame = true;
+      try { this.draw(); }
+      finally { this.ctx = live; this._shareFrame = false; }
+      return this._blitShare(snap, sky);
+    }
+
+    _blitShare(src, sky) {
+      const sw = src && (src.width || 0);
+      const sh = src && (src.height || 0);
+      const backdrop = this.shareBackdrop(sky);
+      if (!sw || !sh) return null;
+      const out = document.createElement('canvas');
+      const scale = Math.min(1, 1600 / Math.max(sw, sh));
+      out.width = Math.max(1, Math.round(sw * scale));
+      out.height = Math.max(1, Math.round(sh * scale));
+      const ctx = out.getContext('2d');
+      if (!ctx || typeof ctx.drawImage !== 'function') {
+        out._share = { src, backdrop, empty: false };
+        return out;
+      }
+      ctx.fillStyle = backdrop;
+      ctx.fillRect(0, 0, out.width, out.height);
+      ctx.drawImage(src, 0, 0, out.width, out.height);
+      return out;
     }
 
     personKeyAt(e) {
@@ -1533,10 +1750,10 @@
       this.onWall('x0', 1.0, 1.85, (c) => {
         c.beginPath(); c.arc(0, 0, 11, 0, Math.PI * 2); c.fillStyle = pal.bubble; c.fill();
         c.lineWidth = 2; c.strokeStyle = pal.trim; c.stroke();
-        const d = new Date();
+        const parts = berlinParts();
         const hand = (ang, len, w) => { c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.sin(ang) * len, -Math.cos(ang) * len); c.lineWidth = w; c.strokeStyle = pal.bubbleInk; c.stroke(); };
-        hand(((d.getHours() % 12) + d.getMinutes() / 60) / 12 * Math.PI * 2, 5.5, 2);
-        hand((d.getMinutes() / 60) * Math.PI * 2, 8, 1.4);
+        hand(((parts.hour % 12) + parts.minute / 60) / 12 * Math.PI * 2, 5.5, 2);
+        hand((parts.minute / 60) * Math.PI * 2, 8, 1.4);
       });
       const dy = this.plan.door.y;
       this.poly([P(0, dy - 0.6, 0), P(0, dy + 0.6, 0), P(0, dy + 0.6, 1.8), P(0, dy - 0.6, 1.8)], pal.trim);
@@ -1941,9 +2158,10 @@
       }
 
       let x = b.x;
-      const y = b.y - hover - bob;
       if (st.act === 'pingpong') x += Math.sin(t * 7 + p.phase) * 4;
       if (st.act === 'foosball') x += Math.sin(t * 5 + p.phase) * 1.5;
+      const hopPx = (this.hopLift(p) + (moving ? 0 : this.workHop(p, t))) * 46;
+      const y = b.y - hover - bob - hopPx;
       const sc = s.subagent ? 0.8 : 1;
       const H = 28; // blob height in px (people were ~35px incl. legs)
       const top = BLOB_TOP[look.shape] || 1;
@@ -1999,6 +2217,17 @@
         }
       }
       c.restore();
+
+      const flash = this.flashAmt(p);
+      if (flash > 0) {
+        c.save();
+        c.globalAlpha = 0.42 * flash;
+        c.fillStyle = '#fff4cc';
+        c.beginPath();
+        c.ellipse(x, y - 10 * sc, 16 * sc, 14 * sc, 0, 0, Math.PI * 2);
+        c.fill();
+        c.restore();
+      }
 
       // Small props so activities still read on the floor.
       const px = x + 11 * sc, py = y - 8 * sc;
@@ -2252,6 +2481,14 @@
           p.jellyT = (p.jellyT || 0) + dt;
           if (p.jellyT >= p.jelly) { p.jelly = 0; p.jellyT = 0; }
         }
+        if (p.hop > 0) {
+          p.hopT = (p.hopT || 0) + dt;
+          if (p.hopT >= p.hop) { p.hop = 0; p.hopT = 0; }
+        }
+        if (p.flash > 0) {
+          p.flashT = (p.flashT || 0) + dt;
+          if (p.flashT >= p.flash) { p.flash = 0; p.flashT = 0; }
+        }
         if (p.mode === 'wander') {
           if (p.poi && !p.path.length && p.until === Infinity) {
             if (p.poi.stairs) {
@@ -2322,6 +2559,20 @@
         else it.draw();
       }
       this.pingPongBall();
+      const z = this.cam.zoom;
+      this.hit = this.hit.map((h) => ({
+        key: h.key,
+        x0: h.x0 * z + this.cam.ox, x1: h.x1 * z + this.cam.ox,
+        y0: h.y0 * z + this.cam.oy, y1: h.y1 * z + this.cam.oy,
+      }));
+      this.paintPeopleLabels(heads);
+    }
+
+    // Name tags, task bubbles, the off-duty count and the floor chip.
+    // A share still skips all of them so the picture is just the room.
+    paintPeopleLabels(heads) {
+      if (this._shareFrame) return;
+      const c = this.ctx;
       if (this.compact) {
         // Keep labels readable when the room is scaled down for PiP.
         c.save();
@@ -2344,13 +2595,6 @@
         c.globalAlpha = 1;
       }
 
-      const z = this.cam.zoom;
-      this.hit = this.hit.map((h) => ({
-        key: h.key,
-        x0: h.x0 * z + this.cam.ox, x1: h.x1 * z + this.cam.ox,
-        y0: h.y0 * z + this.cam.oy, y1: h.y1 * z + this.cam.oy,
-      }));
-
       // Floor chip (screen space) so 2D matches the picker.
       const meta = OFFICE_FLOORS.find((f) => f.id === (this.viewFloor || 0)) || OFFICE_FLOORS[1];
       c.save();
@@ -2366,6 +2610,10 @@
   }
 
   window.Office = Office;
+  window.officeBerlinHour = berlinHour;
+  window.officeLightKey = officeLightKey;
+  window.officeSunHour = officeSunHour;
+  window.officeSunOffset = officeSunOffset;
   window.OFFICE_FLOORS = OFFICE_FLOORS;
   window.OFFICE_LEVEL_H = LEVEL_H;
   window.OFFICE_AGENT_BADGES = AGENT_BADGES;
