@@ -41,6 +41,16 @@ function strHash(str) {
 
 export function blobLookFor(p) {
   const s = p.s || {};
+  // A wallpaper look already mapped onto an office silhouette. Color is a
+  // 24-bit number (or #RRGGBB). Unknown shapes fall through to the crew table.
+  const over = s.look;
+  if (over && SHAPES.includes(over.shape)) {
+    const color = typeof over.color === 'number'
+      ? over.color
+      : (typeof over.color === 'string' && /^#?[0-9a-f]{6}$/i.test(over.color.trim())
+        ? parseInt(over.color.trim().replace('#', ''), 16) : NaN);
+    if (Number.isFinite(color)) return { shape: over.shape, color, accessory: over.accessory || 'none' };
+  }
   const id = String(s.id || (p.key || '').split(':').pop() || '');
   if (CREW_LOOKS[id]) return CREW_LOOKS[id];
   const name = s.project || s.title || '';
@@ -140,9 +150,49 @@ const EYE_AT = {
   cloud: [[-0.14, 0.5], [0.14, 0.5]],
   bean: [[-0.12, 0.42], [0.14, 0.42]],
   oval: [[-0.1, 0.56], [0.14, 0.56]],
+  squircle: [[-0.13, 0.55], [0.13, 0.55]],
+  tablet: [[-0.14, 0.36], [0.14, 0.36]],
 };
 
 let glowTex = null;
+// Small marks for wallpaper accessories. Drawn after the body is scaled so
+// they don't change how tall the blob normalises.
+function accessoryMesh(accessory, height) {
+  if (!accessory || accessory === 'none') return null;
+  const g = new THREE.Group();
+  const dark = new THREE.MeshStandardMaterial({ color: 0x241c18, roughness: 0.4 });
+  const ink = new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.3, metalness: 0.15 });
+  const y = height * 0.72;
+  if (accessory === 'stem') {
+    const stem = new THREE.Mesh(new THREE.SphereGeometry(height * 0.07, 12, 10), dark);
+    stem.position.set(-height * 0.22, height * 0.92, height * 0.04);
+    g.add(stem);
+  } else if (accessory === 'antenna') {
+    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, height * 0.28, 8), ink);
+    stick.position.set(0, height * 0.95, 0);
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(height * 0.055, 12, 10), ink);
+    ball.position.set(0, height * 1.1, 0);
+    g.add(stick, ball);
+  } else if (accessory === 'glasses') {
+    const ring = new THREE.TorusGeometry(height * 0.09, height * 0.016, 8, 16);
+    const left = new THREE.Mesh(ring, ink);
+    const right = new THREE.Mesh(ring, ink);
+    left.position.set(-height * 0.11, y, height * 0.28);
+    right.position.set(height * 0.11, y, height * 0.28);
+    g.add(left, right);
+  } else if (accessory === 'bow') {
+    const lobe = new THREE.SphereGeometry(height * 0.07, 12, 10);
+    const a = new THREE.Mesh(lobe, dark);
+    const b = new THREE.Mesh(lobe, dark);
+    a.position.set(-height * 0.08, height * 0.9, height * 0.08);
+    b.position.set(height * 0.08, height * 0.9, height * 0.08);
+    a.scale.set(1.3, 0.8, 0.6);
+    b.scale.set(1.3, 0.8, 0.6);
+    g.add(a, b);
+  } else return null;
+  return g;
+}
+
 function floorGlow() {
   if (glowTex) return glowTex;
   const cv = document.createElement('canvas');
@@ -200,6 +250,8 @@ export function buildBlob(look, height) {
   const k = height / h;
   body.scale.setScalar(k);
   body.position.y = -box.min.y * k;
+  const extra = accessoryMesh(look.accessory, height);
+  if (extra) hover.add(extra);
 
   // Soft coloured glow on the floor under the blob.
   const glow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({
@@ -210,4 +262,23 @@ export function buildBlob(look, height) {
   glow.scale.setScalar(height * 1.25);
   root.add(glow);
   return { root, hover, body, eyes, glow, height, mat };
+}
+
+// Drop geometries and materials for one blob. The floor-glow texture is shared
+// and is left alone (disposing a material does not dispose its map).
+export function disposeBlob(built, ...roots) {
+  const geos = new Set();
+  const mats = new Set();
+  const visit = (root) => {
+    if (!root || !root.traverse) return;
+    root.traverse((o) => {
+      if (o.geometry) geos.add(o.geometry);
+      const list = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+      for (const m of list) if (m) mats.add(m);
+    });
+  };
+  if (built && built.root) visit(built.root);
+  for (const r of roots) visit(r);
+  for (const g of geos) g.dispose();
+  for (const m of mats) m.dispose();
 }

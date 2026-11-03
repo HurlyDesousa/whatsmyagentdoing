@@ -103,6 +103,10 @@ No hooks, no config, no API keys. Both tools already append every message and to
 - Gemini CLI writes its thoughts together with the reply, so between your prompt and its first tool call or reply it simply shows "Thinking".
 - The log formats aren't public APIs. If an update changes them, statuses may degrade — please open an issue.
 
+## Wallpaper feed
+
+The Hurly office can also show a [Grok Bot wallpaper](https://github.com/Bodila51/grokbot-wallpaper) feed: live step text, blob looks, a usage pill, chat links and routines. The browser reads the relay or ntfy topic itself. The office server never sees the topic, and the topic is not in this repo. Setup, and what happens when a bot is in both Paperclip and the feed: [docs/wallpaper-feed.md](docs/wallpaper-feed.md).
+
 ## Development checks
 
 `npm run test:watcher` runs isolated filesystem regression checks for session discovery, resumed old chats, the hours window, unreadable paths and large logs. It requires Node.js 18+ and never reads your real agent history.
