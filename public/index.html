@@ -315,6 +315,7 @@
   .pill.warn .pi, .pill.on .pi { color: var(--accent); }
   .pi.spin { animation: spin 2.4s linear infinite; }
   .showall { justify-self: end; display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; cursor: pointer; user-select: none; }
+  #shareOffice { flex: none; }
   .showall input { appearance: none; width: 14px; height: 14px; border-radius: 4px; border: 1.5px solid #5a596a; background: transparent; display: grid; place-items: center; margin: 0; cursor: pointer; }
   .showall input:checked { background: var(--accent); border-color: var(--accent); }
   .showall input:checked::after { content: "✓"; color: #1a1210; font-size: 10px; font-weight: 900; line-height: 1; }
@@ -434,6 +435,7 @@
       </div>
       <div class="legend" id="agentLegend"></div>
       <label class="showall" id="showAllWrap" title="Show a task bubble over every working agent"><input type="checkbox" id="showAll"> Show all tasks</label>
+      <button class="btn" id="shareOffice" type="button" title="Save a clean office picture for X" aria-label="Share office picture">Share</button>
     </div>
   </div>
   <aside class="side" id="side">
@@ -774,6 +776,7 @@ function render() {
 }
 
 function tickTimes() {
+  if (typeof syncLight === 'function') syncLight();
   if (tipKey) refreshTip();
   const now = Date.now() - state.skew;
   const byKey = new Map(state.data.sessions.map((s) => [s.key, s]));
@@ -1477,15 +1480,71 @@ function renderLog() {
 
 // Now / Day / Evening / Night (saved in localStorage as wmad.light).
 const lightSeg = document.getElementById('lightSeg');
+function berlinLightKey() {
+  if (typeof officeLightKey !== 'function') return '';
+  const prev = window.OFFICE_LIGHT;
+  window.OFFICE_LIGHT = 'now';
+  let key = '';
+  try { key = officeLightKey(); } finally { window.OFFICE_LIGHT = prev; }
+  return key;
+}
 function syncLight() {
   window.OFFICE_LIGHT = state.light;
   lightSeg.querySelectorAll('button').forEach((b) => { b.classList.toggle('on', b.dataset.v === state.light); b.setAttribute('aria-pressed', b.dataset.v === state.light); });
+  const nowBtn = lightSeg.querySelector('[data-v="now"]');
+  if (nowBtn) {
+    const key = berlinLightKey();
+    nowBtn.title = key ? `Follows Europe/Berlin · ${key}` : 'Follows Europe/Berlin';
+  }
 }
 lightSeg.addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   state.light = b.dataset.v; store.set('light', state.light); syncLight();
 });
 syncLight();
+
+// One tap: a clean picture of the 3D view (no names, task text, or chrome)
+// for posting on X. Falls back to a download when the share sheet isn't there.
+(function () {
+  const btn = document.getElementById('shareOffice');
+  if (!btn) return;
+  function fileFromUrl(url) {
+    const comma = url.indexOf(',');
+    if (comma < 0) return null;
+    const bin = atob(url.slice(comma + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new File([bytes], 'hurly-office.png', { type: 'image/png' });
+  }
+  function download(url) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'hurly-office.png';
+    a.click();
+  }
+  btn.addEventListener('click', () => {
+    const shot = office && typeof office.captureShare === 'function' ? office.captureShare() : null;
+    if (!shot || typeof shot.toDataURL !== 'function') return;
+    let url;
+    try { url = shot.toDataURL('image/png'); } catch (e) { console.error(e); return; }
+    const file = fileFromUrl(url);
+    const label = btn.textContent;
+    const saved = () => {
+      btn.textContent = 'Saved';
+      setTimeout(() => { if (btn.textContent === 'Saved') btn.textContent = label; }, 1400);
+    };
+    if (file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file], title: 'Hurly office' }).then(saved, (err) => {
+        if (err && err.name === 'AbortError') return;
+        download(url);
+        saved();
+      });
+      return;
+    }
+    download(url);
+    saved();
+  });
+})();
 
 applyLang(chooseLang(null));
 syncControls();
