@@ -103,6 +103,12 @@
   const BLOB_EXTRA = [0x8b5cf6, 0xf0384a, 0x22c06a, 0xff7417, 0x9b6436, 0xff4fa3, 0x3b82f6, 0x14b8a6, 0xf2c21b, 0x6366f1, 0x84cc16, 0x0ea5e9];
   function blobLook(p) {
     const s = p.s || {};
+    // Wallpaper feed (or any caller) can pin a look on the session. Shape is
+    // one of BLOB_SHAPES; color is a 24-bit number. Absent -> the crew table.
+    const over = s.look;
+    if (over && BLOB_SHAPES.indexOf(over.shape) >= 0 && typeof over.color === 'number') {
+      return { shape: over.shape, color: over.color, accessory: over.accessory || 'none' };
+    }
     const id = String(s.id || (p.key || '').split(':').pop() || '');
     if (BLOB_LOOKS[id]) return BLOB_LOOKS[id];
     const name = s.project || s.title || '';
@@ -908,6 +914,9 @@
         if (!p) { p = this.newPerson(s); this.people.set(s.key, p); }
         const prevCue = p.cueStatus;
         p.s = s;
+        const look = blobLook(p);
+        const lookToken = look.shape + ':' + look.color + ':' + (look.accessory || '');
+        if (p.lookToken !== lookToken) { p.look = look; p.lookToken = lookToken; }
         p.leaving = false;
         // Hop / ding / done flash follow the status the office already
         // consumes. The first snapshot stays quiet so a page load doesn't
@@ -1450,14 +1459,20 @@
       const activity = clip(s.activity);
       const title = clip(s.title);
       const reply = clip(s.reply);
-      if (s.status === 'error') return activity || clip(s.error) || title || 'Error';
-      if (s.status === 'waiting') {
-        if (activity && !/^paused$/i.test(activity)) return activity;
-        return title || activity || reply || 'Waiting for you';
-      }
-      if (s.status === 'idle') return '';
-      if (s.status === 'done' || s.status === 'interrupted') return reply || title || '';
-      return activity || title || reply || (s.status === 'thinking' ? 'Thinking…' : '');
+      let base;
+      if (s.status === 'error') base = activity || clip(s.error) || title || 'Error';
+      else if (s.status === 'waiting') {
+        if (activity && !/^paused$/i.test(activity)) base = activity;
+        else base = title || activity || reply || 'Waiting for you';
+      } else if (s.status === 'idle') base = '';
+      else if (s.status === 'done' || s.status === 'interrupted') base = reply || title || '';
+      else base = activity || title || reply || (s.status === 'thinking' ? 'Thinking…' : '');
+      // Wallpaper step sits beside the office line. It does not replace it.
+      const live = s.wallpaper && clip(s.wallpaper.step);
+      if (!live || !base) return base;
+      if (base.toLowerCase().includes(live.toLowerCase())) return base;
+      const joined = base + ' · ' + live;
+      return joined.length > 180 ? joined.slice(0, 179) + '…' : joined;
     }
 
     pointer(e, click) {
@@ -2365,6 +2380,16 @@
       }
 
       const hover = this.hoverKey === p.key;
+      const w = s.wallpaper;
+      const liveStep = w && w.step && String(w.step).trim();
+      const wantLive = liveStep && (w.effective === 'waiting_user' || w.effective === 'error' || hover || this.focusKey === p.key || this.showAll);
+      const already = spoken && liveStep && spoken.toLowerCase().includes(String(liveStep).toLowerCase());
+      if (wantLive && !already) {
+        const alert = w.effective === 'waiting_user' || w.effective === 'error';
+        const ink = alert ? '#fff' : pal.bubbleInk;
+        const bg = w.effective === 'error' ? '#de4b40' : w.effective === 'waiting_user' ? '#e09412' : pal.bubble;
+        top = pill((w.effective === 'waiting_user' ? '! ' : '') + liveStep, ink, bg, top - 14);
+      }
       if (!s.subagent || hover) {
         pill(this.label(s), pal.text, pal.tagBg, top - 11, p.mode === 'work' || hover ? 1 : 0.7, true);
       } else if (badge) {

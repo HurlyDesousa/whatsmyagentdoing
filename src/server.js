@@ -12,6 +12,7 @@ const STATIC = {
   '/office3d.js': ['office3d.js', 'text/javascript; charset=utf-8'],
   '/i18n.js': ['i18n.js', 'text/javascript; charset=utf-8'],
   '/popout.js': ['popout.js', 'text/javascript; charset=utf-8'],
+  '/wallpaper-feed.js': ['wallpaper-feed.js', 'text/javascript; charset=utf-8'],
 };
 const LOGIN_HTML = path.join(PUBLIC, 'login.html');
 
@@ -170,6 +171,8 @@ function createServer(watcher, opts, { onShutdown, onRestart, auth = createAuth(
       res.writeHead(403, { 'content-type': 'text/plain' }).end('Forbidden');
       return;
     }
+    // Do not log req.url. A wallpaper topic can arrive once as ?feed= before
+    // the page moves it into the hash, and the hash never reaches this server.
     const url = new URL(req.url, 'http://localhost');
     const json = (code, obj, headers = {}) => {
       res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers });

@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="origin">
 <title>Office · Swart Ops</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👀</text></svg>">
 <style>
@@ -101,6 +102,9 @@
   #langSel { max-width: 70%; }
   #notify { width: 100%; margin-top: 14px; padding: 8px; }
   #notify:disabled { cursor: default; opacity: .65; }
+  #wallpaperFeed { width: 100%; text-align: left; }
+  .wallpaper-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .setting-hint { color: var(--muted); font-size: 12px; line-height: 1.4; margin: 8px 0 0; }
   @media (max-width: 640px) {
     header { gap: 14px; }
     .summary { margin-left: 0; width: 100%; gap: 18px; }
@@ -213,6 +217,13 @@
     padding: 16px 18px 18px;
     background: radial-gradient(1200px 700px at 30% 20%, #171a26 0%, #0d0e12 60%);
   }
+  /* Header pills (including the feed / usage chips) must not push Share off the window. */
+  body.dash:not(.pip) { height: 100dvh; overflow: hidden; }
+  body.dash:not(.pip) .wrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+  body.dash:not(.pip) header { flex: none; }
+  body.dash:not(.pip) .dashgrid { flex: 1; min-height: 0; }
+  body.dash:not(.pip) #officeWrap { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+  body.dash:not(.pip) .side { height: 100%; min-height: 0; }
   /* Full-bleed: office chrome spans the whole viewport width (no centered gutters). */
   body.dash .wrap { max-width: none; width: 100%; margin: 0; }
   @media (min-width: 1800px) { .dashgrid { grid-template-columns: minmax(0, 1fr) 380px; } }
@@ -231,6 +242,7 @@
   .dashgrid.list-mode { display: block; }
   .dashgrid.list-mode .side { display: none; }
   body.dash .office { height: calc(100vh - 168px); min-height: 440px; max-height: none; border-color: var(--glassLine); background: radial-gradient(900px 600px at 50% 45%, #1a1f36 0%, #10121c 70%); }
+  body.dash:not(.pip) .office { height: auto; flex: 1; min-height: 280px; }
   body.dash .tip .card { background: #1c1d24; }
   .officebar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-top: 10px; }
   .officebar .legend { margin: 0; font-size: 11.5px; }
@@ -247,6 +259,7 @@
   .lightseg { justify-self: center; background: var(--glass) !important; }
   body.dash .lightseg button.on { background: #f3f1ea; color: #15151a; font-weight: 600; }
   .side { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 168px); min-height: 440px; }
+  body.dash:not(.pip) .side { height: 100%; min-height: 0; }
   .glass { background: var(--glass); border: 1px solid var(--glassLine); border-radius: 14px; backdrop-filter: blur(10px); box-shadow: 0 10px 30px rgba(0,0,0,.35); }
   .gh { display: flex; align-items: baseline; justify-content: space-between; padding: 12px 14px 6px; font-weight: 800; font-size: 14.5px; }
   .gh small { color: var(--faint); font-weight: 500; font-size: 11.5px; }
@@ -285,6 +298,19 @@
   .tlrow .d { width: 7px; height: 7px; border-radius: 50%; background: var(--s); }
   .tlrow span:last-child { color: var(--ink); opacity: .9; word-break: break-word; }
   .detail .note { margin-top: 10px; color: var(--faint); font-size: 11px; }
+  .tline.live { color: #d7d6e2; }
+  .tline.live b { color: #d2c4ff; font-weight: 700; }
+  .trow.has-live .sw { grid-row: span 3; }
+  .chatlink { display: inline-block; margin-top: 8px; color: var(--ink); font-weight: 700; font-size: 12.5px; }
+  details.usage { position: relative; }
+  details.usage > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: baseline; gap: 7px; }
+  details.usage > summary::-webkit-details-marker { display: none; }
+  details.usage .usage-body { position: absolute; z-index: 6; top: calc(100% + 6px); left: 0; min-width: 210px; display: grid; gap: 4px; padding: 8px 10px; background: var(--glass); border: 1px solid var(--glassLine); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+  details.usage .usage-body span { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); }
+  details.usage .usage-body b { color: var(--ink); }
+  .routines .routine-list { max-height: 132px; overflow: auto; padding: 0 14px 10px; }
+  .routine-row { font-size: 12px; padding: 5px 0; border-top: 1px solid var(--glassLine); color: var(--muted); }
+  .routine-row b { color: var(--ink); font-weight: 650; }
   .activity { flex: 1 1 0; min-height: 150px; display: flex; flex-direction: column; background: rgba(10, 11, 15, .88); }
   .log { flex: 1; overflow-y: auto; padding: 2px 14px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.3px; line-height: 1.55; overscroll-behavior: contain; }
   .log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #c9c8d4; }
@@ -293,8 +319,11 @@
   .log .warnl { color: #ffc49b; }
   body.dash .ver { display: none; }
   @media (max-width: 980px) {
+    body.dash:not(.pip) { height: auto; overflow: auto; }
+    body.dash:not(.pip) .wrap { height: auto; display: block; }
     .dashgrid { grid-template-columns: 1fr; }
-    .side { height: auto; }
+    body.dash:not(.pip) .side, .side { height: auto; }
+    body.dash:not(.pip) .office { height: min(74vh, 820px); flex: none; }
     .team { max-height: 360px; }
     .activity { height: 240px; flex: none; }
     .officebar { grid-template-columns: 1fr; justify-items: center; }
@@ -407,6 +436,15 @@
             </div>
             <button class="btn" id="notify" data-t="notify"></button>
           </div>
+          <div class="setting-group" id="wallpaperGroup">
+            <label class="setting-label" for="wallpaperFeed">Wallpaper feed</label>
+            <input class="btn" id="wallpaperFeed" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="#topic or #topic@relay.example.com" aria-describedby="wallpaperHint">
+            <div class="wallpaper-actions">
+              <button class="btn" id="wallpaperSave" type="button">Save in this browser</button>
+              <button class="btn" id="wallpaperClear" type="button">Clear</button>
+            </div>
+            <p class="setting-hint" id="wallpaperHint">The topic stays in this browser. It is not sent to the office server.</p>
+          </div>
         </div>
       </details>
       <button class="btn icon-btn" id="bgmBtn" type="button" aria-label="Unmute music" title="Unmute music" aria-pressed="true"></button>
@@ -441,6 +479,10 @@
   <aside class="side" id="side">
     <div class="glass team"><div class="gh">Team <small id="teamN"></small></div><div class="teamlist" id="teamList"></div></div>
     <div class="glass detail" id="detail" hidden></div>
+    <details class="glass routines" id="routinesBox" hidden>
+      <summary class="gh">Routines <small id="routinesN"></small></summary>
+      <div class="routine-list" id="routinesList"></div>
+    </details>
     <div class="glass activity"><div class="gh">Activity <small>live · last 40</small></div><div class="log" id="actLog"></div></div>
   </aside>
   </div>
@@ -450,6 +492,7 @@
 <div class="tip" id="tip"></div>
 <div class="ver" id="ver"></div>
 <script src="/i18n.js"></script>
+<script src="/wallpaper-feed.js"></script>
 <script src="/office.js"></script>
 <script src="/popout.js"></script>
 <script>
@@ -611,7 +654,7 @@ if (!PIP && store.get('q3dRetry', null) !== 2995) {
   }
   for (const k of ['view', 'quality', 'scene', 'lang', 'light']) if (validPreference(k, q.get(k))) store.set(k, q.get(k));
   if (q.has('floor') && validPreference('floor', q.get('floor'))) store.set('floor', +q.get('floor'));
-  if (location.search) history.replaceState(null, '', location.pathname + (PIP ? '?pip=1' : ''));
+  if (location.search) history.replaceState(null, '', location.pathname + (PIP ? '?pip=1' : '') + location.hash);
 }
 
 const state = {
@@ -710,6 +753,10 @@ function visible() {
 }
 
 function render() {
+  if (window.WallpaperFeed && Array.isArray(state.baseSessions)) {
+    state.data.sessions = WallpaperFeed.mergeSessions(state.baseSessions, wallpaperFeed, Date.now());
+    noteWallpaper(state.data.sessions);
+  }
   const now = Date.now() - state.skew;
   const list = visible();
   const all = state.data.sessions.filter((s) => (state.agent === 'all' || s.agent === state.agent) && (state.showSub || !s.subagent));
@@ -724,7 +771,8 @@ function render() {
       fp('working', nWork, 'working', PILL_ICON.working) +
       fp('needs', nNeed, 'need you', PILL_ICON.needs, nNeed) +
       fp('idle', nIdle, 'idle', PILL_ICON.idle) +
-      (desks ? `<span class="pill">${PILL_ICON.desk}<b>${Math.max(0, desks - used)}</b>free desks</span>` : '');
+      (desks ? `<span class="pill">${PILL_ICON.desk}<b>${Math.max(0, desks - used)}</b>free desks</span>` : '') +
+      feedPills();
   }
 
   const working = count((s) => ACTIVE.has(s));
@@ -801,6 +849,7 @@ function onData(data) {
     state.prev.set(s.key, s.status);
   }
   logChanges(data.sessions, first);
+  state.baseSessions = data.sessions;
   state.data = data;
   state.loaded = true;
   markDataReady();
@@ -1296,6 +1345,8 @@ const FILTERS = {
 };
 state.filter = null;
 document.getElementById('summary').addEventListener('click', (e) => {
+  const usage = e.target.closest('details.usage');
+  if (usage) { setTimeout(() => { state.usageOpen = usage.open; }, 0); return; }
   const b = e.target.closest('[data-f]'); if (!b) return;
   state.filter = state.filter === b.dataset.f ? null : b.dataset.f;
   render();
@@ -1322,6 +1373,8 @@ const STATUS_HEX = { thinking: '#a48bf0', tool: '#5ea4ee', typing: '#3fc48f', wa
 let lookFor = null; // blobLookFor from the 3D bundle (same colours as the blobs)
 import('/office3d.js').then((m) => { lookFor = m.blobLookFor; render(); }).catch(() => {});
 function agentColor(s) {
+  const pinned = s.look && s.look.color;
+  if (typeof pinned === 'number' && pinned >= 0) return '#' + pinned.toString(16).padStart(6, '0');
   if (lookFor) { try { return '#' + lookFor({ s, key: s.key }).color.toString(16).padStart(6, '0'); } catch {} }
   return STATUS_HEX[s.status] || '#888';
 }
@@ -1347,6 +1400,28 @@ function statusLine(s) {
 }
 const ROLE = { grokbot: 'Grok Bot', paperclip: 'Paperclip' };
 const roleOf = (s) => s.role ? `${String(s.role).replace(/\s*\(.*$/, '')} · ${ROLE[s.agent] || AGENT_NAME[s.agent] || s.agent}` : (ROLE[s.agent] || AGENT_NAME[s.agent] || s.agent);
+const FEED_WORD = { working: 'working', idle: 'idle', waiting_user: 'waiting for you', error: 'error', done: 'done' };
+const OFFICE_FAMILY = { thinking: 'working', tool: 'working', typing: 'working', waiting: 'waiting_user', error: 'error', done: 'done', interrupted: 'done', idle: 'idle' };
+function feedWord(effective) { return FEED_WORD[effective] || effective || 'live'; }
+function roleLine(s) {
+  const base = roleOf(s);
+  const g = s.wallpaper && s.wallpaper.group;
+  if (g && base.toLowerCase().indexOf(g.toLowerCase()) < 0) return g + ' · ' + base;
+  return base;
+}
+let wallpaperFeed = null;
+function feedPills() {
+  const feed = wallpaperFeed;
+  if (!feed) return '';
+  const n = Object.keys(feed.bots || {}).length;
+  const live = n ? `<span class="pill" title="Wallpaper feed, read in this browser">feed <b>${n}</b></span>` : '';
+  const u = feed.usage;
+  if (!u || !Number.isFinite(u.total_used_pct)) return live;
+  const when = u.resets_at ? new Date(u.resets_at).toLocaleString('en-GB', { timeZone: 'Europe/Berlin', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  const rows = Object.entries(u.bots || {}).map(([name, pct]) => `<span>${esc(name)}<b>${esc(pct)}</b></span>`).join('');
+  return live + `<details class="pill usage" id="usageBox"${state.usageOpen ? ' open' : ''}><summary title="Usage posted on the wallpaper feed">used <b>${esc(u.total_used_pct)}%</b></summary><div class="usage-body"><span>resets<b>${esc(when || '—')}</b></span>${rows}<span>per bot<b>as posted</b></span></div></details>`;
+}
+state.usageOpen = false;
 const ORDER = (s) => (GROUPS[0].match(s.status) ? 0 : ACTIVE.has(s.status) ? 1 : s.status === 'done' ? 2 : 3);
 state.sel = null;
 function selectAgent(key) {
@@ -1392,6 +1467,7 @@ function stepsOf(s) {
   return { exact: false, cur: rows.length, total, rows, source: 'estimated from activity history' };
 }
 function renderSide(all, now) {
+  renderRoutines();
   const list = all.filter((s) => !s.subagent).slice().sort((a, b) => ORDER(a) - ORDER(b) || String(a.project).localeCompare(String(b.project)));
   const f = state.filter && FILTERS[state.filter];
   const shown = f ? list.filter(f) : list;
@@ -1400,11 +1476,14 @@ function renderSide(all, now) {
   document.getElementById('teamList').innerHTML = shown.map((s) => {
     const p = pillOf(s);
     const n = narrative(s);
-    return `<div class="trow${state.sel === s.key ? ' sel' : ''}${p.cls ? ' warnrow' : ''}" data-sel="${esc(s.key)}" data-s="${esc(s.status)}" data-k="${p.k}" title="${esc(s.title || '')}">
+    const live = s.wallpaper && (s.wallpaper.step || s.wallpaper.effective);
+    const liveHtml = live ? `<span class="tline live"><b>live ${esc(feedWord(s.wallpaper.effective))}</b> — ${esc(s.wallpaper.step || 'no step')}</span>` : '';
+    return `<div class="trow${state.sel === s.key ? ' sel' : ''}${p.cls ? ' warnrow' : ''}${live ? ' has-live' : ''}" data-sel="${esc(s.key)}" data-s="${esc(s.status)}" data-k="${p.k}" title="${esc(s.title || '')}">
       <span class="sw" style="--c:${agentColor(s)}"></span>
-      <span class="tname">${esc(s.project || s.agent)}<span class="rl">${esc(roleOf(s))}</span></span>
+      <span class="tname">${esc(s.project || s.agent)}<span class="rl">${esc(roleLine(s))}</span></span>
       <span class="spill ${p.cls}" data-k="${p.k}">${esc(p.txt)}</span>
-      <span class="tline">${n.what ? `<b>${esc(n.verb)}</b> — ${esc(n.what)}` : `<b>${esc(n.verb)}</b>`}</span></div>`;
+      <span class="tline">${n.what ? `<b>${esc(n.verb)}</b> — ${esc(n.what)}` : `<b>${esc(n.verb)}</b>`}</span>
+      ${liveHtml}</div>`;
   }).join('') || `<div class="tline" style="padding:8px">${f ? 'Nobody matches this filter' : 'No sessions yet'}</div>`;
   if (office) office.focusKey = state.sel;
   const det = document.getElementById('detail');
@@ -1416,7 +1495,7 @@ function renderSide(all, now) {
   det.dataset.s = s.status;
   det.innerHTML = `
     <div class="dh"><span class="sw" style="--c:${agentColor(s)}"></span>
-      <div><div class="dn">${esc(s.project || s.agent)}</div><div class="dm">${esc(roleOf(s))} · updated ${esc(updatedLabel(s, now))}</div></div>
+      <div><div class="dn">${esc(s.project || s.agent)}</div><div class="dm">${esc(roleLine(s))} · updated ${esc(updatedLabel(s, now))}</div></div>
       <span class="spill ${p.cls}" data-k="${p.k}" style="margin-left:auto">${esc(p.txt)}</span><button class="dx" data-unsel title="Close">×</button></div>
     <div class="lab">Task</div>
     <div class="task">${esc(s.title || '—')}</div>
@@ -1424,7 +1503,36 @@ function renderSide(all, now) {
     <div class="stepmeta"><span>${esc(st.source)}</span><span>${st.exact ? `step ${st.cur} of ${st.total}` : `≈ step ${st.cur} of ${st.total} (est.)`}</span></div>` : ''}
     ${s.error ? `<div class="txt" style="color:var(--error)">${esc(s.error)}</div>` : ''}
     ${st.rows.length ? `<div class="steps">${st.rows.map((r) => `<div class="stp ${r.state}"><span class="ck">${r.state === 'ok' ? '✓' : ''}</span><span class="st">${r.ts ? `<time>${esc(r.ts)}</time>` : ''}${esc(r.text)}</span></div>`).join('')}</div>` : ''}
-    <div class="note">${esc(s.model || '')}${s.status === 'waiting' ? ' · answer it where the agent runs (Paperclip / Grok Bot chat)' : ''}</div>`;
+    <div class="note">${esc(s.model || '')}${s.status === 'waiting' ? ' · answer it where the agent runs (Paperclip / Grok Bot chat)' : ''}</div>
+    ${liveBlock(s, now)}`;
+}
+function liveBlock(s, now) {
+  const w = s.wallpaper;
+  if (!w) return '';
+  const family = OFFICE_FAMILY[s.status] || s.status;
+  const disagree = w.effective && family !== w.effective;
+  const seen = w.seenMs ? (now - w.seenMs < 15000 ? 'just now' : ago(w.seenMs, now)) : 'no status yet';
+  const chat = /^(grokbot|https):\/\//i.test(w.chat || '')
+    ? `<a class="chatlink" href="${esc(w.chat)}"${/^https:\/\//i.test(w.chat) ? ' target="_blank" rel="noopener noreferrer"' : ''}>Open chat</a>`
+    : '';
+  const usage = Number.isFinite(w.usagePct) ? `<div class="txt">usage ${esc(w.usagePct)} as posted</div>` : '';
+  return `<div class="lab">Live feed</div>
+    <div class="task">${esc(feedWord(w.effective))}${w.step ? ' — ' + esc(w.step) : ''}</div>
+    <div class="txt">${esc([w.group, 'seen ' + seen].filter(Boolean).join(' · '))}</div>
+    ${usage}${chat}
+    ${disagree ? `<div class="note">Paperclip keeps this desk (${esc(s.status)}). The feed says ${esc(feedWord(w.effective))}.</div>` : ''}`;
+}
+function renderRoutines() {
+  const box = document.getElementById('routinesBox');
+  if (!box) return;
+  const items = (wallpaperFeed && wallpaperFeed.routines) || [];
+  box.hidden = !items.length;
+  if (!items.length) return;
+  document.getElementById('routinesN').textContent = String(items.length);
+  document.getElementById('routinesList').innerHTML = items.slice(0, 24).map((r) => {
+    const when = r.next_run ? new Date(r.next_run).toLocaleString('en-GB', { timeZone: 'Europe/Berlin', weekday: 'short', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }) : '';
+    return `<div class="routine-row"><b>${esc(r.bot)}</b> · ${esc(r.name)}${r.schedule ? ' · ' + esc(r.schedule) : ''}${when ? ' · ' + esc(when) : ''}</div>`;
+  }).join('');
 }
 document.getElementById('side').addEventListener('click', (e) => {
   if (e.target.closest('[data-clearf]')) { state.filter = null; render(); return; }
@@ -1470,6 +1578,22 @@ function logChanges(sessions, first) {
   }
   for (const [k, b] of [...lastSeen]) if (!seen.has(k)) { pushAct({ key: k, project: b.name || k, status: 'idle' }, 'left the office'); lastSeen.delete(k); }
   renderLog();
+}
+const wallpaperSeen = new Map();
+function noteWallpaper(sessions) {
+  let changed = false;
+  const seen = new Set();
+  for (const s of sessions) {
+    if (s.subagent || !s.wallpaper) continue;
+    seen.add(s.key);
+    const sig = (s.wallpaper.effective || '') + '|' + (s.wallpaper.step || '');
+    if (wallpaperSeen.get(s.key) === sig) continue;
+    wallpaperSeen.set(s.key, sig);
+    changed = true;
+    pushAct(s, s.wallpaper.step ? `live ${feedWord(s.wallpaper.effective)} · ${s.wallpaper.step}` : `live ${feedWord(s.wallpaper.effective)}`);
+  }
+  for (const k of [...wallpaperSeen.keys()]) if (!seen.has(k)) wallpaperSeen.delete(k);
+  if (changed) renderLog();
 }
 function renderLog() {
   const el = document.getElementById('actLog');
@@ -1546,10 +1670,66 @@ syncLight();
   });
 })();
 
+let feedHandle = null;
+function feedTarget() {
+  if (!window.WallpaperFeed) return null;
+  if (WallpaperFeed.pageLink) return WallpaperFeed.pageLink;
+  let saved = '';
+  try { saved = localStorage.getItem(WallpaperFeed.STORE_KEY) || ''; } catch (_) {}
+  return WallpaperFeed.parseFeedInput(saved);
+}
+function setFeedHint(text) {
+  const el = document.getElementById('wallpaperHint');
+  if (el) el.textContent = text;
+}
+function startFeed() {
+  if (feedHandle) { feedHandle.stop(); feedHandle = null; }
+  const link = feedTarget();
+  if (!link) {
+    wallpaperFeed = null;
+    setFeedHint('No feed set. Paste #topic or #topic@host. It stays in this browser and is not sent to the office server.');
+    if (state.baseSessions) render();
+    return;
+  }
+  setFeedHint('Reading the feed in this browser…');
+  feedHandle = WallpaperFeed.connectFeed(link, (feed) => {
+    wallpaperFeed = feed;
+    if (state.baseSessions || state.loaded) render();
+  }, (st) => {
+    if (st.phase === 'live') setFeedHint('Live feed · ' + st.bots + (st.bots === 1 ? ' bot' : ' bots') + '. The topic stays in this browser.');
+    else if (st.phase === 'error') setFeedHint('Could not reach the feed. The topic was not sent to the office server.');
+    else setFeedHint('Reading the feed in this browser…');
+  });
+}
+document.getElementById('wallpaperSave').addEventListener('click', () => {
+  const raw = document.getElementById('wallpaperFeed').value.trim();
+  const parsed = WallpaperFeed.parseFeedInput(raw);
+  if (!parsed) { setFeedHint('Use #topic, #topic@host, or https://host/topic.'); return; }
+  try { localStorage.setItem(WallpaperFeed.STORE_KEY, raw); } catch (_) {}
+  WallpaperFeed.pageLink = null;
+  const pip = new URLSearchParams(location.search).get('pip') === '1' ? '?pip=1' : '';
+  history.replaceState(null, '', location.pathname + pip);
+  document.getElementById('wallpaperFeed').value = '';
+  startFeed();
+});
+document.getElementById('wallpaperClear').addEventListener('click', () => {
+  if (feedHandle && feedHandle.clearCache) feedHandle.clearCache();
+  try { localStorage.removeItem(WallpaperFeed.STORE_KEY); } catch (_) {}
+  WallpaperFeed.pageLink = null;
+  const pip = new URLSearchParams(location.search).get('pip') === '1' ? '?pip=1' : '';
+  history.replaceState(null, '', location.pathname + pip);
+  document.getElementById('wallpaperFeed').value = '';
+  startFeed();
+});
+document.getElementById('wallpaperFeed').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('wallpaperSave').click(); }
+});
+
 applyLang(chooseLang(null));
 syncControls();
 scenesReady.then(() => makeOffice());
 connect();
+startFeed();
 setInterval(tickTimes, 1000);
 </script>
 </body>

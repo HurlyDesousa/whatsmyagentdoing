@@ -8,7 +8,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { buildBlob, blobLookFor, CREW_LOOKS } from './grokblobs.js';
+import { buildBlob, blobLookFor, CREW_LOOKS, disposeBlob } from './grokblobs.js';
 export { blobLookFor, CREW_LOOKS };
 const FURNITURE = ['desk', 'chairDesk', 'computerScreen', 'computerKeyboard', 'computerMouse', 'laptop',
   'pottedPlant', 'plantSmall1', 'plantSmall2', 'plantSmall3', 'kitchenCabinet', 'kitchenCoffeeMachine',
@@ -2410,10 +2410,20 @@ export class Office3D extends window.Office {
 
   // ------------------------------------------------------------ actors
 
+  dropActor(key) {
+    const a = this.actors.get(key);
+    if (!a) return;
+    this.scene.remove(a.obj, a.prop);
+    disposeBlob(a.blob, a.obj, a.prop);
+    this.actors.delete(key);
+  }
+
   actorFor(p) {
-    let a = this.actors.get(p.key);
-    if (a) return a;
     const look = blobLookFor(p);
+    const lookToken = look.shape + ':' + (look.color >>> 0) + ':' + (look.accessory || '');
+    const prev = this.actors.get(p.key);
+    if (prev && prev.lookToken === lookToken) return prev;
+    if (prev) this.dropActor(p.key);
     const blob = buildBlob(look, CHAR_HEIGHT * 0.84 * (p.s && p.s.subagent ? 0.8 : 1));
     const obj = blob.root;
     const prop = new THREE.Group();
@@ -2427,7 +2437,7 @@ export class Office3D extends window.Office {
     }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.02; ring.visible = false;
     obj.add(ring);
-    a = { obj, blob, look, prop, cup, book, ring, yaw: 0, last: { x: p.x, y: p.y }, hop: 0 };
+    const a = { obj, blob, look, lookToken, prop, cup, book, ring, yaw: 0, last: { x: p.x, y: p.y }, hop: 0 };
     this.actors.set(p.key, a);
     tagFloorShadowMaterials(obj, this.floorShadowCount || 0);
     tagFloorShadowMaterials(prop, this.floorShadowCount || 0);
@@ -2502,8 +2512,8 @@ export class Office3D extends window.Office {
   }
 
   syncActors(dt) {
-    for (const [k, a] of this.actors) {
-      if (!this.people.has(k)) { this.scene.remove(a.obj, a.prop); this.actors.delete(k); }
+    for (const k of [...this.actors.keys()]) {
+      if (!this.people.has(k)) this.dropActor(k);
     }
     for (const p of this.people.values()) {
       const a = this.actorFor(p);
