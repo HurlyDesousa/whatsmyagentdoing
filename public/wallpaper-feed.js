@@ -352,6 +352,16 @@
     return mapped ? { shape: mapped.shape, color: mapped.color, accessory: mapped.accessory } : null;
   }
 
+  // The tower (4D) draws wallpaper shapes, not the 2D silhouette map.
+  function wallpaperLookFor(session, bot) {
+    if (bot && bot.look && bot.look.shape && bot.look.color) {
+      return { shape: bot.look.shape, color: bot.look.color, accessory: bot.look.accessory || 'none' };
+    }
+    const row = rememberedFor((bot && bot.name) || (session && (session.project || session.title || session.id)) || '');
+    if (!row) return null;
+    return { shape: row.shape, color: row.color, accessory: row.accessory || 'none' };
+  }
+
   function wallpaperView(bot) {
     return {
       name: bot.name,
@@ -377,8 +387,10 @@
       const bot = matchBot(s, index, used);
       if (bot) used.add(bot.id);
       const look = lookFor(s, bot);
+      const wallpaperLook = wallpaperLookFor(s, bot);
       const next = { ...s };
       if (look) next.look = look;
+      if (wallpaperLook) next.wallpaperLook = wallpaperLook;
       if (bot) {
         next.wallpaper = wallpaperView(bot);
         if (!next.wallpaper.group) {
@@ -391,6 +403,7 @@
     for (const bot of index.list) {
       if (used.has(bot.id)) continue;
       const look = lookFor({ project: bot.name }, bot);
+      const wallpaperLook = wallpaperLookFor({ project: bot.name }, bot);
       const status = officeStatus(bot.effective);
       out.push({
         key: 'wallpaper:' + bot.id,
@@ -405,6 +418,7 @@
         model: 'Wallpaper feed',
         wallpaperOnly: true,
         wallpaper: wallpaperView(bot),
+        wallpaperLook: wallpaperLook || undefined,
         look: look || undefined,
         lastEventAt: bot.seenMs || now,
         startedAt: bot.seenMs || now,
@@ -555,9 +569,164 @@
     }
   } catch (_) { pageLink = null; }
 
+  const DEFAULT_QUALITY = '4d';
+  const QUALITIES = ['mid', 'high', '4d'];
+  function resolveQuality(saved) {
+    return QUALITIES.includes(saved) ? saved : DEFAULT_QUALITY;
+  }
+
+  // Paperclip / office status owns the seat. Feed-only bots already carry the
+  // feed's effective status on session.status (working → thinking, and so on).
+  const TOWER_STATUS = {
+    thinking: 'working', tool: 'working', typing: 'working',
+    waiting: 'waiting_user', error: 'error', done: 'done',
+    interrupted: 'idle', idle: 'idle',
+  };
+  const FLOOR_RANK = { ops: 0, infra: 1, watch: 2, 'main-floor': 3 };
+  const PER_FLOOR = 20;
+  const COUNT_KEYS = ['working', 'idle', 'waiting_user', 'error', 'stuck', 'done'];
+
+  function zeroCounts() {
+    return { working: 0, idle: 0, waiting_user: 0, error: 0, stuck: 0, done: 0 };
+  }
+
+  function hashHex(id) {
+    let h = 2166136261;
+    const s = String(id);
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return '#' + (((h >>> 0) & 0xffffff) | 0x303030).toString(16).padStart(6, '0').slice(-6).toUpperCase();
+  }
+
+  function towerFloorName(session) {
+    const g = session && session.wallpaper && session.wallpaper.group;
+    if (g) return clip(g, 60);
+    const row = rememberedFor((session && (session.project || session.title)) || '');
+    if (row && row.group) return row.group;
+    return 'Main floor';
+  }
+
+  // Sessions (already merged with the feed) → the tower scene's state.
+  // A bot who is in both keeps the office status at the desk. The feed still
+  // supplies the glossy look and the floor (group). No topic is read or returned.
+  function towerState(sessions, extras) {
+    const list = (Array.isArray(sessions) ? sessions : []).filter((s) => s && typeof s === 'object');
+    const extra = extras && typeof extras === 'object' ? extras : {};
+    const rows = [];
+    const used = new Set();
+    for (const s of list) {
+      const name = clip(s.project || s.title || s.id || 'Bot', 80) || 'Bot';
+      let id = botId(name);
+      if (used.has(id)) id = (id + '-' + botId(String(s.key || s.id || rows.length))).slice(0, 64);
+      used.add(id);
+      const look = towerLook(s);
+      const status = TOWER_STATUS[s.status] || 'idle';
+      const step = s.wallpaperOnly
+        ? clip((s.wallpaper && s.wallpaper.step) || s.activity || '', 160)
+        : clip(s.activity || '', 160);
+      const chat = s.wallpaper && /^https:\/\/|^grokbot:\/\//.test(s.wallpaper.chat || '') ? s.wallpaper.chat : '';
+      rows.push({ id, name, floorName: towerFloorName(s), look, status, step, chat });
+    }
+    rows.sort((a, b) => a.floorName.localeCompare(b.floorName) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+
+    const floors = new Map();
+    function takeFloor(name) {
+      const base = botId(name) || 'floor';
+      let n = 1;
+      let id = base;
+      while (floors.has(id) && floors.get(id).ids.length >= PER_FLOOR) {
+        n += 1;
+        id = base + '-' + n;
+      }
+      if (!floors.has(id)) floors.set(id, { id, name: n === 1 ? name : `${name} · ${n}`, ids: [], counts: zeroCounts() });
+      return floors.get(id);
+    }
+
+    const nowIso = new Date().toISOString();
+    const bots = {};
+    const summary = zeroCounts();
+    summary.total = 0;
+    for (const row of rows) {
+      const floor = takeFloor(row.floorName);
+      const desk = floor.ids.length + 1;
+      floor.ids.push(row.id);
+      const status = COUNT_KEYS.includes(row.status) ? row.status : 'idle';
+      floor.counts[status] += 1;
+      summary[status] += 1;
+      summary.total += 1;
+      const look = row.look;
+      bots[row.id] = {
+        id: row.id,
+        name: row.name,
+        floor: floor.id,
+        desk,
+        group: row.floorName,
+        status,
+        effective_status: status,
+        step: row.step,
+        task: row.step,
+        usage_share: null,
+        chat_url: row.chat || null,
+        color: look ? look.color : hashHex(row.id),
+        look,
+        avatar: row.id,
+        has_glb: false,
+        last_event: nowIso,
+        today: { working_min: 0, events: 0, tasks_done: 0, hourly: new Array(24).fill(0) },
+        history: row.step ? [{ t: nowIso, status, step: row.step }] : [],
+      };
+    }
+
+    let floorList = [...floors.values()];
+    floorList.sort((a, b) => (FLOOR_RANK[a.id] ?? 50) - (FLOOR_RANK[b.id] ?? 50) || a.name.localeCompare(b.name));
+    if (!floorList.length) floorList = [{ id: 'main-floor', name: 'Main floor', ids: [], counts: zeroCounts() }];
+    const usage = extra.usage && Number.isFinite(Number(extra.usage.total_used_pct))
+      ? { period: extra.usage.period || 'week', total_used_pct: Number(extra.usage.total_used_pct), resets_at: extra.usage.resets_at || null, updated_at: extra.usage.updated_at || null }
+      : null;
+    const routines = (Array.isArray(extra.routines) ? extra.routines : []).map((r) => ({
+      bot: botId(r.bot || ''),
+      name: r.bot || '',
+      routine: r.name || r.routine || '',
+      schedule: r.schedule || '',
+      next_run: r.next_run || null,
+    })).filter((r) => r.routine);
+    return {
+      version: 1,
+      now: nowIso,
+      demo: false,
+      summary,
+      usage,
+      floors: floorList.map((f, i) => ({
+        id: f.id,
+        name: f.name,
+        order: i + 1,
+        bots: f.ids.slice(),
+        counts: f.counts,
+        free_desks: PER_FLOOR - f.ids.length,
+      })),
+      bots,
+      feed: rows.filter((r) => r.step).slice(0, 12).reverse().map((r) => ({
+        t: nowIso, bot: r.id, name: r.name, status: r.status, step: r.step,
+      })),
+      finished: Object.values(bots).filter((b) => b.effective_status === 'done').map((b) => ({
+        t: nowIso, bot: b.id, name: b.name, step: b.step || 'done',
+      })),
+      routines,
+    };
+  }
+
+  function towerLook(session) {
+    const w = session && session.wallpaperLook;
+    if (w && typeof w.shape === 'string' && typeof w.color === 'string') {
+      return { shape: w.shape, color: w.color, accessory: w.accessory || 'none' };
+    }
+    return wallpaperLookFor(session, null);
+  }
+
   root.WallpaperFeed = {
     RELAY, NTFY, STORE_KEY, REMEMBERED,
+    DEFAULT_QUALITY, QUALITIES,
     parseFeedLink, parseFeedInput, mapLook, reduceFeed, mergeSessions, officeStatus,
+    resolveQuality, towerState,
     connectFeed, hashTag, rememberedFor, botId,
     get pageLink() { return pageLink; },
     set pageLink(v) { pageLink = v; },

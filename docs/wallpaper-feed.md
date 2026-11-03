@@ -70,7 +70,15 @@ If the feed is connected but a look line has not arrived, these six names use re
 | Dockhand Master | triangle | `#F93498` | Infra |
 | Monitor Master | rounded_square | `#FD690F` | Watch |
 
-With no feed configured, the office keeps its own crew colours.
+With no feed configured, the office keeps its own crew colours. **4D** still uses the remembered looks for those six names so the tower is not a set of random blobs before the first look line.
+
+## 4D tower
+
+The quality control is **2D**, **3D**, and **4D**. **4D** is the default when this browser has no saved quality. A saved 2D (`mid`) or 3D (`high`) choice stays until you pick something else. **Dark** / **Light** (saved as `wmad.theme`) follows the same browser store. With no saved theme it follows the system, the same way the 2D floor does. An explicit choice stays after reload and tints the tower backdrop as well as the Kenney floor.
+
+**4D** is the wallpaper dashboard across the whole window: glossy blobs, stacked floors, and the glass panels (floors, waiting, finished, routines, activity, the floor team, the live clock, usage). It is the default when this browser has no saved quality. Pick **2D** or **3D** on that dashboard (top right) to come back to the Kenney floors and the Swart Ops chrome. A saved 2D or 3D choice stays. Paperclip still owns the seat when the feed disagrees. The topic stays in the browser.
+
+The tower renderer is the wallpaper scene, served from this origin (`/office4d.js`, assets under `/4d/`). The topic is still only in the browser.
 
 ## Deploy
 

@@ -10,6 +10,7 @@ const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/office.js': ['office.js', 'text/javascript; charset=utf-8'],
   '/office3d.js': ['office3d.js', 'text/javascript; charset=utf-8'],
+  '/office4d.js': ['office4d.js', 'text/javascript; charset=utf-8'],
   '/i18n.js': ['i18n.js', 'text/javascript; charset=utf-8'],
   '/popout.js': ['popout.js', 'text/javascript; charset=utf-8'],
   '/wallpaper-feed.js': ['wallpaper-feed.js', 'text/javascript; charset=utf-8'],
@@ -24,9 +25,9 @@ function readJsonBody(req, limit = 8192) {
     req.on('error', () => resolve(null));
   });
 }
-const TYPES = { '.js': 'text/javascript; charset=utf-8', '.glb': 'model/gltf-binary', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json' };
+const TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.glb': 'model/gltf-binary', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.json': 'application/json' };
 // 3D models, served as-is (3D view only).
-const MOUNTS = { '/assets/': path.join(__dirname, '..', 'assets') };
+const MOUNTS = { '/assets/': path.join(__dirname, '..', 'assets'), '/4d/': path.join(PUBLIC, '4d') };
 const scenes = require('./scenes');
 const updater = require('./update');
 const { ompResumeCommand } = require('./omp');
