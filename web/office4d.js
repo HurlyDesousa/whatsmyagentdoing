@@ -2,6 +2,7 @@
 // (floors, team, activity, usage) sit on top of it. The feed topic never comes through here.
 import { initScene, renderScene, destroyScene, setSceneVisible, sceneCanvas, focusBot, captureScene, zoom, setTowerTheme } from './tower/scene.js';
 import { initUI, renderUI, destroyUI } from './tower-ui/ui.js';
+import { initSound, destroySound, sfx } from './tower-ui/sound.js';
 
 const LIGHT_TIME = { day: '13:00', evening: '18:50', night: '23:00' };
 
@@ -83,11 +84,13 @@ export class Office4D {
         if (this.opts.onFrame) this.opts.onFrame(this);
       },
       onSelectBot: (id) => this.selectBot(id),
+      onHoverBot: (id) => sfx.hover(id),
     });
     initUI({
       onSelectBot: (id) => this.selectBot(id),
       onSelectFloor: (id) => this.setTowerFloor(id),
-      onZoom: (dir) => zoom(dir),
+      onZoom: (dir) => { zoom(dir); sfx.zoom(dir); },
+      onOpenChat: (_id, url) => openWallpaperChat(url),
       onShare: () => {
         const shot = this.captureShare();
         if (!shot) return;
@@ -99,14 +102,20 @@ export class Office4D {
     });
     mountQuality((v) => { if (this.opts.onQuality) this.opts.onQuality(v); });
     mountTheme(() => { if (this.opts.onTheme) this.opts.onTheme(); });
+    initSound({ slot: document.querySelector('#topbar .bhq-right') });
+    const snd = document.querySelector('#topbar .bhq-snd');
+    const usage = document.querySelector('#topbar .bhq-usage');
+    if (snd && usage && usage.parentElement) usage.parentElement.insertBefore(snd, usage);
     this.canvas = sceneCanvas();
     this.syncLight();
     this.setTheme(document.documentElement.dataset.theme === 'dark');
   }
 
   selectBot(id) {
-    this.pickedId = id || null;
-    this._followPick = !!id;
+    const next = id || null;
+    if (next !== this.pickedId) sfx.select(!!next);
+    this.pickedId = next;
+    this._followPick = !!next;
     this.update(this.sessions);
   }
 
@@ -142,6 +151,7 @@ export class Office4D {
     const view = { currentFloor: want, selectedBot: sel };
     renderScene(state, view);
     try { renderUI(state, view); } catch (e) { console.error(e); }
+    this._soundStatus(state);
     if (sel && sel !== this._lastSel) {
       this._lastSel = sel;
       focusBot(sel);
@@ -157,9 +167,27 @@ export class Office4D {
   }
 
   setTowerFloor(id) {
+    if (id && id !== this.viewFloorId) {
+      const floors = ((this._state && this._state.floors) || []).slice().sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+      const order = floors.findIndex((f) => f.id === id);
+      if (order >= 0) sfx.floor(order);
+    }
     this.viewFloorId = id;
     this._lastFocus = this.focusKey;
     this.update(this.sessions);
+  }
+
+  _soundStatus(state) {
+    const now = {};
+    const bots = (state && state.bots) || {};
+    for (const [id, b] of Object.entries(bots)) now[id] = b.effective_status;
+    if (this._lastStatus) {
+      const fresh = new Set();
+      for (const [id, s] of Object.entries(now)) if (this._lastStatus[id] && this._lastStatus[id] !== s) fresh.add(s);
+      const kind = ['waiting_user', 'error', 'done'].find((k) => fresh.has(k));
+      if (kind) sfx.status(kind);
+    }
+    this._lastStatus = now;
   }
 
   setVisible(v) {
@@ -183,8 +211,23 @@ export class Office4D {
   }
 
   destroy() {
+    try { destroySound(); } catch (e) { console.error(e); }
     try { destroyUI(); } catch (e) { console.error(e); }
     try { destroyScene(); } catch (e) { console.error(e); }
     this.canvas = null;
   }
+}
+
+// The wallpaper opens a chat with location.href. A real anchor click is the
+// navigation browsers accept for grokbot:// (assigning location from a button
+// is dropped). https stays in this tab, same as the demo.
+function openWallpaperChat(url) {
+  if (!url || !/^(https|grokbot):\/\//i.test(url)) return;
+  const a = document.createElement('a');
+  a.href = url;
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.append(a);
+  a.click();
+  a.remove();
 }

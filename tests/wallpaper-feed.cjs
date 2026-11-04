@@ -181,6 +181,104 @@ test('3D blobLookFor honors the same session look', async () => {
   assert.notEqual(fallback.color, 0xFD690F);
 });
 
+test('4D tower keeps Paperclip status and shows usage share, chat and routines', () => {
+  const sessions = [
+    { key: 'grokbot:truenas', id: 'truenas', agent: 'grokbot', project: 'TrueNAS Master', status: 'thinking', activity: 'scrubbing a pool', title: 'Storage' },
+    { key: 'grokbot:chief', id: 'chief', agent: 'grokbot', project: 'Chief Master', status: 'idle', activity: null, title: 'Ops' },
+  ];
+  const feed = WF.reduceFeed([
+    line({ bot: 'TrueNAS Master', status: 'idle', step: 'feed says idle' }),
+    line({ bot: 'Chief Master', status: 'working', step: 'feed says working' }),
+    line({ chat: { 'TrueNAS Master': 'grokbot://app/v1/agent?id=truenas', 'Chief Master': 'javascript:alert(1)' } }),
+    line({ type: 'usage', total_used_pct: 17.2, resets_at: '2026-11-08T14:19:00Z', bots: { 'TrueNAS Master': 3, 'Chief Master': 37 } }),
+    line({ routines: { bot: 'Chief Master', items: [{ name: 'Morning dispatch', schedule: 'daily 08:00', next_run: '2026-11-04T07:00:00Z' }] } }),
+    line({ routines: { bot: 'TrueNAS Master', items: [{ name: 'Scrub check', schedule: 'weekly', next_run: '2026-11-09T01:00:00Z' }] } }),
+  ], NOW);
+  const merged = WF.mergeSessions(sessions, feed, NOW);
+  const nas = merged.find((s) => s.id === 'truenas');
+  assert.equal(nas.status, 'thinking');
+  assert.equal(nas.activity, 'scrubbing a pool');
+  assert.equal(nas.wallpaper.chat.startsWith('grokbot://'), true);
+  assert.equal(nas.wallpaper.usagePct, 3);
+  const tower = WF.towerState(merged, { usage: feed.usage, routines: feed.routines });
+  const nasBot = tower.bots[WF.botId('TrueNAS Master')];
+  assert.equal(nasBot.effective_status, 'working');
+  assert.equal(nasBot.step, 'scrubbing a pool');
+  assert.equal(nasBot.chat_url, 'grokbot://app/v1/agent?id=truenas');
+  assert.equal(nasBot.usage_share, 0.174);
+  assert.equal(tower.usage.period, 'week');
+  assert.equal(tower.usage.total_used_pct, 17.2);
+  assert.equal(tower.usage.resets_at, '2026-11-08T14:19:00Z');
+  const chiefBot = tower.bots[WF.botId('Chief Master')];
+  assert.equal(chiefBot.effective_status, 'idle');
+  assert.equal(chiefBot.chat_url, null);
+  assert.equal(chiefBot.usage_share, 1);
+  assert.equal(tower.routines.length, 2);
+  assert.equal(tower.routines[0].routine, 'Morning dispatch');
+  assert.equal(tower.routines[0].bot, WF.botId('Chief Master'));
+  assert.equal(JSON.stringify(tower).includes('javascript:'), false);
+});
+
+test('config lines stay after the relay window drops them', async () => {
+  const mem = new Map();
+  let round = 0;
+  const routine = { routines: { bot: 'Doc Master', items: [{ name: 'BGA des Tages', schedule: 'daily 08:00', next_run: '2026-11-04T07:00:00Z' }] } };
+  const chat = { chat: { 'Doc Master': 'grokbot://app/v1/agent?id=doc' } };
+  const status = { bot: 'Doc Master', status: 'idle', step: 'resting' };
+  function ndjson(recs, time) {
+    return recs.map((rec, i) => JSON.stringify({
+      id: 'id' + time + i, time, event: 'message', message: JSON.stringify(rec),
+    })).join('\n');
+  }
+  function load() {
+    const sandbox = {
+      URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+      Map, Set, Int8Array: globalThis.Int8Array,
+      history: { replaceState() {} },
+      location: { hash: '', search: '', pathname: '/' },
+      localStorage: {
+        getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+        setItem: (k, v) => mem.set(k, v),
+        removeItem: (k) => mem.delete(k),
+      },
+      fetch: async () => {
+        round += 1;
+        const body = round <= 2 ? ndjson([routine, chat, status], 1000) : ndjson([status], 5000);
+        return { ok: true, text: async () => body };
+      },
+      setTimeout: (fn) => { fn(); return 1; },
+      clearTimeout() {},
+      setInterval: () => 1,
+      clearInterval() {},
+    };
+    sandbox.window = sandbox;
+    sandbox.globalThis = sandbox;
+    vm.runInNewContext(feedSrc, sandbox, { filename: 'wallpaper-feed.js' });
+    return sandbox.WallpaperFeed;
+  }
+  const first = load();
+  const link = first.parseFeedInput('#feed-TESTTOPICONLY000000');
+  let seen;
+  const handle = first.connectFeed(link, (state) => { seen = state; });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(seen.routines.length, 1);
+  assert.equal(seen.routines[0].name, 'BGA des Tages');
+  assert.equal(seen.bots[first.botId('Doc Master')].chat, 'grokbot://app/v1/agent?id=doc');
+  handle.stop();
+  for (const k of [...mem.keys()]) if (!k.endsWith('.pins')) mem.delete(k);
+  const second = load();
+  let again;
+  second.connectFeed(link, (state) => { again = state; });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(again, 'pinned lines should publish even when the relay reply has none');
+  assert.equal(again.routines.length, 1);
+  assert.equal(again.routines[0].name, 'BGA des Tages');
+  assert.equal(again.bots[second.botId('Doc Master')].chat, 'grokbot://app/v1/agent?id=doc');
+  assert.equal(JSON.stringify(again).includes('feed-TESTTOPIC'), false);
+});
+
 test('the repo does not contain a wallpaper topic literal', () => {
   const banned = /gbw-[A-Za-z0-9]{16,}/;
   const skip = new Set(['node_modules', '.git', 'public/office3d.js']);
