@@ -616,7 +616,7 @@ function buildPanel(root) {
 
   const body = watchFade(h('div', { class: 'bhq-card-body' }, taskBlock, stats, useBlock, stepsBlock));
 
-  const cta = h('button', { class: 'bhq-cta', type: 'button', text: 'Open chat', disabled: true, title: 'No chat link yet' });
+  const cta = h('button', { class: 'bhq-cta', type: 'button', text: 'Open chat', disabled: true, title: 'Set Wallpaper feed in Settings to enable Open chat' });
   cta.addEventListener('click', () => {
     const url = cta.getAttribute('data-chat');
     if (url) openChat(U.cardBot, url);
@@ -1470,11 +1470,14 @@ function renderCard(state, bot) {
     for (const x of hist) c.hist.append(histRow(x));
   }
 
-  // chat button
+  // chat button — feed-less browsers need Settings, not "no link yet"
   const has = !!bot.chat_url;
   if (c.cta.disabled === has) c.cta.disabled = !has;
   setAttr(c.cta, 'data-chat', has ? bot.chat_url : null);
-  setAttr(c.cta, 'title', has ? 'Open this bot chat' : 'No chat link yet');
+  const ctaTitle = has
+    ? 'Open this bot chat'
+    : (state.wallpaper_feed ? 'No chat link yet' : 'Set Wallpaper feed in Settings to enable Open chat');
+  setAttr(c.cta, 'title', ctaTitle);
   c.fresh = false;
 }
 

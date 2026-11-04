@@ -853,6 +853,7 @@ function render() {
     office.extras = {
       usage: wallpaperFeed && wallpaperFeed.usage,
       routines: wallpaperFeed && wallpaperFeed.routines,
+      feedLive: !!wallpaperFeed,
     };
   }
   if (office && state.loaded) {

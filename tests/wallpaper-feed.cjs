@@ -219,6 +219,28 @@ test('4D tower keeps Paperclip status and shows usage share, chat and routines',
   assert.equal(JSON.stringify(tower).includes('javascript:'), false);
 });
 
+test('towerState sets last_seen from wallpaper seenMs', () => {
+  const statusAt = NOW - 90_000;
+  const feed = WF.reduceFeed([
+    line({ bot: 'Monitor Master', status: 'working', step: 'watching alerts' }, statusAt / 1000),
+    line({ chat: { 'Monitor Master': 'grokbot://app/v1/agent?id=monitor' } }),
+  ], NOW);
+  const merged = WF.mergeSessions([], feed, NOW);
+  const mon = merged.find((s) => s.project === 'Monitor Master');
+  assert.equal(mon.wallpaper.seenMs, statusAt);
+  const withFeed = WF.towerState(merged, { feedLive: true });
+  const bot = withFeed.bots[WF.botId('Monitor Master')];
+  assert.equal(bot.last_seen, new Date(statusAt).toISOString());
+  assert.equal(bot.chat_url, 'grokbot://app/v1/agent?id=monitor');
+  assert.equal(withFeed.wallpaper_feed, true);
+  const quiet = WF.towerState([{
+    key: 'paperclip:chief', id: 'chief', agent: 'claude', project: 'Chief Master',
+    status: 'idle', activity: null, title: 'Ops',
+  }], {});
+  assert.equal(quiet.bots[WF.botId('Chief Master')].last_seen, null);
+  assert.equal(quiet.wallpaper_feed, false);
+});
+
 test('config lines stay after the relay window drops them', async () => {
   const mem = new Map();
   let round = 0;

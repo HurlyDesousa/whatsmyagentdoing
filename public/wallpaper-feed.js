@@ -712,7 +712,9 @@
       const chatRaw = s.wallpaper && typeof s.wallpaper.chat === 'string' ? s.wallpaper.chat.trim() : '';
       const chat = /^(https|grokbot):\/\//i.test(chatRaw) ? chatRaw : '';
       const posted = s.wallpaper && Number.isFinite(Number(s.wallpaper.usagePct)) ? Number(s.wallpaper.usagePct) : null;
-      rows.push({ id, name, floorName: towerFloorName(s), look, status, step, chat, usagePct: posted });
+      const seenRaw = s.wallpaper && Number(s.wallpaper.seenMs);
+      const seenMs = Number.isFinite(seenRaw) && seenRaw > 0 ? seenRaw : null;
+      rows.push({ id, name, floorName: towerFloorName(s), look, status, step, chat, usagePct: posted, seenMs });
     }
     rows.sort((a, b) => a.floorName.localeCompare(b.floorName) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 
@@ -764,6 +766,7 @@
         look,
         avatar: row.id,
         has_glb: false,
+        last_seen: row.seenMs != null ? new Date(row.seenMs).toISOString() : null,
         last_event: nowIso,
         today: { working_min: 0, events: 0, tasks_done: 0, hourly: new Array(24).fill(0) },
         history: row.step ? [{ t: nowIso, status, step: row.step }] : [],
@@ -793,6 +796,9 @@
       version: 1,
       now: nowIso,
       demo: false,
+      // True when index.html has a live wallpaperFeed object for this browser.
+      // Used by the Open chat CTA title; never carries the topic string.
+      wallpaper_feed: !!extra.feedLive,
       summary,
       usage,
       floors: floorList.map((f, i) => ({
