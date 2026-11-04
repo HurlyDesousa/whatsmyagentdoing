@@ -5,7 +5,7 @@
 //
 // Same recipe as the hand-made blobs: a closed 2D outline that is star-shaped around its origin becomes a
 // polar radius function r(theta); the body is an "inflated gummy slab" (flat, slightly domed face + a round
-// bevel) built ring by ring; two white vertical-oval eyes sit on the front surface. Geometry is cached per
+// bevel) built ring by ring; two black vertical-oval eyes sit on the front surface. Geometry is cached per
 // shape (+ a small tilt bucket + accessory), materials per colour, so a floor of 20 bots costs a handful of
 // meshes. Everything is deterministic: same input, same blob.
 import * as THREE from 'three';
@@ -547,24 +547,15 @@ function partsStage(shape, tilt, accessory) {
 
 // ---------------------------------------------------------------- materials (cached per colour)
 
-// Any user picks the colour, so the face and the accessories adapt to it the way the brand's two Grok Bots do:
-// white eyes on a colour or on black, glossy black eyes on a near-white body (the white bot); black glasses and
-// stem, light ones on a near-black body. Thresholds are relative luminance (linear): warm cream (#F6DCC2, ~0.73)
-// keeps white eyes like the hand-made warren-buffett, #F3E7DB (~0.81) and lighter get dark eyes.
+// Any user picks the colour, so the accessories adapt to it the way the brand's two Grok Bots do:
+// black glasses and stem, light ones on a near-black body. Thresholds are relative luminance (linear).
+// Eyes stay the same glossy black pills on every body (SWA-3137). Near-white bodies already used this
+// material; coloured, grey, and black bodies used to get white or bright-white pills.
 const LIGHT_BODY = 0.78, DARK_BODY = 0.06;
 export function bodyTone(hex) {
   const c = new THREE.Color(hex);                                       // linear (colour management is on)
   const L = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
   return L >= LIGHT_BODY ? 'light' : L < DARK_BODY ? 'dark' : 'mid';
-}
-
-// Eyes: 'dark' on a near-white body; 'bright' (white that stays white in shade) on a grey body, where only lightness
-// separates the eyes from the body (the app's gray, #959595, is as light as its orange); else the usual white.
-function eyeKind(hex) {
-  const tone = bodyTone(hex);
-  if (tone === 'light') return 'dark';
-  const s = new THREE.Color(hex).convertLinearToSRGB();
-  return tone === 'mid' && Math.max(s.r, s.g, s.b) - Math.min(s.r, s.g, s.b) < 0.12 ? 'bright' : 'white';
 }
 
 const bodyMats = new Map();
@@ -573,13 +564,13 @@ function bodyMaterial(hex) {
   return bodyMats.get(hex);
 }
 
+const EYE_BLACK = '#141417';
 const eyeMats = new Map();
-function eyeMaterial(kind = 'white') {
-  const glow = kind === 'bright' ? 0.42 : 0.1;
-  if (!eyeMats.has(kind)) eyeMats.set(kind, new THREE.MeshPhysicalMaterial(kind === 'dark'
-    ? { color: '#141417', roughness: 0.2, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.04 }
-    : { color: 0xffffff, roughness: 0.22, metalness: 0, clearcoat: 0.6, clearcoatRoughness: 0.05, emissive: new THREE.Color().setRGB(glow, glow, glow, THREE.LinearSRGBColorSpace) }));
-  return eyeMats.get(kind);
+function eyeMaterial() {
+  if (!eyeMats.has('dark')) eyeMats.set('dark', new THREE.MeshPhysicalMaterial({
+    color: EYE_BLACK, roughness: 0.2, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.04,
+  }));
+  return eyeMats.get('dark');
 }
 
 const darkMats = new Map();
@@ -646,8 +637,6 @@ export function generateBlob({ shape, color, accessory, seed } = {}) {
   const acc = normAccessory(accessory);
   const parts = partsStage(sh, tiltFor(sd), acc);
   const colors = parts.body.nMats > 1 ? trioColors(col) : [col];
-  // trio: eye_L / eye_R sit on the primary (second) blob, eye_*_2 / eye_*_3 on the first and third
-  const eyeColor = (name) => colors[parts.body.nMats > 1 ? { 2: 0, 3: 2 }[name.split('_')[2]] ?? 1 : 0];
   const host = colors[parts.body.nMats > 1 ? (acc === 'glasses' ? 1 : 2) : 0];   // glasses on the primary, the rest on the top star
 
   const root = new THREE.Group();
@@ -656,7 +645,7 @@ export function generateBlob({ shape, color, accessory, seed } = {}) {
   body.name = 'body';
   root.add(body);
   for (const e of parts.eyes) {
-    const m = new THREE.Mesh(e.geo, eyeMaterial(eyeKind(eyeColor(e.name))));
+    const m = new THREE.Mesh(e.geo, eyeMaterial());
     m.name = e.name;
     m.position.set(e.pos[0], e.pos[1], e.pos[2]);
     root.add(m);
