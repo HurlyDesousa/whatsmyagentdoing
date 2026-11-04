@@ -90,7 +90,7 @@ export class Actor {
     body.scale.set(1, 0.95, 0.82);
     body.position.y = 0.44;
     const eyeGeo = new THREE.CapsuleGeometry(0.042, 0.085, 6, 12);
-    const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25, emissive: 0xffffff, emissiveIntensity: 0.15 });
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0x141417, roughness: 0.25 });
     const eyeL = new THREE.Mesh(eyeGeo, eyeMat); eyeL.position.set(-0.12, 0.52, 0.36);
     const eyeR = new THREE.Mesh(eyeGeo, eyeMat); eyeR.position.set(0.12, 0.52, 0.36);
     const g = new THREE.Group();
