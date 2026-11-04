@@ -271,6 +271,7 @@
         }
         const total = typeof rec.total_used_pct === 'number' ? rec.total_used_pct : Number(rec.total_used_pct);
         usage = {
+          period: typeof rec.period === 'string' && rec.period.trim() ? clip(rec.period, 20) : 'week',
           total_used_pct: Number.isFinite(total) ? total : null,
           resets_at: typeof rec.resets_at === 'string' ? rec.resets_at : '',
           bots: botsPct,
@@ -440,6 +441,51 @@
     return 'wmad.wallpaperCache.' + fnv(link.bases.join('|') + '\n' + link.topic);
   }
 
+  // Roster, looks, teams, chat links and routines are posted about once a day.
+  // The relay forgets them after 12 hours of status lines. The wallpaper keeps
+  // whatever it has already seen; these pins do the same, separate from the
+  // rolling status log, until a newer line of the same kind replaces them.
+  function configPinKey(rec) {
+    if (!isMap(rec)) return null;
+    if (isMap(rec.routines)) {
+      const name = typeof rec.routines.bot === 'string' ? rec.routines.bot.trim() : '';
+      return name ? 'routines:' + botId(name) : null;
+    }
+    if (isMap(rec.chat)) return 'chat';
+    if (isMap(rec.looks)) return 'looks';
+    if (isMap(rec.groups)) return 'groups';
+    if (Array.isArray(rec.roster)) return 'roster';
+    return null;
+  }
+
+  function pinsFromLines(lines) {
+    const pins = {};
+    const ordered = (Array.isArray(lines) ? lines : []).map((l, i) => ({ l, i }))
+      .sort((a, b) => (Number(a.l && a.l.time) || 0) - (Number(b.l && b.l.time) || 0) || a.i - b.i);
+    for (const { l } of ordered) {
+      if (!l || typeof l.message !== 'string') continue;
+      let rec;
+      try { rec = JSON.parse(l.message); } catch (_) { continue; }
+      const key = configPinKey(rec);
+      if (!key) continue;
+      pins[key] = { id: l.id || key, time: Number(l.time) || 0, message: l.message, src: l.src || 'pin' };
+    }
+    return pins;
+  }
+
+  function mergePinned(lines, pins) {
+    const out = Array.isArray(lines) ? lines.slice() : [];
+    const have = new Set(out.map((l) => (Number(l && l.time) || 0) + ' ' + (l && l.message)));
+    for (const p of Object.values(pins || {})) {
+      if (!p || typeof p.message !== 'string') continue;
+      const body = (Number(p.time) || 0) + ' ' + p.message;
+      if (have.has(body)) continue;
+      out.push({ id: p.id, time: p.time, message: p.message, src: p.src || 'pin' });
+      have.add(body);
+    }
+    return out;
+  }
+
   // Poll the last 12h, then follow /sse. Replays a local cache of line bodies
   // (id, time, message) so a quiet night still has bots. The topic is not
   // stored in the cache and is not passed to onStatus.
@@ -455,10 +501,35 @@
       es: null,
     }));
     const key = cacheKey(link);
+    const pinKey = key + '.pins';
     let lines = [];
+    let pins = {};
     const seen = new Set();
     let saveTimer = 0;
     let tickTimer = 0;
+
+    function loadPins() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(pinKey));
+        return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      } catch (_) { return {}; }
+    }
+    function savePins() {
+      try { localStorage.setItem(pinKey, JSON.stringify(pins)); } catch (_) { /* private mode */ }
+    }
+    function rememberPins(list) {
+      const found = pinsFromLines(list);
+      let changed = false;
+      for (const k of Object.keys(found)) {
+        const prev = pins[k];
+        const next = found[k];
+        if (!prev || (Number(next.time) || 0) >= (Number(prev.time) || 0)) {
+          if (!prev || prev.message !== next.message) changed = true;
+          pins[k] = next;
+        }
+      }
+      if (changed) savePins();
+    }
 
     function report(phase, extra) {
       if (typeof onStatus !== 'function') return;
@@ -482,7 +553,9 @@
       if (!m || m.event !== 'message' || typeof m.id !== 'string' || typeof m.message !== 'string') return false;
       src.lastId = m.id;
       if (!fresh(src, m)) return false;
-      lines.push({ id: m.id, time: Number(m.time) || Math.floor(Date.now() / 1000), message: m.message, src: src.tag });
+      const kept = { id: m.id, time: Number(m.time) || Math.floor(Date.now() / 1000), message: m.message, src: src.tag };
+      lines.push(kept);
+      rememberPins([kept]);
       if (lines.length > KEEP * 1.5) lines = lines.slice(-KEEP);
       clearTimeout(saveTimer);
       saveTimer = setTimeout(save, 1500);
@@ -490,7 +563,7 @@
     }
     function publish() {
       if (dead) return;
-      const state = reduceFeed(lines, Date.now());
+      const state = reduceFeed(mergePinned(lines, pins), Date.now());
       state.live = true;
       try { onState(state); } catch (_) { /* the page guards itself */ }
       report('live', { bots: Object.keys(state.bots).length });
@@ -522,7 +595,9 @@
       } catch (_) { /* the stream retries */ }
     }
 
+    pins = loadPins();
     lines = cached().map((l) => ({ id: l.id, time: l.time, message: l.message, src: l.src || sources[0].tag }));
+    rememberPins(lines);
     for (const l of lines) {
       if (l.id) seen.add(l.src + ' ' + l.id);
       if (l.message) seen.add((l.time || 0) + ' ' + l.message);
@@ -535,6 +610,7 @@
     })).then(() => {
       if (dead) return;
       lines = lines.sort((a, b) => (a.time || 0) - (b.time || 0));
+      rememberPins(lines);
       for (const src of sources) {
         const last = lines.filter((l) => l.src === src.tag).slice(-1)[0];
         if (last) src.lastId = last.id;
@@ -554,7 +630,9 @@
         clearTimeout(saveTimer);
         for (const src of sources) { try { src.es && src.es.close(); } catch (_) { /* already closed */ } }
       },
-      clearCache() { try { localStorage.removeItem(key); } catch (_) { /* private */ } },
+      clearCache() {
+        try { localStorage.removeItem(key); localStorage.removeItem(pinKey); } catch (_) { /* private */ }
+      },
     };
   }
 
@@ -605,6 +683,14 @@
     return 'Main floor';
   }
 
+  // Same split as the wallpaper: a bot's posted number over the week's total
+  // used. 3 against a 17.2 limit is 17% of all.
+  function shareOf(pct, total) {
+    const n = Number(pct);
+    if (!Number.isFinite(n) || !(total > 0)) return null;
+    return Math.round(Math.min(1, Math.max(0, n / total)) * 1000) / 1000;
+  }
+
   // Sessions (already merged with the feed) → the tower scene's state.
   // A bot who is in both keeps the office status at the desk. The feed still
   // supplies the glossy look and the floor (group). No topic is read or returned.
@@ -623,8 +709,10 @@
       const step = s.wallpaperOnly
         ? clip((s.wallpaper && s.wallpaper.step) || s.activity || '', 160)
         : clip(s.activity || '', 160);
-      const chat = s.wallpaper && /^https:\/\/|^grokbot:\/\//.test(s.wallpaper.chat || '') ? s.wallpaper.chat : '';
-      rows.push({ id, name, floorName: towerFloorName(s), look, status, step, chat });
+      const chatRaw = s.wallpaper && typeof s.wallpaper.chat === 'string' ? s.wallpaper.chat.trim() : '';
+      const chat = /^(https|grokbot):\/\//i.test(chatRaw) ? chatRaw : '';
+      const posted = s.wallpaper && Number.isFinite(Number(s.wallpaper.usagePct)) ? Number(s.wallpaper.usagePct) : null;
+      rows.push({ id, name, floorName: towerFloorName(s), look, status, step, chat, usagePct: posted });
     }
     rows.sort((a, b) => a.floorName.localeCompare(b.floorName) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 
@@ -645,6 +733,11 @@
     const bots = {};
     const summary = zeroCounts();
     summary.total = 0;
+    const usageBots = extra.usage && isMap(extra.usage.bots) ? extra.usage.bots : null;
+    let usageTotal = extra.usage && Number(extra.usage.total_used_pct);
+    if (!(usageTotal > 0) && usageBots) {
+      usageTotal = Object.values(usageBots).reduce((sum, v) => sum + (Number(v) || 0), 0);
+    }
     for (const row of rows) {
       const floor = takeFloor(row.floorName);
       const desk = floor.ids.length + 1;
@@ -664,7 +757,8 @@
         effective_status: status,
         step: row.step,
         task: row.step,
-        usage_share: null,
+        usage_pct: Number.isFinite(row.usagePct) ? row.usagePct : null,
+        usage_share: shareOf(row.usagePct, usageTotal),
         chat_url: row.chat || null,
         color: look ? look.color : hashHex(row.id),
         look,
@@ -680,7 +774,13 @@
     floorList.sort((a, b) => (FLOOR_RANK[a.id] ?? 50) - (FLOOR_RANK[b.id] ?? 50) || a.name.localeCompare(b.name));
     if (!floorList.length) floorList = [{ id: 'main-floor', name: 'Main floor', ids: [], counts: zeroCounts() }];
     const usage = extra.usage && Number.isFinite(Number(extra.usage.total_used_pct))
-      ? { period: extra.usage.period || 'week', total_used_pct: Number(extra.usage.total_used_pct), resets_at: extra.usage.resets_at || null, updated_at: extra.usage.updated_at || null }
+      ? {
+        period: extra.usage.period || 'week',
+        total_used_pct: Number(extra.usage.total_used_pct),
+        resets_at: extra.usage.resets_at || null,
+        updated_at: extra.usage.updated_at || (Number.isFinite(Number(extra.usage.at)) ? new Date(Number(extra.usage.at)).toISOString() : null),
+        bots: usageBots || {},
+      }
       : null;
     const routines = (Array.isArray(extra.routines) ? extra.routines : []).map((r) => ({
       bot: botId(r.bot || ''),
@@ -728,6 +828,7 @@
     parseFeedLink, parseFeedInput, mapLook, reduceFeed, mergeSessions, officeStatus,
     resolveQuality, towerState,
     connectFeed, hashTag, rememberedFor, botId,
+    configPinKey, pinsFromLines, mergePinned,
     get pageLink() { return pageLink; },
     set pageLink(v) { pageLink = v; },
   };

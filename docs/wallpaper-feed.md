@@ -27,9 +27,9 @@ The page polls `/json?poll=1&since=12h`, then follows `/sse`, and replays the la
 | `status` (`working` `idle` `waiting_user` `error` `done`, `step` ≤ 80, optional `group`) | A **live** line on the team row, the bot card, the activity log, and a floor caption when that bot is waiting, selected, or already showing a task |
 | `roster` | Quiet bots exist. They do not replace anyone already on the floor |
 | `looks` | Recolours the existing jelly blob (see the map below) |
-| `usage` | A **used N%** pill. Open it for `resets_at` and the per-bot numbers as posted |
-| `chat` | **Open chat** on the bot card (`grokbot://` or `https://` only) |
-| `routines` | A Routines block on the right when any arrive |
+| `usage` | A **used N%** pill on the Kenney floors. **4D** shows the week meter (percent, bar, "resets in …") and each bot's share of that total ("N% of all") |
+| `chat` | **Open chat** (`grokbot://` or `https://` only). On **4D** the button follows that link |
+| `routines` | A Routines list. **4D** keeps the latest routines, chat, looks, groups and roster lines in this browser after the relay’s 12-hour window drops them |
 | `groups` | A label on the bot (`Ops`, `Infra`, `Watch`, …). Not a new floor |
 
 A `working` bot with no new line for 20 minutes counts as idle on the live line. `done` stays for 60 seconds, then idle. Silence past 3 hours counts as idle. Same clocks as the wallpaper client.
@@ -76,7 +76,7 @@ With no feed configured, the office keeps its own crew colours. **4D** still use
 
 The quality control is **2D**, **3D**, and **4D**. **4D** is the default when this browser has no saved quality. A saved 2D (`mid`) or 3D (`high`) choice stays until you pick something else. **Dark** / **Light** (saved as `wmad.theme`) follows the same browser store. With no saved theme it follows the system, the same way the 2D floor does. An explicit choice stays after reload and tints the tower backdrop as well as the Kenney floor.
 
-**4D** is the wallpaper dashboard across the whole window: glossy blobs, stacked floors, and the glass panels (floors, waiting, finished, routines, activity, the floor team, the live clock, usage). It is the default when this browser has no saved quality. Pick **2D** or **3D** on that dashboard (top right) to come back to the Kenney floors and the Swart Ops chrome. A saved 2D or 3D choice stays. Paperclip still owns the seat when the feed disagrees. The topic stays in the browser.
+**4D** is the wallpaper dashboard across the whole window: glossy blobs, stacked floors, and the glass panels (floors, waiting, finished, routines, activity, the floor team, the live clock, usage). The top-right speaker opens **Music** and **Sounds**, the same two switches as the wallpaper. It is the default when this browser has no saved quality. Pick **2D** or **3D** on that dashboard (top right) to come back to the Kenney floors and the Swart Ops chrome. A saved 2D or 3D choice stays. Paperclip still owns the seat when the feed disagrees. The topic stays in the browser.
 
 The tower renderer is the wallpaper scene, served from this origin (`/office4d.js`, assets under `/4d/`). The topic is still only in the browser.
 

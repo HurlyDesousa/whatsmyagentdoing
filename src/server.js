@@ -25,7 +25,7 @@ function readJsonBody(req, limit = 8192) {
     req.on('error', () => resolve(null));
   });
 }
-const TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.glb': 'model/gltf-binary', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.json': 'application/json' };
+const TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.glb': 'model/gltf-binary', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.json': 'application/json', '.m4a': 'audio/mp4' };
 // 3D models, served as-is (3D view only).
 const MOUNTS = { '/assets/': path.join(__dirname, '..', 'assets'), '/4d/': path.join(PUBLIC, '4d') };
 const scenes = require('./scenes');

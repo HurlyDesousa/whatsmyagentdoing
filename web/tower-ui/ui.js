@@ -475,7 +475,12 @@ export function initUI(handlers) {
   // relative times ("12 min ago", "in 3 h") move on even when no new state arrives
   U.timer = setInterval(() => {
     if (document.hidden || !U.last.state) return;
+    safe('topbar', () => U.top && renderTopbar(U.last.state));
     safe('dock', () => U.dock && renderDock(U.last.state));
+    safe('card-reset', () => {
+      const bot = U.cardBot && U.last.state.bots && U.last.state.bots[U.cardBot];
+      if (bot && U.panel) renderCard(U.last.state, bot);
+    });
   }, 15000);
 }
 
@@ -603,7 +608,8 @@ function buildPanel(root) {
   const fuel = h('span', { class: 'bhq-slider', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': 'Share of total usage' }, fillBar);
   const shareNum = h('b', { class: 'bhq-num' });
   const share = h('span', { class: 'bhq-share' }, shareNum, ' of all');
-  const useBlock = h('div', { class: 'bhq-useblock' }, usageLabel, h('div', { class: 'bhq-use' }, fuel, share));
+  const reset = h('span', { class: 'bhq-card-reset' });
+  const useBlock = h('div', { class: 'bhq-useblock' }, usageLabel, h('div', { class: 'bhq-use' }, fuel, share), reset);
 
   const hist = h('ol', { class: 'bhq-steps', role: 'list' });
   const stepsBlock = h('div', { class: 'bhq-stepsblock' }, h('div', { class: 'bhq-label', text: 'Recent steps' }), hist);
@@ -612,9 +618,8 @@ function buildPanel(root) {
 
   const cta = h('button', { class: 'bhq-cta', type: 'button', text: 'Open chat', disabled: true, title: 'No chat link yet' });
   cta.addEventListener('click', () => {
-    const b = U.last.state && U.last.state.bots && U.last.state.bots[U.cardBot];
-    if (!b || !b.chat_url) return;
-    openChat(b.id, b.chat_url);
+    const url = cta.getAttribute('data-chat');
+    if (url) openChat(U.cardBot, url);
   });
 
   const more = h('div', { class: 'bhq-more bhq-surface bhq-glow bhq-glow--still' }, body, h('div', { class: 'bhq-card-foot' }, cta));
@@ -627,14 +632,27 @@ function buildPanel(root) {
     root, team, tcard, teamHead: head, teamTitle, teamSub, teamBig: big, nWait, nErr, rowWait, rowErr, lErr, list, teamEmpty,
     card: {
       root: card, hero, body, av, name, where, status, stDot, stTxt, now, taskBlock, task,
-      sSteps, sTasks, sHours, usageLabel, useBlock, fuel, fillBar, shareNum, hist, histSig: null, cta, fresh: true,
+      sSteps, sTasks, sHours, usageLabel, useBlock, fuel, fillBar, shareNum, reset, hist, histSig: null, cta, fresh: true,
     },
   };
 }
 
 function openChat(id, url) {
+  if (!url) return;
   if (U.h.onOpenChat) U.h.onOpenChat(id, url);
-  else window.location.href = url;
+  else followChat(url);
+}
+
+// grokbot:// needs a real link activation. Assigning location from the button
+// is ignored in some browsers, which is why Open chat looked dead.
+function followChat(url) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.append(a);
+  a.click();
+  a.remove();
 }
 
 /* ------------------------------------------------------------------ build: feed + zoom */
@@ -1431,6 +1449,14 @@ function renderCard(state, bot) {
     setAttr(c.fuel, 'aria-valuenow', Math.round(share * 100));
     setText(c.shareNum, Math.round(share * 100) + '%');
   }
+  const resetAt = parseTs(state.usage && state.usage.resets_at);
+  let resetText = '';
+  if (resetAt != null) {
+    const left = resetAt - now;
+    resetText = left > 0 ? 'resets in ' + fmtLeft(left) : 'resetting now';
+  }
+  setText(c.reset, resetText);
+  setHidden(c.reset, !resetText || share == null);
 
   // last steps (rebuilt only when they change); the newest entry is usually the current step, already shown above
   let hist = (bot.history || []).slice(0, STEPS_SHOWN + 1);
@@ -1447,7 +1473,8 @@ function renderCard(state, bot) {
   // chat button
   const has = !!bot.chat_url;
   if (c.cta.disabled === has) c.cta.disabled = !has;
-  setAttr(c.cta, 'title', has ? null : 'No chat link yet');
+  setAttr(c.cta, 'data-chat', has ? bot.chat_url : null);
+  setAttr(c.cta, 'title', has ? 'Open this bot chat' : 'No chat link yet');
   c.fresh = false;
 }
 
@@ -1597,9 +1624,10 @@ function makeWaitRow(id) {
   const select = () => { if (U.h.onSelectBot) U.h.onSelectBot(id); };
   name.addEventListener('click', select);
   row.addEventListener('click', (e) => { if (!e.target.closest('button')) select(); });
-  btn.addEventListener('click', () => {
-    const b = U.last.state && U.last.state.bots && U.last.state.bots[id];
-    if (b && b.chat_url) openChat(id, b.chat_url);
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const url = btn.getAttribute('data-chat');
+    if (url) openChat(id, url);
   });
   return { row, av, name, btn, st, step };
 }
@@ -1633,6 +1661,7 @@ function renderWaiting(state) {
     setText(r.st, CHIP[s] || statusLabel(s));
     setText(r.step, bot.step ? ' · ' + bot.step : '');
     setHidden(r.btn, !bot.chat_url);
+    setAttr(r.btn, 'data-chat', bot.chat_url || null);
     return r.row;
   });
   reconcile(d.wlist, els, 0);

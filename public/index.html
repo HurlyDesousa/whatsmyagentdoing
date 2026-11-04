@@ -520,6 +520,7 @@
     let pref = null;
     try { pref = localStorage.getItem(KEY); } catch {}
     let userMuted = pref === '1';
+    let held = false; // 4D holds this track so the wallpaper Music switch is the one that plays
     // Just logged in (login.html sets this before redirecting): the click's user
     // activation doesn't survive the redirect, so force music on and try now.
     let unlock = null;
@@ -528,7 +529,7 @@
     audio.loop = true; // continuous seamless loop
     audio.volume = 0.4;
     // Belt-and-braces: if 'ended' ever fires (loop unsupported), restart immediately.
-    audio.addEventListener('ended', () => { audio.currentTime = 0; audio.play().catch(() => {}); });
+    audio.addEventListener('ended', () => { if (held) return; audio.currentTime = 0; audio.play().catch(() => {}); });
     function render() {
       const muted = audio.muted || audio.paused;
       btn.innerHTML = muted ? ICON_OFF : ICON_ON;
@@ -539,6 +540,7 @@
     }
     function save() { try { localStorage.setItem(KEY, userMuted ? '1' : '0'); } catch {} }
     function start() {
+      if (held) { audio.pause(); render(); return Promise.resolve(); }
       audio.muted = userMuted;
       return audio.play().then(render, () => {
         // Autoplay with sound blocked: keep it muted (try muted playback) and wait for a gesture.
@@ -549,6 +551,7 @@
     }
     let armed = false;
     function onGesture(e) {
+      if (held) return;
       if (e && e.target && btn.contains(e.target)) return; // the button handles itself
       disarm();
       if (!userMuted) { audio.muted = false; audio.play().catch(() => {}).finally(render); }
@@ -557,6 +560,7 @@
     function armGesture() { if (armed) return; armed = true; EVENTS.forEach((t) => document.addEventListener(t, onGesture, { capture: true })); }
     function disarm() { armed = false; EVENTS.forEach((t) => document.removeEventListener(t, onGesture, { capture: true })); }
     btn.addEventListener('click', () => {
+      if (held) return;
       disarm();
       const nowMuted = !(audio.muted || audio.paused);
       userMuted = nowMuted;
@@ -569,6 +573,9 @@
     audio.addEventListener('volumechange', render);
     render();
     start();
+    // 4D plays the wallpaper loop from its own Music switch. Hold this track
+    // so the two don't play at once; the mute choice is left as it was.
+    window.officeBgmHold = (on) => { held = !!on; if (held) { audio.pause(); render(); } else start(); };
   })();
 </script>
 <script>
@@ -1274,6 +1281,7 @@ async function makeOffice() {
     try { mine = new window.Office(officeEl, officeOpts); } catch (e2) { console.error(e2); setLoading(false); return; }
   }
   office = mine;
+  if (window.officeBgmHold) window.officeBgmHold(!!office.isTower);
   office.offDutyLabel = L.wentHome;
   office.onFloorChange = (fl) => {
     state.floor = fl; store.set('floor', fl);
