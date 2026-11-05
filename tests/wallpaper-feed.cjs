@@ -357,14 +357,16 @@ test('paperclipAgentId maps names and session pc; seats persist via assignSeat',
   assert.equal(W.assignSeat(a, 5), 5);
   assert.equal(W.assignSeat(b, 7), 7);
   assert.equal(W.assignSeat(a, 7), 7); // Chief takes Monitor's desk; Monitor keeps prior seat 5 via swap
+  assert.equal(W.assignSeat(a, 21), 21); // department manager desk is a valid seating target
+  assert.equal(W.PER_FLOOR, 21);
   const seats = W.loadSeatAssign();
-  assert.equal(seats[a], 7);
+  assert.equal(seats[a], 21);
   assert.equal(seats[b], 5);
   const tower = W.towerState([
     { key: 'paperclip:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x', pc: '2842a7bf-9527-42c1-aa86-ba5b599c8878' },
     { key: 'paperclip:mon', id: 'mon', agent: 'grokbot', project: 'Monitor Master', status: 'waiting', activity: 'needs you' },
   ], {});
-  assert.equal(tower.bots[a].desk, 7);
+  assert.equal(tower.bots[a].desk, 21);
   assert.equal(tower.bots[b].desk, 5);
   assert.equal(tower.bots[a].paperclip_agent_id, '2842a7bf-9527-42c1-aa86-ba5b599c8878');
   assert.equal(tower.bots[b].paperclip_agent_id, '4f2ddf7b-26ee-4beb-8424-beddd98a0247');

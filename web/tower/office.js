@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildFloorStyles } from './floorstyle.js';
 
-export const DESK_COUNT = 20;
+export const BANK_DESK_COUNT = 20; // communal bank stools from the GLB / placeholder
+export const DESK_COUNT = 21;      // + department manager desk (SWA-3195)
 export const LOUNGE_COUNT = 6;
 export const SLAB = 0.36;
 export const FLOOR_STEP = 1.6;
@@ -44,7 +45,7 @@ export async function loadOfficeAssets(baseUrl) {
   }
 
   const spots = collectSpots(templates.floor_open);
-  if (spots.desks.filter(Boolean).length < DESK_COUNT) {
+  if (spots.desks.filter(Boolean).length < BANK_DESK_COUNT) {
     console.warn('[office] floor_open has fewer than 20 desk_NN empties: using placeholder floor_open');
     const p = ph || buildPlaceholder();
     templates.floor_open = p.templates.floor_open;
@@ -67,12 +68,16 @@ function finish(templates, spots, nightMaps, source) {
   } catch (err) {
     console.warn('[office] dept divider skipped:', err.message);
   }
+  try {
+    addManagerDesk(templates.floor_open, spots);
+  } catch (err) {
+    console.warn('[office] manager desk skipped:', err.message);
+  }
   return { templates, spots, nightMaps, source, style };
 }
 
-// SWA-3171: diagonal frosted divider on Main Floor (open storey) between the two desk banks.
-// Hurly sketch: bottom-left near lounge/walkway → top-right toward the glass, through the aisle.
-// Ends stay short so walk paths remain open; panels stay in the aisle (no desk/chair hits).
+// SWA-3195: frosted dept divider follows Hurly’s red diagonal through the desk banks
+// (lounge/walkway → glass), not a shallow parallel aisle split. Ends stay open for walking.
 function addDeptDivider(open) {
   if (!open || open.getObjectByName('dept_divider')) return;
   const g = new THREE.Group();
@@ -88,9 +93,9 @@ function addDeptDivider(open) {
     depthWrite: false,
   });
   const frame = new THREE.MeshStandardMaterial({ name: 'dept_divider_frame', color: 0x1C1C1E, roughness: 0.45, metalness: 0.3 });
-  // Aisle between table_1 near seats (z≈-1.5) and table_2 far seats (z≈0.3).
-  const x0 = -5.35, z0 = 0.22;   // lounge / walkway end (bottom-left of sketch)
-  const x1 = 1.05, z1 = -1.38;  // glass / top-right between desk clusters
+  // Steeper cut through both communal banks (table_1 @ z=-3.4, table_2 @ z=0.8).
+  const x0 = -5.55, z0 = 1.35;   // lounge / walkway (bottom-left of markup)
+  const x1 = 1.45, z1 = -3.55;  // through desks toward glass (top-right of markup)
   const dx = x1 - x0, dz = z1 - z0;
   const span = Math.hypot(dx, dz);
   const yaw = Math.atan2(-dz, dx); // local +X follows the diagonal
@@ -98,7 +103,7 @@ function addDeptDivider(open) {
   const h = 1.28;
   const thick = 0.04;
   // Three frosted panels along the cut; gaps (~0.55m) at both ends leave walk paths clear.
-  const panelW = 1.85;
+  const panelW = 2.15;
   const usable = span - 1.1;
   const step = usable / 3;
   const first = 0.55 + step / 2;
@@ -129,6 +134,57 @@ function addDeptDivider(open) {
   ledge.rotation.y = yaw;
   g.add(ledge);
   open.add(g);
+}
+
+// SWA-3195: dedicated department-manager desk (not a bank stool). Seat index 21 for drag-drop.
+function addManagerDesk(open, spots) {
+  if (!open || open.getObjectByName('manager_desk')) return;
+  if (spots.desks[20]) return;
+  const g = new THREE.Group();
+  g.name = 'manager_desk';
+  // Head of the banks, left walkway — clear of communal stools, faces +x toward the floor.
+  const cx = -6.7, cz = -0.85;
+  const oak = new THREE.MeshStandardMaterial({ name: 'manager_desk_oak', color: 0xC9A57C, roughness: 0.55 });
+  const black = new THREE.MeshStandardMaterial({ name: 'manager_desk_frame', color: 0x1C1C1E, roughness: 0.45, metalness: 0.3 });
+  const fabric = new THREE.MeshStandardMaterial({ name: 'manager_desk_seat', color: 0x3A3A3E, roughness: 0.85 });
+  // Distinct rectangular oak desk (not a bank stool / communal table segment).
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.05, 0.7), oak);
+  top.position.set(cx, 0.725, cz);
+  g.add(top);
+  for (const [lx, lz] of [[-0.55, -0.28], [0.55, -0.28], [-0.55, 0.28], [0.55, 0.28]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.7, 0.05), black);
+    leg.position.set(cx + lx, 0.35, cz + lz);
+    g.add(leg);
+  }
+  // Task chair behind the desk (seat faces +x / the banks).
+  const seatX = cx - 0.72, seatZ = cz;
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.26, 0.08, 20), fabric);
+  pad.position.set(seatX, 0.46, seatZ);
+  g.add(pad);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.42, 0.42), fabric);
+  back.position.set(seatX - 0.2, 0.72, seatZ);
+  g.add(back);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.38, 12), black);
+  base.position.set(seatX, 0.22, seatZ);
+  g.add(base);
+  // Slim laptop so it reads as a working desk, not lounge furniture.
+  const laptop = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.012, 0.22), new THREE.MeshStandardMaterial({
+    name: 'manager_desk_laptop', color: 0xC9CCD0, roughness: 0.35, metalness: 0.75,
+  }));
+  laptop.position.set(cx + 0.1, 0.756, cz);
+  g.add(laptop);
+  const lid = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.2, 0.008), laptop.material);
+  lid.position.set(cx + 0.1, 0.86, cz - 0.1);
+  lid.rotation.x = -0.35;
+  g.add(lid);
+  open.add(g);
+
+  const seat = new THREE.Object3D();
+  seat.name = 'desk_21';
+  seat.position.set(seatX, SEAT_Y, seatZ);
+  seat.rotation.y = Math.PI / 2; // face +x toward the banks
+  open.add(seat);
+  spots.desks[20] = { pos: new THREE.Vector3(seatX, SEAT_Y, seatZ), yaw: Math.PI / 2 };
 }
 
 // Baked surfaces are unlit: day lightmap as a basic material (night map is mixed in by the instance patch).

@@ -151,7 +151,7 @@ export class Building {
       }
       return { positions: lamps.length ? this.lampPositions : [], k: inst.alpha };
     });
-    this.screenTargets = new Array(20).fill(0);
+    this.screenTargets = new Array(21).fill(0);
 
     for (let i = 0; i < 2; i++) {        // both open-floor instances up front: nothing is cloned during a switch
       const inst = new Instance(this, assets.templates.floor_open, 'open');

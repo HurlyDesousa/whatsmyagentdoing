@@ -77,7 +77,8 @@
     'cursor-cloud': '1103a0e7-abc7-42fd-a5c9-66cfb37ce344',
   };
   const SEAT_STORE_KEY = 'wmad.seatAssign';
-  const PER_FLOOR = 20;
+  // 20 communal bank stools + 1 department manager desk (SWA-3195).
+  const PER_FLOOR = 21;
 
   // Wallpaper picker shapes -> the office blobs that already exist
   // (web/grokblobs.js / public/office.js). Triangle in the wallpaper is the
