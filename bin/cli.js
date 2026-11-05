@@ -193,7 +193,7 @@ async function main() {
     return;
   }
 
-  const query = o.hurly && !o.scene ? '/?view=office&quality=high' : o.scene ? `/?view=office&quality=high&scene=${encodeURIComponent(o.scene)}` : '';
+  const query = o.hurly && !o.scene ? '/?view=office' : o.scene ? `/?view=office&scene=${encodeURIComponent(o.scene)}` : '';
   if (await alreadyRunning(o.port)) {
     const url = `http://localhost:${o.port}${query}`;
     console.log(`Already running at ${url}`);

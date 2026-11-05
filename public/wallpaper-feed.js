@@ -870,9 +870,11 @@
   } catch (_) { pageLink = null; }
 
   const DEFAULT_QUALITY = '4d';
-  const QUALITIES = ['mid', 'high', '4d'];
-  function resolveQuality(saved) {
-    return QUALITIES.includes(saved) ? saved : DEFAULT_QUALITY;
+  // Sole office view. Legacy mid (2D) / high (3D) and unknown values all map
+  // here so old bookmarks, query params, and saved prefs land on the tower.
+  const QUALITIES = ['4d'];
+  function resolveQuality(_saved) {
+    return DEFAULT_QUALITY;
   }
 
   // Paperclip / office status owns the seat. Feed-only bots already carry the

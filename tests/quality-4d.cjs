@@ -1,5 +1,4 @@
-// Default quality is 4D. A saved 2D or 3D choice stays. 4D mounts the tower
-// and seats bots from Paperclip status, with wallpaper looks on the blobs.
+// 4D is the sole office view. Legacy mid/high prefs and query params resolve to 4D.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -25,15 +24,15 @@ function line(message, timeSec) {
   return { time: timeSec == null ? NOW / 1000 : timeSec, message: JSON.stringify(message) };
 }
 
-test('quality defaults to 4D and keeps an explicit 2D or 3D choice', () => {
+test('quality is always 4D; legacy mid/high resolve to the sole view', () => {
   assert.equal(WF.DEFAULT_QUALITY, '4d');
-  assert.equal(JSON.stringify(WF.QUALITIES), JSON.stringify(['mid', 'high', '4d']));
+  assert.equal(JSON.stringify(WF.QUALITIES), JSON.stringify(['4d']));
   assert.equal(WF.resolveQuality(undefined), '4d');
   assert.equal(WF.resolveQuality(null), '4d');
   assert.equal(WF.resolveQuality(''), '4d');
   assert.equal(WF.resolveQuality('low'), '4d');
-  assert.equal(WF.resolveQuality('mid'), 'mid');
-  assert.equal(WF.resolveQuality('high'), 'high');
+  assert.equal(WF.resolveQuality('mid'), '4d');
+  assert.equal(WF.resolveQuality('high'), '4d');
   assert.equal(WF.resolveQuality('4d'), '4d');
 });
 
@@ -119,7 +118,7 @@ test('Main floor keeps Dept A vs B banks when mixed crew lands there', () => {
   }
 });
 
-test('4D mode mounts the tower and 2D / 3D still come up', { timeout: 90000 }, async () => {
+test('4D is the sole view: no mode pill; legacy mid/high URLs land on the tower', { timeout: 90000 }, async () => {
   const { createServer } = require('../src/server');
   const { DemoWatcher } = require('../src/demo');
   const watcher = new DemoWatcher().start();
@@ -141,11 +140,12 @@ test('4D mode mounts the tower and 2D / 3D still come up', { timeout: 90000 }, a
     const errors = [];
     page.on('pageerror', (e) => errors.push(String(e)));
     await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => state.quality === '4d' && document.querySelector('#qualSeg [data-v="4d"].on'), null, { timeout: 10000 });
-    assert.equal(await page.locator('#qualSeg [data-v="4d"].on').count(), 1);
+    await page.waitForFunction(() => state.quality === '4d' && officeKind === '4d' && office?.isTower, null, { timeout: 10000 });
+    assert.equal(await page.locator('#qualSeg').count(), 0);
+    assert.equal(await page.locator('.bhq-qual').count(), 0);
+    assert.equal(await page.evaluate(() => !!document.body.textContent && !/\b4D\b/.test(document.querySelector('#topbar')?.innerText || '')), true);
     await page.waitForFunction(() => document.body.classList.contains('tower-site') && document.querySelector('#topbar .bhq-word')?.textContent === 'Grok Bot Dashboard' && document.querySelector('#floors')?.textContent.includes('Floors'), null, { timeout: 15000 });
     assert.equal(await page.locator('body.tower-site .wrap > header').isHidden(), true);
-    assert.equal(await page.locator('#qualSeg [data-v="4d"]').innerText(), '4D');
     await page.waitForFunction(() => officeKind === '4d' && office?.isTower && office.loaded && office.framesShown > 4, null, { timeout: 20000 });
     const shot = await page.evaluate(() => {
       const live = document.querySelector('#office canvas.hq-canvas');
@@ -165,26 +165,34 @@ test('4D mode mounts the tower and 2D / 3D still come up', { timeout: 90000 }, a
     assert.ok(shot.colors > 8, 'tower frame should not be a flat colour: ' + JSON.stringify(shot));
     await page.waitForTimeout(900);
     await page.screenshot({ path: '/tmp/tower-4d.png' });
+
+    // Saved mid / high prefs must remount as 4D (no Kenney 2D/3D).
     await page.evaluate(() => {
       localStorage.setItem('wmad.quality', JSON.stringify('mid'));
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => state.quality === 'mid' && officeKind === 'mid' && office && !office.isTower && office.framesShown > 2, null, { timeout: 15000 });
-    assert.equal(await page.locator('#floorSeg button').first().innerText(), 'B');
+    await page.waitForFunction(() => state.quality === '4d' && officeKind === '4d' && office?.isTower && office.loaded, null, { timeout: 20000 });
+    assert.equal(await page.locator('#qualSeg, .bhq-qual').count(), 0);
+    assert.notEqual(await page.locator('#floorSeg button').first().innerText(), 'B');
+
     await page.evaluate(() => {
       localStorage.setItem('wmad.quality', JSON.stringify('high'));
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => state.quality === 'high' && officeKind === 'high:office' && office?.loaded, null, { timeout: 20000 });
-    await page.evaluate(() => localStorage.removeItem('wmad.quality'));
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => state.quality === '4d' && officeKind === '4d' && office?.isTower && office.loaded, null, { timeout: 20000 });
+
+    // Legacy query params also land on the sole tower view.
+    await page.goto(base + '/?view=office&quality=mid', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => state.quality === '4d' && office?.isTower && office.loaded, null, { timeout: 20000 });
-    assert.notEqual(await page.locator('#floorSeg button').first().innerText(), 'B');
+    await page.goto(base + '/?view=office&quality=high', { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => state.quality === '4d' && office?.isTower && office.loaded, null, { timeout: 20000 });
+
     assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'light');
     await page.locator('.bhq-theme').click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark' && document.documentElement.dataset.themeChoice === 'dark');
     await page.waitForTimeout(400);
     await page.screenshot({ path: '/tmp/tower-4d-dark.png' });
+    assert.equal(await page.locator('.bhq-theme').innerText(), 'Light');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => state.quality === '4d' && document.documentElement.dataset.theme === 'dark' && document.documentElement.dataset.themeChoice === 'dark' && office?.isTower && office.loaded, null, { timeout: 20000 });
     assert.equal(await page.locator('.bhq-theme').innerText(), 'Light');

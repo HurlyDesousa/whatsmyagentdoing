@@ -6,25 +6,6 @@ import { initSound, destroySound, sfx } from './tower-ui/sound.js';
 
 const LIGHT_TIME = { day: '13:00', evening: '18:50', night: '23:00' };
 
-function mountQuality(onQuality) {
-  const host = document.querySelector('#topbar .bhq-right');
-  if (!host || host.querySelector('.bhq-qual')) return;
-  const seg = document.createElement('div');
-  seg.className = 'bhq-qual bhq-surface';
-  seg.setAttribute('role', 'group');
-  seg.setAttribute('aria-label', 'Office quality');
-  for (const [v, label] of [['mid', '2D'], ['high', '3D'], ['4d', '4D']]) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.dataset.v = v;
-    b.textContent = label;
-    if (v === '4d') b.classList.add('on');
-    b.addEventListener('click', () => onQuality(v));
-    seg.append(b);
-  }
-  host.prepend(seg);
-}
-
 function mountTheme(onTheme) {
   const host = document.querySelector('#topbar .bhq-right');
   if (!host || host.querySelector('.bhq-theme')) return;
@@ -32,8 +13,7 @@ function mountTheme(onTheme) {
   b.type = 'button';
   b.className = 'bhq-theme bhq-surface';
   b.addEventListener('click', () => onTheme());
-  const qual = host.querySelector('.bhq-qual');
-  host.insertBefore(b, qual ? qual.nextSibling : host.firstChild);
+  host.insertBefore(b, host.firstChild);
   paintThemeButton(b);
 }
 
@@ -103,7 +83,6 @@ export class Office4D {
         a.click();
       },
     });
-    mountQuality((v) => { if (this.opts.onQuality) this.opts.onQuality(v); });
     mountTheme(() => { if (this.opts.onTheme) this.opts.onTheme(); });
     initSound({ slot: document.querySelector('#topbar .bhq-right') });
     const snd = document.querySelector('#topbar .bhq-snd');
