@@ -32,7 +32,7 @@ const scenes = require('./scenes');
 const updater = require('./update');
 const { ompResumeCommand } = require('./omp');
 const { createAuth } = require('./auth');
-const { resumeAgent } = require('./paperclip-resume');
+const { resumeAgent, clearErrorAgent } = require('./paperclip-resume');
 
 function serveFile(res, root, rel) {
   const file = path.normalize(path.join(root, rel));
@@ -280,6 +280,17 @@ function createServer(watcher, opts, { onShutdown, onRestart, auth = createAuth(
       readJsonBody(req).then(async (body) => {
         const id = body && (body.agentId || body.id || body.pc);
         const result = await resumeAgent(id);
+        json(result.ok ? 200 : result.status || 502, result);
+      });
+    } else if (url.pathname === '/api/paperclip/clear-error' && req.method === 'POST') {
+      // Clear Paperclip error state only (no auto-retry / resume).
+      readJsonBody(req).then(async (body) => {
+        const id = body && (body.agentId || body.id || body.pc);
+        const result = await clearErrorAgent(id);
+        if (result.ok && typeof watcher.poll === 'function') {
+          // Nudge the Hurly crew poller so the card drops error without a reload.
+          Promise.resolve(watcher.poll()).catch(() => {});
+        }
         json(result.ok ? 200 : result.status || 502, result);
       });
     } else if (url.pathname === '/api/shutdown' && req.method === 'POST') {

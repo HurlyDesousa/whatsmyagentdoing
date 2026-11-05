@@ -1,6 +1,6 @@
 'use strict';
 
-// Office → Paperclip agent resume (Start when paused / waiting).
+// Office → Paperclip agent actions (Start / Clear error).
 // Uses the same board token as the live Hurly crew poller.
 
 const https = require('https');
@@ -84,4 +84,27 @@ async function resumeAgent(agentId) {
   }
 }
 
-module.exports = { resumeAgent, boardToken, PAPERCLIP_URL, UUID };
+/** Clear Paperclip error state only — does not resume or retry the failed run. */
+async function clearErrorAgent(agentId) {
+  const id = String(agentId || '').trim();
+  if (!UUID.test(id)) return { ok: false, status: 400, error: 'invalid agent id' };
+  const token = boardToken();
+  if (!token) return { ok: false, status: 503, error: 'Paperclip board token not configured' };
+  const base = PAPERCLIP_URL.replace(/\/+$/, '');
+  try {
+    const cleared = await postJson(`${base}/api/agents/${encodeURIComponent(id)}/clear-error`, token, {});
+    if (cleared.status >= 200 && cleared.status < 300) {
+      return { ok: true, status: cleared.status, via: 'clear-error', body: cleared.body };
+    }
+    return {
+      ok: false,
+      status: cleared.status || 502,
+      error: (cleared.body && (cleared.body.error || cleared.body.message))
+        || 'Paperclip clear-error failed',
+    };
+  } catch (e) {
+    return { ok: false, status: 502, error: String(e.message || e) };
+  }
+}
+
+module.exports = { resumeAgent, clearErrorAgent, boardToken, PAPERCLIP_URL, UUID };
