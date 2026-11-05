@@ -5,16 +5,20 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildFloorStyles } from './floorstyle.js';
 
-export const BANK_DESK_COUNT = 20; // communal bank stools from the GLB / placeholder
+export const BANK_DESK_COUNT = 20; // communal bank stools from the GLB / placeholder (before SWA-3221 removals)
 export const DESK_COUNT = 21;      // + department manager desk (SWA-3195)
 export const LOUNGE_COUNT = 6;
 export const SLAB = 0.36;
 export const FLOOR_STEP = 1.6;
 export const OPEN_H = 2.7;
 export const SHAFT_POS = new THREE.Vector2(9.05, -2.6);
+// SWA-3221: rear/window bank, window-side stools behind the dept divider (leave wall-end desk_01).
+// Visual desk_NN indices; logical bot.desk numbers that map here via DESK_ORDER are 2–5.
+export const REMOVED_BANK_DESKS = Object.freeze([3, 5, 7, 9]);
 const SPOT_RE = /^(desk|screen|lounge)_(\d{2})$/;
 const LAMP_RE = /^lamp_(\d{2})$/;
 const NAMES = ['floor_open', 'floor_closed', 'roof', 'elevator_shaft', 'elevator_cabin'];
+const REMOVED_BANK_SET = new Set(REMOVED_BANK_DESKS);
 
 export async function loadOfficeAssets(baseUrl) {
   let glb = null;
@@ -73,7 +77,108 @@ function finish(templates, spots, nightMaps, source) {
   } catch (err) {
     console.warn('[office] manager desk skipped:', err.message);
   }
+  try {
+    clearRemovedWorkstations(templates.floor_open, spots);
+  } catch (err) {
+    console.warn('[office] removed workstations skipped:', err.message);
+  }
   return { templates, spots, nightMaps, source, style };
+}
+
+// SWA-3221: drop stool/laptop/mug props + desk/screen empties at the four marked window-side seats.
+// Spots are nulled so drag-drop and sync skip them; agents on those logical desks are relocated in wallpaper-feed.
+// Window and aisle laptops on table_1 share an x column and sit only ~0.35 m apart in z, so laptop
+// bodies are cut by the table mid-plane (z < -2.7) per removed column — not a large sphere radius.
+function clearRemovedWorkstations(open, spots) {
+  if (!open || !spots) return;
+  const seatCenters = [];
+  const laptopColumns = []; // { x, zMax } — strip laptop tris with |Δx|<halfSpan and z < zMax
+  const TABLE1_MID_Z = -2.7; // midway between window screens (~-2.87) and aisle screens (~-2.53)
+  for (const n of REMOVED_BANK_DESKS) {
+    const id = String(n).padStart(2, '0');
+    const desk = open.getObjectByName(`desk_${id}`);
+    const pair = Math.floor((n - 1) / 2);
+    const fallbackX = [-5.7, -4.0, -2.3, -0.6, 1.1][pair] ?? -2.3;
+    const x = desk ? desk.position.x : fallbackX;
+    seatCenters.push(desk ? desk.position.clone() : new THREE.Vector3(x, SEAT_Y, -3.9));
+    laptopColumns.push({ x, zMax: TABLE1_MID_Z });
+    if (desk?.parent) desk.parent.remove(desk);
+    for (const prefix of ['screen_', 'laptop_screen_']) {
+      const o = open.getObjectByName(prefix + id);
+      if (o?.parent) o.parent.remove(o);
+    }
+    spots.desks[n - 1] = undefined;
+    spots.screens[n - 1] = undefined;
+  }
+
+  const poufs = open.getObjectByName('poufs');
+  if (poufs) stripMeshesNear(poufs, seatCenters, 0.55);
+  const laptops = open.getObjectByName('laptops');
+  if (laptops) stripMeshesInColumns(laptops, laptopColumns, 0.55);
+  const mugs = open.getObjectByName('mugs');
+  if (mugs) stripMeshesNear(mugs, seatCenters, 0.45);
+}
+
+function stripMeshesNear(root, centers, radius) {
+  stripMeshTris(root, (x, y, z) => {
+    const r2 = radius * radius;
+    for (const c of centers) {
+      const dx = x - c.x, dz = z - c.z;
+      if (dx * dx + dz * dz <= r2 && Math.abs(y - c.y) < 1.4) return true;
+    }
+    return false;
+  });
+}
+
+function stripMeshesInColumns(root, columns, halfSpan) {
+  stripMeshTris(root, (x, y, z) => {
+    if (y < 0.5 || y > 1.2) return false; // laptop band on the table top
+    for (const col of columns) {
+      if (Math.abs(x - col.x) <= halfSpan && z < col.zMax) return true;
+    }
+    return false;
+  });
+}
+
+function stripMeshTris(root, dropCentroid) {
+  root.traverse((o) => {
+    if (!o.isMesh || !o.geometry?.attributes?.position) return;
+    const geo = o.geometry;
+    const pos = geo.attributes.position;
+    const idx = geo.index;
+    const keep = [];
+    const triDrop = (a, b, c) => {
+      const cx = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3;
+      const cy = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3;
+      const cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
+      return dropCentroid(cx, cy, cz);
+    };
+    if (idx) {
+      for (let i = 0; i < idx.count; i += 3) {
+        const a = idx.getX(i), b = idx.getX(i + 1), c = idx.getX(i + 2);
+        if (!triDrop(a, b, c)) keep.push(a, b, c);
+      }
+      geo.setIndex(keep);
+    } else {
+      for (let i = 0; i < pos.count; i += 3) {
+        if (!triDrop(i, i + 1, i + 2)) keep.push(i, i + 1, i + 2);
+      }
+      if (keep.length !== pos.count) {
+        const next = new Float32Array(keep.length * 3);
+        for (let i = 0; i < keep.length; i++) {
+          const v = keep[i];
+          next[i * 3] = pos.getX(v);
+          next[i * 3 + 1] = pos.getY(v);
+          next[i * 3 + 2] = pos.getZ(v);
+        }
+        geo.setAttribute('position', new THREE.BufferAttribute(next, 3));
+        geo.deleteAttribute('normal');
+        geo.deleteAttribute('uv');
+      }
+    }
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+  });
 }
 
 // SWA-3195 / SWA-3212: frosted dept divider matches Hurly’s red up-right slash (~image slope -0.57).
@@ -351,8 +456,10 @@ function buildPlaceholder() {
       const n = t * 10 + i + 1;
       const pair = Math.floor(i / 2), far = i % 2 === 0;
       const x = PAIR_X[pair], sz = far ? -1 : 1;
-      addCyl(open, M.fabric, 0.26, 0.29, SEAT_Y, x, SEAT_Y / 2, z0 + sz * 1.05);
+      // Keep desk empties so collectSpots still sees 20 seats; SWA-3221 strips props in clearRemovedWorkstations.
       empty(open, `desk_${String(n).padStart(2, '0')}`, x, SEAT_Y, z0 + sz * 1.05, far ? 0 : Math.PI);
+      if (REMOVED_BANK_SET.has(n)) continue;
+      addCyl(open, M.fabric, 0.26, 0.29, SEAT_Y, x, SEAT_Y / 2, z0 + sz * 1.05);
       // laptop on the table, screen facing the seat
       const g = new THREE.Group();
       g.position.set(x, 0.75, z0 + sz * 0.3);
