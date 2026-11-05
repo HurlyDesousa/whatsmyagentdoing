@@ -76,8 +76,10 @@ function finish(templates, spots, nightMaps, source) {
   return { templates, spots, nightMaps, source, style };
 }
 
-// SWA-3195: frosted dept divider follows Hurly’s red diagonal through the desk banks
-// (lounge/walkway → glass), not a shallow parallel aisle split. Ends stay open for walking.
+// SWA-3195: frosted dept divider matches Hurly’s red up-right slash (~image slope -0.57).
+// Tower camera looks along (1,1,1); that screen slash is a front→back (−z) cut through both
+// GLB banks (desk_12 @ z=2.7 → desk_01 @ z=-3.9), not an xz aisle diagonal. Place the cut
+// between stool columns so panels clear seats (~0.85 m). Ends stay open for walking.
 function addDeptDivider(open) {
   if (!open || open.getObjectByName('dept_divider')) return;
   const g = new THREE.Group();
@@ -93,17 +95,18 @@ function addDeptDivider(open) {
     depthWrite: false,
   });
   const frame = new THREE.MeshStandardMaterial({ name: 'dept_divider_frame', color: 0x1C1C1E, roughness: 0.45, metalness: 0.3 });
-  // Steeper cut through both communal banks (table_1 @ z=-3.4, table_2 @ z=0.8).
-  const x0 = -5.55, z0 = 1.35;   // lounge / walkway (bottom-left of markup)
-  const x1 = 1.45, z1 = -3.55;  // through desks toward glass (top-right of markup)
+  // GLB tables at z=-2.700 / 1.500; stool columns at x=-5.7,-4.0,-2.3,-0.6,1.1.
+  // Mid-gap x=-3.15 (between -4.0 and -2.3); short of front/back stools for walk gaps.
+  const x0 = -3.15, z0 = 2.20;   // front of bank B (toward desk_12 / lounge)
+  const x1 = -3.15, z1 = -3.50;  // back of bank A (toward desk_01 / glass)
   const dx = x1 - x0, dz = z1 - z0;
   const span = Math.hypot(dx, dz);
-  const yaw = Math.atan2(-dz, dx); // local +X follows the diagonal
+  const yaw = Math.atan2(-dz, dx); // local +X follows the cut (here −z → yaw = π/2)
   const y = 0.72;                 // low / partial (~desk-monitor height)
   const h = 1.28;
   const thick = 0.04;
   // Three frosted panels along the cut; gaps (~0.55m) at both ends leave walk paths clear.
-  const panelW = 2.15;
+  const panelW = 1.55;
   const usable = span - 1.1;
   const step = usable / 3;
   const first = 0.55 + step / 2;
@@ -126,7 +129,7 @@ function addDeptDivider(open) {
     }
     g.add(panel);
   }
-  // oak kick ledge under the panels, same diagonal
+  // oak kick ledge under the panels, same cut
   const oak = new THREE.MeshStandardMaterial({ name: 'dept_divider_oak', color: 0xC9A57C, roughness: 0.6 });
   const ledgeLen = usable + 0.15;
   const ledge = new THREE.Mesh(new THREE.BoxGeometry(ledgeLen, 0.05, 0.12), oak);

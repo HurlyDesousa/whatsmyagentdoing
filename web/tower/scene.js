@@ -507,6 +507,7 @@ function onUp(e) {
 function nearestDeskLogical() {
   if (!assets || !assets.spots || !assets.spots.desks) return null;
   raycaster.setFromCamera(pointer, camera);
+  if (building) groundPlane.constant = -building.activeY;
   if (!raycaster.ray.intersectPlane(groundPlane, tmp)) return null;
   const gx = tmp.x, gz = tmp.z;
   let best = null, bestD = Infinity;
