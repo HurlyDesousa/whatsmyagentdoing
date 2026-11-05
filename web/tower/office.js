@@ -70,8 +70,9 @@ function finish(templates, spots, nightMaps, source) {
   return { templates, spots, nightMaps, source, style };
 }
 
-// SWA-3157: low frosted divider between the two communal desk banks (table_1 @ z=-2.7, table_2 @ z=1.5).
-// Keeps the aisle ends open so blobs can still reach the elevator, bar, and meeting corner.
+// SWA-3171: diagonal frosted divider on Main Floor (open storey) between the two desk banks.
+// Hurly sketch: bottom-left near lounge/walkway → top-right toward the glass, through the aisle.
+// Ends stay short so walk paths remain open; panels stay in the aisle (no desk/chair hits).
 function addDeptDivider(open) {
   if (!open || open.getObjectByName('dept_divider')) return;
   const g = new THREE.Group();
@@ -87,37 +88,45 @@ function addDeptDivider(open) {
     depthWrite: false,
   });
   const frame = new THREE.MeshStandardMaterial({ name: 'dept_divider_frame', color: 0x1C1C1E, roughness: 0.45, metalness: 0.3 });
-  const z = -0.6;           // mid-aisle between the near seats of table_1 (z=-1.5) and far seats of table_2 (z=0.3)
-  const y = 0.72;           // low / partial (~desk-monitor height), not a full opaque box wall
+  // Aisle between table_1 near seats (z≈-1.5) and table_2 far seats (z≈0.3).
+  const x0 = -5.35, z0 = 0.22;   // lounge / walkway end (bottom-left of sketch)
+  const x1 = 1.05, z1 = -1.38;  // glass / top-right between desk clusters
+  const dx = x1 - x0, dz = z1 - z0;
+  const span = Math.hypot(dx, dz);
+  const yaw = Math.atan2(-dz, dx); // local +X follows the diagonal
+  const y = 0.72;                 // low / partial (~desk-monitor height)
   const h = 1.28;
   const thick = 0.04;
-  // Three frosted panels spanning the desk rows; gaps at both ends leave walk paths clear.
-  const panels = [
-    { x: -4.55, w: 2.2 },
-    { x: -2.15, w: 2.2 },
-    { x: 0.25, w: 2.2 },
-  ];
-  for (const p of panels) {
-    const glass = new THREE.Mesh(new THREE.BoxGeometry(p.w, h, thick), frost);
-    glass.position.set(p.x, y, z);
-    g.add(glass);
-    // slim black frame like wall_screen / task_board surrounds
-    const hw = p.w / 2, hh = h / 2;
+  // Three frosted panels along the cut; gaps (~0.55m) at both ends leave walk paths clear.
+  const panelW = 1.85;
+  const usable = span - 1.1;
+  const step = usable / 3;
+  const first = 0.55 + step / 2;
+  for (let i = 0; i < 3; i++) {
+    const t = (first + i * step) / span;
+    const panel = new THREE.Group();
+    panel.position.set(x0 + dx * t, y, z0 + dz * t);
+    panel.rotation.y = yaw;
+    panel.add(new THREE.Mesh(new THREE.BoxGeometry(panelW, h, thick), frost));
+    const hw = panelW / 2, hh = h / 2;
     for (const [fw, fh, fx, fy] of [
-      [p.w + 0.04, 0.035, 0, hh + 0.01],
-      [p.w + 0.04, 0.035, 0, -hh - 0.01],
+      [panelW + 0.04, 0.035, 0, hh + 0.01],
+      [panelW + 0.04, 0.035, 0, -hh - 0.01],
       [0.035, h + 0.04, -hw - 0.01, 0],
       [0.035, h + 0.04, hw + 0.01, 0],
     ]) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, thick + 0.02), frame);
-      m.position.set(p.x + fx, y + fy, z);
-      g.add(m);
+      m.position.set(fx, fy, 0);
+      panel.add(m);
     }
+    g.add(panel);
   }
-  // short oak kick / whiteboard ledge under the panels (matches oak tables)
+  // oak kick ledge under the panels, same diagonal
   const oak = new THREE.MeshStandardMaterial({ name: 'dept_divider_oak', color: 0xC9A57C, roughness: 0.6 });
-  const ledge = new THREE.Mesh(new THREE.BoxGeometry(7.1, 0.05, 0.12), oak);
-  ledge.position.set(-2.15, 0.06, z);
+  const ledgeLen = usable + 0.15;
+  const ledge = new THREE.Mesh(new THREE.BoxGeometry(ledgeLen, 0.05, 0.12), oak);
+  ledge.position.set((x0 + x1) / 2, 0.06, (z0 + z1) / 2);
+  ledge.rotation.y = yaw;
   g.add(ledge);
   open.add(g);
 }

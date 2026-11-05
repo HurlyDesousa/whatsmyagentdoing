@@ -842,15 +842,11 @@
   };
   const FLOOR_RANK = { ops: 0, infra: 1, watch: 2, 'main-floor': 3 };
   const COUNT_KEYS = ['working', 'idle', 'waiting_user', 'error', 'stuck', 'done'];
-  // SWA-3157: both departments share Main Floor — Dept A on table_1 (desks 1–10), Dept B on table_2 (11–20).
+  // SWA-3171: floors come from wallpaper group again (Ops/Infra/Watch + Main floor).
+  // Dept A vs B desk banks apply only when a bot lands on Main floor.
   const DEPT_A = [
     'dispatcher', 'code master 1', 'code master 2', 'qa engineer', 'qa engineer 2',
   ];
-  const MAIN_FLOOR_CREW = new Set([
-    ...DEPT_A,
-    'chief', 'chief master', 'monitor master', 'proxmox master', 'dockhand master',
-    'truenas master', 'doc master', 'claude', 'gpu agent', 'amazon master', 'accountant',
-  ]);
 
   function zeroCounts() {
     return { working: 0, idle: 0, waiting_user: 0, error: 0, stuck: 0, done: 0 };
@@ -872,18 +868,10 @@
     return DEPT_A.some((k) => n === k || n.startsWith(k + ' '));
   }
 
-  function isMainFloorCrew(name) {
-    const n = normBot(name);
-    return MAIN_FLOOR_CREW.has(n) || DEPT_A.some((k) => n === k || n.startsWith(k + ' '));
-  }
-
   function towerFloorName(session) {
-    const label = (session && (session.project || session.title)) || '';
-    // Named Hurly crew sit together on Main Floor so the dept divider splits them.
-    if (isMainFloorCrew(label)) return 'Main floor';
     const g = session && session.wallpaper && session.wallpaper.group;
     if (g) return clip(g, 60);
-    const row = rememberedFor(label);
+    const row = rememberedFor((session && (session.project || session.title)) || '');
     if (row && row.group) return row.group;
     return 'Main floor';
   }

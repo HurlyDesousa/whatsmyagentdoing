@@ -62,28 +62,25 @@ test('4D seats from Paperclip status and dresses blobs from the feed look', () =
   assert.equal(chiefBot.look.shape, 'triangle');
   assert.equal(chiefBot.look.color, '#8F59F9');
   assert.equal(chiefBot.has_glb, false);
-  // SWA-3157: Hurly crew share Main Floor; Dept A (QA) on bank A, Dept B (Chief/Doc/Proxmox) on bank B.
-  assert.equal(chiefBot.floor, 'main-floor');
-  assert.ok(chiefBot.desk >= 11 && chiefBot.desk <= 20, 'Dept B desk on bank B');
+  // SWA-3171: floors follow wallpaper group again; Dept A seating only on Main floor.
+  assert.equal(chiefBot.floor, 'ops');
   const doc = tower.bots[WF.botId('Doc Master')];
   assert.equal(doc.effective_status, 'idle');
   assert.equal(doc.look.shape, 'drop');
   assert.equal(doc.look.color, '#EB2B3E');
-  assert.equal(doc.floor, 'main-floor');
-  assert.ok(doc.desk >= 11 && doc.desk <= 20, 'Dept B desk on bank B');
+  assert.equal(doc.floor, 'ops');
   const prox = tower.bots[WF.botId('Proxmox Master')];
   assert.equal(prox.effective_status, 'working');
   assert.equal(prox.step, 'cluster check');
   assert.equal(prox.look.shape, 'cloud');
-  assert.equal(prox.floor, 'main-floor');
-  assert.ok(prox.desk >= 11 && prox.desk <= 20, 'Dept B desk on bank B');
+  assert.equal(prox.floor, 'infra');
   const qa = tower.bots[WF.botId('QA Engineer')];
   assert.equal(qa.effective_status, 'working');
   assert.equal(qa.step, 'Bash: npm test');
   assert.equal(qa.floor, 'main-floor');
   assert.ok(qa.desk >= 1 && qa.desk <= 10, 'Dept A desk on bank A');
   assert.equal(qa.look, null);
-  assert.equal(JSON.stringify(tower.floors.map((f) => f.id)), JSON.stringify(['main-floor']));
+  assert.equal(JSON.stringify(tower.floors.map((f) => f.id)), JSON.stringify(['ops', 'infra', 'main-floor']));
   assert.equal(JSON.stringify(tower).includes('gbw-'), false);
 });
 
@@ -99,9 +96,27 @@ test('an empty roster still has a tower floor, and remembered looks apply with n
   const bot = quiet.bots[WF.botId('Chief Master')];
   assert.equal(bot.look.shape, 'triangle');
   assert.equal(bot.look.color, '#8F59F9');
-  assert.equal(bot.floor, 'main-floor');
-  assert.ok(bot.desk >= 11 && bot.desk <= 20, 'Dept B desk on bank B');
+  assert.equal(bot.floor, 'ops');
   assert.equal(bot.effective_status, 'idle');
+});
+
+test('Main floor keeps Dept A vs B banks when mixed crew lands there', () => {
+  const tower = WF.towerState([
+    { key: 'paperclip:disp', id: 'disp', project: 'Dispatcher', status: 'thinking', activity: 'routing' },
+    { key: 'paperclip:cm1', id: 'cm1', project: 'Code Master 1', status: 'tool', activity: 'edit' },
+    { key: 'paperclip:qa', id: 'qa', project: 'QA Engineer', status: 'idle', activity: null },
+    { key: 'paperclip:gpu', id: 'gpu', project: 'GPU Agent', status: 'idle', activity: null },
+    { key: 'paperclip:amazon', id: 'amazon', project: 'Amazon Master', status: 'idle', activity: null },
+  ]);
+  assert.equal(JSON.stringify(tower.floors.map((f) => f.id)), JSON.stringify(['main-floor']));
+  for (const name of ['Dispatcher', 'Code Master 1', 'QA Engineer']) {
+    const bot = tower.bots[WF.botId(name)];
+    assert.ok(bot.desk >= 1 && bot.desk <= 10, `${name} on bank A`);
+  }
+  for (const name of ['GPU Agent', 'Amazon Master']) {
+    const bot = tower.bots[WF.botId(name)];
+    assert.ok(bot.desk >= 11 && bot.desk <= 20, `${name} on bank B`);
+  }
 });
 
 test('4D mode mounts the tower and 2D / 3D still come up', { timeout: 90000 }, async () => {
