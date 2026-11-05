@@ -1165,7 +1165,7 @@ function renderTopbar(state) {
     const level = pct >= 95 ? 'error' : pct >= 85 ? 'warn' : null;
     setText(t.usageLabel, USAGE_TITLE[u.period] || 'Limit');
     setVar(t.meter, '--p', (pct / 100).toFixed(3));
-    setText(t.pct, Math.round(pct) + '%');
+    setText(t.pct, (Math.round(pct * 10) / 10).toFixed(1) + '%');
     setAttr(t.meter, 'aria-valuenow', Math.round(pct));
     setAttr(t.meter, 'data-level', level);
     setAttr(t.usage, 'data-level', level);
