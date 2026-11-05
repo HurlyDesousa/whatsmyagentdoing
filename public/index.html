@@ -302,7 +302,8 @@
   .tline.live { color: #d7d6e2; }
   .tline.live b { color: #d2c4ff; font-weight: 700; }
   .trow.has-live .sw { grid-row: span 3; }
-  .chatlink { display: inline-block; margin-top: 8px; color: var(--ink); font-weight: 700; font-size: 12.5px; }
+  .chatlink, .startlink { display: inline-block; margin-top: 8px; margin-right: 12px; color: var(--ink); font-weight: 700; font-size: 12.5px; background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+  .startlink { color: var(--typing); }
   details.usage { position: relative; }
   details.usage > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: baseline; gap: 7px; }
   details.usage > summary::-webkit-details-marker { display: none; }
@@ -1629,17 +1630,25 @@ function liveBlock(s, now) {
   const disagree = w.effective && family !== w.effective;
   const seen = w.seenMs ? (now - w.seenMs < 15000 ? 'just now' : ago(w.seenMs, now)) : 'no status yet';
   // Paperclip map wins; never emit grokbot:// (OS "Open Grok Bot?" dialog).
+  const name = s.project || s.title || w.name || '';
   const chatUrl = (typeof WallpaperFeed !== 'undefined' && WallpaperFeed.resolveChatUrl)
-    ? WallpaperFeed.resolveChatUrl(s.project || s.title || w.name || '', w.chat || '')
+    ? WallpaperFeed.resolveChatUrl(name, w.chat || '')
     : (/^https:\/\//i.test(w.chat || '') ? w.chat : '');
   const chat = chatUrl
     ? `<a class="chatlink" href="${esc(chatUrl)}">Open chat</a>`
+    : '';
+  const pc = (typeof WallpaperFeed !== 'undefined' && WallpaperFeed.paperclipAgentId)
+    ? WallpaperFeed.paperclipAgentId(name, s.pc)
+    : (s.pc || '');
+  const needsStart = (s.status === 'waiting' || w.effective === 'waiting_user') && pc;
+  const start = needsStart
+    ? `<button type="button" class="startlink" data-pc-start="${esc(pc)}">Start</button>`
     : '';
   const usage = Number.isFinite(w.usagePct) ? `<div class="txt">usage ${esc(w.usagePct)} as posted</div>` : '';
   return `<div class="lab">Live feed</div>
     <div class="task">${esc(feedWord(w.effective))}${w.step ? ' — ' + esc(w.step) : ''}</div>
     <div class="txt">${esc([w.group, 'seen ' + seen].filter(Boolean).join(' · '))}</div>
-    ${usage}${chat}
+    ${usage}${start}${chat}
     ${disagree ? `<div class="note">Paperclip keeps this desk (${esc(s.status)}). The feed says ${esc(feedWord(w.effective))}.</div>` : ''}`;
 }
 function renderRoutines() {
@@ -1655,6 +1664,26 @@ function renderRoutines() {
   }).join('');
 }
 document.getElementById('side').addEventListener('click', (e) => {
+  const startBtn = e.target.closest('[data-pc-start]');
+  if (startBtn) {
+    e.preventDefault();
+    const agentId = startBtn.getAttribute('data-pc-start');
+    if (!agentId) return;
+    startBtn.disabled = true;
+    startBtn.textContent = 'Starting…';
+    fetch('/api/paperclip/resume', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentId }),
+    }).then((r) => r.json().catch(() => ({}))).then((body) => {
+      if (!body || !body.ok) console.warn('[office] Start failed', body && body.error);
+    }).catch((err) => console.warn('[office] Start error', err)).finally(() => {
+      startBtn.disabled = false;
+      startBtn.textContent = 'Start';
+    });
+    return;
+  }
   if (e.target.closest('[data-clearf]')) { state.filter = null; render(); return; }
   if (e.target.closest('[data-unsel]')) { state.sel = null; state.userCleared = true; if (office) office.focusKey = null; render(); return; }
   const row = e.target.closest('[data-sel]');

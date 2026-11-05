@@ -55,6 +55,27 @@
     'smoke scout': 'smoke-scout',
     'cursor cloud': 'cursor-cloud',
   };
+  // urlKey → Paperclip agent UUID (for Start / resume).
+  const PAPERCLIP_AGENT_IDS = {
+    chief: '2842a7bf-9527-42c1-aa86-ba5b599c8878',
+    'monitor-master': '4f2ddf7b-26ee-4beb-8424-beddd98a0247',
+    'dockhand-master': 'e679f570-38bb-4de0-b754-89425d98d398',
+    'truenas-master': '9082e6f0-9eae-472e-b0ef-81a423e4cfff',
+    'code-master-2': 'eb8ecca2-c2cd-4fc9-ac22-0c63b25d2e4b',
+    'code-master-1': 'a08c0cb1-355a-4cd6-ade3-91fe773d05ea',
+    'qa-engineer': '47312222-173f-478e-bdb3-c36938e012dd',
+    'qa-engineer-2': '9017add5-a1b7-4505-92dd-95cf86a96782',
+    dispatcher: '00862553-fcd5-476d-a5d8-e8102c846c16',
+    'gpu-agent': 'bca31b4a-add1-4299-8865-c04100478d18',
+    'amazon-master': '644aa5aa-f4a7-4114-ad84-d0277307b9e8',
+    accountant: '2fdb3770-fda5-4675-bfbd-6aef0f950f9d',
+    claude: 'abd3ef5c-f872-4a0f-a626-ab48518b3242',
+    grok: '2b483eac-3320-4c85-9f05-c88db157c63c',
+    'smoke-scout': '9948dfec-b8f5-4e98-8cdb-7404c83821d1',
+    'cursor-cloud': '1103a0e7-abc7-42fd-a5c9-66cfb37ce344',
+  };
+  const SEAT_STORE_KEY = 'wmad.seatAssign';
+  const PER_FLOOR = 20;
 
   // Wallpaper picker shapes -> the office blobs that already exist
   // (web/grokblobs.js / public/office.js). Triangle in the wallpaper is the
@@ -146,6 +167,85 @@
       const parsed = new URL(u);
       return parsed.origin === PAPERCLIP_ORIGIN && /\/chats\//i.test(parsed.pathname);
     } catch (_) { return false; }
+  }
+
+  function paperclipAgentId(name, sessionPc) {
+    const fromSession = String(sessionPc || '').trim();
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fromSession)) {
+      return fromSession.toLowerCase();
+    }
+    const key = paperclipUrlKey(name);
+    if (!key || !Object.prototype.hasOwnProperty.call(PAPERCLIP_AGENT_IDS, key)) return null;
+    return PAPERCLIP_AGENT_IDS[key];
+  }
+
+  function loadSeatAssign() {
+    try {
+      const raw = globalThis.localStorage && localStorage.getItem(SEAT_STORE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      const out = {};
+      for (const [id, desk] of Object.entries(parsed)) {
+        const n = Number(desk);
+        if (!id || !Number.isInteger(n) || n < 1 || n > PER_FLOOR) continue;
+        out[String(id).slice(0, 64)] = n;
+      }
+      return out;
+    } catch (_) { return {}; }
+  }
+
+  function saveSeatAssign(map) {
+    try {
+      if (!globalThis.localStorage) return;
+      localStorage.setItem(SEAT_STORE_KEY, JSON.stringify(map || {}));
+    } catch (_) { /* private mode */ }
+  }
+
+  function assignSeat(botId, desk) {
+    const id = String(botId || '').slice(0, 64);
+    const n = Number(desk);
+    if (!id || !Number.isInteger(n) || n < 1 || n > PER_FLOOR) return null;
+    const map = loadSeatAssign();
+    const prev = map[id];
+    let displaced = null;
+    for (const [other, d] of Object.entries(map)) {
+      if (other !== id && d === n) { displaced = other; break; }
+    }
+    if (displaced) {
+      if (prev) map[displaced] = prev;
+      else delete map[displaced];
+    }
+    map[id] = n;
+    saveSeatAssign(map);
+    return n;
+  }
+
+  function applySeatOverrides(bots, floorIds) {
+    const map = loadSeatAssign();
+    if (!Object.keys(map).length) return;
+    const onFloor = new Set(floorIds || []);
+    const taken = new Map();
+    for (const id of onFloor) {
+      const b = bots[id];
+      if (!b) continue;
+      taken.set(b.desk, id);
+    }
+    for (const id of onFloor) {
+      const want = map[id];
+      if (!want || !bots[id]) continue;
+      const cur = bots[id].desk;
+      if (cur === want) continue;
+      const other = taken.get(want);
+      if (other && other !== id) {
+        bots[other].desk = cur;
+        taken.set(cur, other);
+      } else {
+        taken.delete(cur);
+      }
+      bots[id].desk = want;
+      taken.set(want, id);
+    }
   }
 
   function feedBase(raw) {
@@ -739,7 +839,6 @@
     interrupted: 'idle', idle: 'idle',
   };
   const FLOOR_RANK = { ops: 0, infra: 1, watch: 2, 'main-floor': 3 };
-  const PER_FLOOR = 20;
   const COUNT_KEYS = ['working', 'idle', 'waiting_user', 'error', 'stuck', 'done'];
 
   function zeroCounts() {
@@ -794,7 +893,8 @@
       const posted = s.wallpaper && Number.isFinite(Number(s.wallpaper.usagePct)) ? Number(s.wallpaper.usagePct) : null;
       const seenRaw = s.wallpaper && Number(s.wallpaper.seenMs);
       const seenMs = Number.isFinite(seenRaw) && seenRaw > 0 ? seenRaw : null;
-      rows.push({ id, name, floorName: towerFloorName(s), look, status, step, chat, usagePct: posted, seenMs });
+      const pc = paperclipAgentId(name, s.pc || s.paperclipAgentId);
+      rows.push({ id, name, floorName: towerFloorName(s), look, status, step, chat, pc, usagePct: posted, seenMs });
     }
     rows.sort((a, b) => a.floorName.localeCompare(b.floorName) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 
@@ -842,6 +942,7 @@
         usage_pct: Number.isFinite(row.usagePct) ? row.usagePct : null,
         usage_share: shareOf(row.usagePct, usageTotal),
         chat_url: row.chat || null,
+        paperclip_agent_id: row.pc || null,
         color: look ? look.color : hashHex(row.id),
         look,
         avatar: row.id,
@@ -852,6 +953,7 @@
         history: row.step ? [{ t: nowIso, status, step: row.step }] : [],
       };
     }
+    for (const floor of floors.values()) applySeatOverrides(bots, floor.ids);
 
     let floorList = [...floors.values()];
     floorList.sort((a, b) => (FLOOR_RANK[a.id] ?? 50) - (FLOOR_RANK[b.id] ?? 50) || a.name.localeCompare(b.name));
@@ -911,11 +1013,13 @@
   root.WallpaperFeed = {
     RELAY, NTFY, STORE_KEY, REMEMBERED,
     DEFAULT_FEED_TOPIC, DEFAULT_QUALITY, QUALITIES,
-    PAPERCLIP_ORIGIN, PAPERCLIP_PREFIX, PAPERCLIP_CHAT_KEYS,
+    PAPERCLIP_ORIGIN, PAPERCLIP_PREFIX, PAPERCLIP_CHAT_KEYS, PAPERCLIP_AGENT_IDS,
+    SEAT_STORE_KEY, PER_FLOOR,
     parseFeedLink, parseFeedInput, defaultFeedLink, resolveFeedTarget,
     mapLook, reduceFeed, mergeSessions, officeStatus,
     resolveQuality, towerState,
-    paperclipUrlKey, paperclipChatUrl, resolveChatUrl, isPaperclipChatUrl,
+    paperclipUrlKey, paperclipChatUrl, paperclipAgentId, resolveChatUrl, isPaperclipChatUrl,
+    loadSeatAssign, saveSeatAssign, assignSeat, applySeatOverrides,
     connectFeed, hashTag, rememberedFor, botId,
     configPinKey, pinsFromLines, mergePinned,
     get pageLink() { return pageLink; },

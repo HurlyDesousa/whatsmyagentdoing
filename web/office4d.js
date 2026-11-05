@@ -1,7 +1,7 @@
 // 4D is the wallpaper dashboard: the tower fills the viewport and the glass panels
 // (floors, team, activity, usage) sit on top of it. The feed topic never comes through here.
 import { initScene, renderScene, destroyScene, setSceneVisible, sceneCanvas, focusBot, captureScene, zoom, setTowerTheme } from './tower/scene.js';
-import { initUI, renderUI, destroyUI } from './tower-ui/ui.js';
+import { initUI, renderUI, destroyUI, setStartBusy } from './tower-ui/ui.js';
 import { initSound, destroySound, sfx } from './tower-ui/sound.js';
 
 const LIGHT_TIME = { day: '13:00', evening: '18:50', night: '23:00' };
@@ -85,12 +85,14 @@ export class Office4D {
       },
       onSelectBot: (id) => this.selectBot(id),
       onHoverBot: (id) => sfx.hover(id),
+      onAssignSeat: (id, desk) => this.assignSeat(id, desk),
     });
     initUI({
       onSelectBot: (id) => this.selectBot(id),
       onSelectFloor: (id) => this.setTowerFloor(id),
       onZoom: (dir) => { zoom(dir); sfx.zoom(dir); },
       onOpenChat: (_id, url) => openWallpaperChat(url),
+      onStartAgent: (_id, agentId) => startPaperclipAgent(agentId),
       onShare: () => {
         const shot = this.captureShare();
         if (!shot) return;
@@ -116,6 +118,14 @@ export class Office4D {
     if (next !== this.pickedId) sfx.select(!!next);
     this.pickedId = next;
     this._followPick = !!next;
+    this.update(this.sessions);
+  }
+
+  assignSeat(botId, desk) {
+    const feed = globalThis.WallpaperFeed;
+    if (!feed || typeof feed.assignSeat !== 'function') return;
+    if (!feed.assignSeat(botId, desk)) return;
+    sfx.select(true);
     this.update(this.sessions);
   }
 
@@ -239,6 +249,27 @@ function followHttps(url) {
   document.body.append(a);
   a.click();
   a.remove();
+}
+
+async function startPaperclipAgent(agentId) {
+  if (!agentId) return;
+  setStartBusy(true);
+  try {
+    const r = await fetch('/api/paperclip/resume', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentId }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok || !body.ok) {
+      console.warn('[office] Start failed:', (body && body.error) || `HTTP ${r.status}`);
+    }
+  } catch (e) {
+    console.warn('[office] Start error:', e);
+  } finally {
+    setStartBusy(false);
+  }
 }
 
 let paperclipPanel = null;

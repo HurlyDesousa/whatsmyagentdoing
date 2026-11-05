@@ -326,3 +326,46 @@ test('office default feed topic is baked in; hash and Settings still override', 
   const page = WF.parseFeedLink('#hash-TOPIC-OVERRIDE-00002', '');
   assert.equal(WF.resolveFeedTarget({ pageLink: page, saved: 'other-TOPIC-OVERRIDE-001' }).topic, 'hash-TOPIC-OVERRIDE-00002');
 });
+
+test('paperclipAgentId maps names and session pc; seats persist via assignSeat', () => {
+  assert.equal(WF.paperclipAgentId('Grok'), '2b483eac-3320-4c85-9f05-c88db157c63c');
+  assert.equal(WF.paperclipAgentId('Chief Master'), '2842a7bf-9527-42c1-aa86-ba5b599c8878');
+  assert.equal(WF.paperclipAgentId('Doc Master'), null);
+  assert.equal(
+    WF.paperclipAgentId('Someone', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'),
+    'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+  );
+  const mem = new Map();
+  const sandbox = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, v),
+      removeItem: (k) => mem.delete(k),
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  const feedSrc = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'public/wallpaper-feed.js'), 'utf8');
+  require('node:vm').runInNewContext(feedSrc, sandbox, { filename: 'wallpaper-feed.js' });
+  const W = sandbox.WallpaperFeed;
+  const a = W.botId('Chief Master');
+  const b = W.botId('Monitor Master');
+  assert.equal(W.assignSeat(a, 5), 5);
+  assert.equal(W.assignSeat(b, 7), 7);
+  assert.equal(W.assignSeat(a, 7), 7); // Chief takes Monitor's desk; Monitor keeps prior seat 5 via swap
+  const seats = W.loadSeatAssign();
+  assert.equal(seats[a], 7);
+  assert.equal(seats[b], 5);
+  const tower = W.towerState([
+    { key: 'paperclip:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x', pc: '2842a7bf-9527-42c1-aa86-ba5b599c8878' },
+    { key: 'paperclip:mon', id: 'mon', agent: 'grokbot', project: 'Monitor Master', status: 'waiting', activity: 'needs you' },
+  ], {});
+  assert.equal(tower.bots[a].desk, 7);
+  assert.equal(tower.bots[b].desk, 5);
+  assert.equal(tower.bots[a].paperclip_agent_id, '2842a7bf-9527-42c1-aa86-ba5b599c8878');
+  assert.equal(tower.bots[b].paperclip_agent_id, '4f2ddf7b-26ee-4beb-8424-beddd98a0247');
+});
