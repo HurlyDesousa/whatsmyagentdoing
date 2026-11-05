@@ -45,6 +45,7 @@ const CREW = [
   // Paperclip agents
   { key: 'cm2', role: 'Code', name: 'Code Master 2', agent: 'paperclip', pc: 'eb8ecca2-c2cd-4fc9-ac22-0c63b25d2e4b', status: 'running', task: 'Charting batch SWA-2971', activity: 'Bash: npm run build' },
   { key: 'qa', role: 'QA', name: 'QA Engineer', agent: 'paperclip', pc: '47312222-173f-478e-bdb3-c36938e012dd', status: 'idle', task: 'QA' },
+  { key: 'qa2', role: 'QA', name: 'QA Engineer 2', agent: 'paperclip', pc: '9017add5-a1b7-4505-92dd-95cf86a96782', status: 'idle', task: 'QA' },
   { key: 'claude', role: 'Code · Claude', name: 'Claude', agent: 'paperclip', pc: 'abd3ef5c-f872-4a0f-a626-ab48518b3242', status: 'paused', task: 'Paused — needs Hurly', activity: 'Paused · needs you' },
   { key: 'dispatcher', role: 'Dispatch', name: 'Dispatcher', agent: 'paperclip', pc: '00862553-fcd5-476d-a5d8-e8102c846c16', status: 'idle', task: 'Queue: SWA-2978 follow-up' },
   { key: 'cm1', role: 'Code', name: 'Code Master 1', agent: 'paperclip', pc: 'a08c0cb1-355a-4cd6-ade3-91fe773d05ea', status: 'idle', task: 'Coding' },

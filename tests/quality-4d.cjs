@@ -62,23 +62,28 @@ test('4D seats from Paperclip status and dresses blobs from the feed look', () =
   assert.equal(chiefBot.look.shape, 'triangle');
   assert.equal(chiefBot.look.color, '#8F59F9');
   assert.equal(chiefBot.has_glb, false);
-  assert.equal(chiefBot.floor, 'ops');
+  // SWA-3157: Hurly crew share Main Floor; Dept A (QA) on bank A, Dept B (Chief/Doc/Proxmox) on bank B.
+  assert.equal(chiefBot.floor, 'main-floor');
+  assert.ok(chiefBot.desk >= 11 && chiefBot.desk <= 20, 'Dept B desk on bank B');
   const doc = tower.bots[WF.botId('Doc Master')];
   assert.equal(doc.effective_status, 'idle');
   assert.equal(doc.look.shape, 'drop');
   assert.equal(doc.look.color, '#EB2B3E');
-  assert.equal(doc.floor, 'ops');
+  assert.equal(doc.floor, 'main-floor');
+  assert.ok(doc.desk >= 11 && doc.desk <= 20, 'Dept B desk on bank B');
   const prox = tower.bots[WF.botId('Proxmox Master')];
   assert.equal(prox.effective_status, 'working');
   assert.equal(prox.step, 'cluster check');
   assert.equal(prox.look.shape, 'cloud');
-  assert.equal(prox.floor, 'infra');
+  assert.equal(prox.floor, 'main-floor');
+  assert.ok(prox.desk >= 11 && prox.desk <= 20, 'Dept B desk on bank B');
   const qa = tower.bots[WF.botId('QA Engineer')];
   assert.equal(qa.effective_status, 'working');
   assert.equal(qa.step, 'Bash: npm test');
   assert.equal(qa.floor, 'main-floor');
+  assert.ok(qa.desk >= 1 && qa.desk <= 10, 'Dept A desk on bank A');
   assert.equal(qa.look, null);
-  assert.equal(JSON.stringify(tower.floors.map((f) => f.id)), JSON.stringify(['ops', 'infra', 'main-floor']));
+  assert.equal(JSON.stringify(tower.floors.map((f) => f.id)), JSON.stringify(['main-floor']));
   assert.equal(JSON.stringify(tower).includes('gbw-'), false);
 });
 
@@ -94,7 +99,8 @@ test('an empty roster still has a tower floor, and remembered looks apply with n
   const bot = quiet.bots[WF.botId('Chief Master')];
   assert.equal(bot.look.shape, 'triangle');
   assert.equal(bot.look.color, '#8F59F9');
-  assert.equal(bot.floor, 'ops');
+  assert.equal(bot.floor, 'main-floor');
+  assert.ok(bot.desk >= 11 && bot.desk <= 20, 'Dept B desk on bank B');
   assert.equal(bot.effective_status, 'idle');
 });
 
