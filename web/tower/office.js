@@ -76,10 +76,12 @@ function finish(templates, spots, nightMaps, source) {
   return { templates, spots, nightMaps, source, style };
 }
 
-// SWA-3195: frosted dept divider matches Hurly’s red up-right slash (~image slope -0.57).
+// SWA-3195 / SWA-3212: frosted dept divider matches Hurly’s red up-right slash (~image slope -0.57).
 // Tower camera looks along (1,1,1); that screen slash is a front→back (−z) cut through both
 // GLB banks (desk_12 @ z=2.7 → desk_01 @ z=-3.9), not an xz aisle diagonal. Place the cut
 // between stool columns so panels clear seats (~0.85 m). Ends stay open for walking.
+// SWA-3212: shorten the run ~25% vs f8f0b9a (z 2.20→−3.50 / span 5.70) and keep the same
+// midpoint so both desk departments stay separated without shifting the wall to one end.
 function addDeptDivider(open) {
   if (!open || open.getObjectByName('dept_divider')) return;
   const g = new THREE.Group();
@@ -97,19 +99,21 @@ function addDeptDivider(open) {
   const frame = new THREE.MeshStandardMaterial({ name: 'dept_divider_frame', color: 0x1C1C1E, roughness: 0.45, metalness: 0.3 });
   // GLB tables at z=-2.700 / 1.500; stool columns at x=-5.7,-4.0,-2.3,-0.6,1.1.
   // Mid-gap x=-3.15 (between -4.0 and -2.3); short of front/back stools for walk gaps.
-  const x0 = -3.15, z0 = 2.20;   // front of bank B (toward desk_12 / lounge)
-  const x1 = -3.15, z1 = -3.50;  // back of bank A (toward desk_01 / glass)
+  // Was z0=2.20 / z1=-3.50 (span 5.70); now ~75% length, centered on z=-0.65.
+  const x0 = -3.15, z0 = 1.49;   // front of bank B (toward desk_12 / lounge)
+  const x1 = -3.15, z1 = -2.79;  // back of bank A (toward desk_01 / glass)
   const dx = x1 - x0, dz = z1 - z0;
   const span = Math.hypot(dx, dz);
   const yaw = Math.atan2(-dz, dx); // local +X follows the cut (here −z → yaw = π/2)
   const y = 0.72;                 // low / partial (~desk-monitor height)
   const h = 1.28;
   const thick = 0.04;
-  // Three frosted panels along the cut; gaps (~0.55m) at both ends leave walk paths clear.
-  const panelW = 1.55;
-  const usable = span - 1.1;
+  // Three frosted panels along the cut; end gaps (~0.41m) scale with the shorter run.
+  const panelW = 1.16;
+  const endGap = 0.41;
+  const usable = span - endGap * 2;
   const step = usable / 3;
-  const first = 0.55 + step / 2;
+  const first = endGap + step / 2;
   for (let i = 0; i < 3; i++) {
     const t = (first + i * step) / span;
     const panel = new THREE.Group();
