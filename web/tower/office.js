@@ -109,7 +109,7 @@ function addDeptDivider(open) {
   const h = 1.28;
   const thick = 0.04;
   // Three frosted panels along the cut; end gaps (~0.41m) scale with the shorter run.
-  const panelW = 1.16;
+  const panelW = 1.15;
   const endGap = 0.41;
   const usable = span - endGap * 2;
   const step = usable / 3;
