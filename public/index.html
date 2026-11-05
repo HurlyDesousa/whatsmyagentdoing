@@ -1628,8 +1628,12 @@ function liveBlock(s, now) {
   const family = OFFICE_FAMILY[s.status] || s.status;
   const disagree = w.effective && family !== w.effective;
   const seen = w.seenMs ? (now - w.seenMs < 15000 ? 'just now' : ago(w.seenMs, now)) : 'no status yet';
-  const chat = /^(grokbot|https):\/\//i.test(w.chat || '')
-    ? `<a class="chatlink" href="${esc(w.chat)}"${/^https:\/\//i.test(w.chat) ? ' target="_blank" rel="noopener noreferrer"' : ''}>Open chat</a>`
+  // Paperclip map wins; never emit grokbot:// (OS "Open Grok Bot?" dialog).
+  const chatUrl = (typeof WallpaperFeed !== 'undefined' && WallpaperFeed.resolveChatUrl)
+    ? WallpaperFeed.resolveChatUrl(s.project || s.title || w.name || '', w.chat || '')
+    : (/^https:\/\//i.test(w.chat || '') ? w.chat : '');
+  const chat = chatUrl
+    ? `<a class="chatlink" href="${esc(chatUrl)}">Open chat</a>`
     : '';
   const usage = Number.isFinite(w.usagePct) ? `<div class="txt">usage ${esc(w.usagePct)} as posted</div>` : '';
   return `<div class="lab">Live feed</div>

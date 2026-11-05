@@ -27,6 +27,35 @@
   const DEFAULT_FEED_TOPIC = 'gbw-YdhGRttWLlcHJZK6CgzHLP';
   const STATUSES = new Set(['working', 'idle', 'waiting_user', 'error', 'done']);
 
+  // Office Open chat → Paperclip agent conversations (not grokbot://).
+  // Board UI route: /{issuePrefix}/chats/{urlKey}. Feed chat maps may still
+  // publish grokbot://; the office ignores those when a urlKey is known.
+  const PAPERCLIP_ORIGIN = 'https://paperclip.s-w.art';
+  const PAPERCLIP_PREFIX = 'SWA';
+  // Display / wallpaper names → Paperclip agent urlKey (aliases included).
+  const PAPERCLIP_CHAT_KEYS = {
+    'chief master': 'chief',
+    chief: 'chief',
+    'monitor master': 'monitor-master',
+    monitor: 'monitor-master',
+    'dockhand master': 'dockhand-master',
+    dockhand: 'dockhand-master',
+    'truenas master': 'truenas-master',
+    truenas: 'truenas-master',
+    'code master 2': 'code-master-2',
+    'code master 1': 'code-master-1',
+    'qa engineer': 'qa-engineer',
+    'qa engineer 2': 'qa-engineer-2',
+    dispatcher: 'dispatcher',
+    'gpu agent': 'gpu-agent',
+    'amazon master': 'amazon-master',
+    accountant: 'accountant',
+    claude: 'claude',
+    grok: 'grok',
+    'smoke scout': 'smoke-scout',
+    'cursor cloud': 'cursor-cloud',
+  };
+
   // Wallpaper picker shapes -> the office blobs that already exist
   // (web/grokblobs.js / public/office.js). Triangle in the wallpaper is the
   // play-button wedge; rounded_square is the upright squircle.
@@ -86,6 +115,38 @@
     return '#' + v.trim().replace('#', '').toUpperCase();
   }
   function isMap(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
+
+  function paperclipUrlKey(name) {
+    for (const a of aliases(name)) {
+      if (Object.prototype.hasOwnProperty.call(PAPERCLIP_CHAT_KEYS, a)) return PAPERCLIP_CHAT_KEYS[a];
+    }
+    return null;
+  }
+
+  function paperclipChatUrl(name) {
+    const key = paperclipUrlKey(name);
+    if (!key) return '';
+    return PAPERCLIP_ORIGIN + '/' + PAPERCLIP_PREFIX + '/chats/' + encodeURIComponent(key);
+  }
+
+  // Prefer the office Paperclip map so Open chat never depends on grokbot://.
+  // Unmapped bots may still use an https feed link; grokbot:// is dropped.
+  function resolveChatUrl(name, feedChat) {
+    const mapped = paperclipChatUrl(name);
+    if (mapped) return mapped;
+    const u = String(feedChat == null ? '' : feedChat).trim();
+    if (/^https:\/\//i.test(u)) return u.slice(0, 400);
+    return '';
+  }
+
+  function isPaperclipChatUrl(url) {
+    const u = String(url == null ? '' : url).trim();
+    if (!/^https:\/\//i.test(u)) return false;
+    try {
+      const parsed = new URL(u);
+      return parsed.origin === PAPERCLIP_ORIGIN && /\/chats\//i.test(parsed.pathname);
+    } catch (_) { return false; }
+  }
 
   function feedBase(raw) {
     let s = String(raw == null ? '' : raw).trim();
@@ -387,7 +448,7 @@
       effective: bot.effective,
       step: bot.step || '',
       group: bot.group || '',
-      chat: bot.chat || '',
+      chat: resolveChatUrl(bot.name, bot.chat || ''),
       usagePct: bot.usagePct,
       seenMs: bot.seenMs || 0,
     };
@@ -727,7 +788,9 @@
         ? clip((s.wallpaper && s.wallpaper.step) || s.activity || '', 160)
         : clip(s.activity || '', 160);
       const chatRaw = s.wallpaper && typeof s.wallpaper.chat === 'string' ? s.wallpaper.chat.trim() : '';
-      const chat = /^(https|grokbot):\/\//i.test(chatRaw) ? chatRaw : '';
+      // wallpaperView already resolves; resolve again so Paperclip-only sessions
+      // (no feed chat line) still get an Open chat URL from the office map.
+      const chat = resolveChatUrl(name, chatRaw);
       const posted = s.wallpaper && Number.isFinite(Number(s.wallpaper.usagePct)) ? Number(s.wallpaper.usagePct) : null;
       const seenRaw = s.wallpaper && Number(s.wallpaper.seenMs);
       const seenMs = Number.isFinite(seenRaw) && seenRaw > 0 ? seenRaw : null;
@@ -848,9 +911,11 @@
   root.WallpaperFeed = {
     RELAY, NTFY, STORE_KEY, REMEMBERED,
     DEFAULT_FEED_TOPIC, DEFAULT_QUALITY, QUALITIES,
+    PAPERCLIP_ORIGIN, PAPERCLIP_PREFIX, PAPERCLIP_CHAT_KEYS,
     parseFeedLink, parseFeedInput, defaultFeedLink, resolveFeedTarget,
     mapLook, reduceFeed, mergeSessions, officeStatus,
     resolveQuality, towerState,
+    paperclipUrlKey, paperclipChatUrl, resolveChatUrl, isPaperclipChatUrl,
     connectFeed, hashTag, rememberedFor, botId,
     configPinKey, pinsFromLines, mergePinned,
     get pageLink() { return pageLink; },
