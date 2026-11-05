@@ -354,11 +354,12 @@ test('paperclipAgentId maps names and session pc; seats persist via assignSeat',
   const W = sandbox.WallpaperFeed;
   const a = W.botId('Chief Master');
   const b = W.botId('Monitor Master');
-  assert.equal(W.assignSeat(a, 1), 1);
-  assert.equal(W.assignSeat(b, 6), 6);
-  assert.equal(W.assignSeat(a, 6), 6); // Chief takes Monitor's desk; Monitor keeps prior seat 1 via swap
-  assert.equal(W.assignSeat(a, 21), 21); // department manager desk is a valid seating target
-  assert.equal(W.assignSeat(a, 5), null); // SWA-3221: cleared window-side logical desks are not seatable
+  const peers = [a, b]; // same-floor swap peers
+  assert.equal(W.assignSeat(a, 1, peers), 1);
+  assert.equal(W.assignSeat(b, 6, peers), 6);
+  assert.equal(W.assignSeat(a, 6, peers), 6); // Chief takes Monitor's desk; Monitor keeps prior seat 1 via swap
+  assert.equal(W.assignSeat(a, 21, peers), 21); // department manager desk is a valid seating target
+  assert.equal(W.assignSeat(a, 5, peers), null); // SWA-3221: cleared window-side logical desks are not seatable
   assert.equal(W.PER_FLOOR, 21);
   const seats = W.loadSeatAssign();
   assert.equal(seats[a], 21);
@@ -471,4 +472,64 @@ test('moveToFloor relocates across floors, persists, and refuses a full floor', 
   const stayed = W2.towerState(packedSessions, {});
   assert.ok(stayed.bots[chief], 'full-floor refusal must not drop the agent');
   assert.equal(stayed.bots[chief].floor, 'ops');
+});
+
+test('moveToFloor does not wipe another floor’s drag-drop seat at the same desk number', () => {
+  // QA FAIL repro (SWA-3213 / PR #32): Chief drag-seated Ops desk 7; Infra has
+  // open desks 1+6 taken so first free open is 7 (2–5 removed); moving Monitor
+  // to Infra must keep Chief at 7.
+  const mem = new Map();
+  const sandbox = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, v),
+      removeItem: (k) => mem.delete(k),
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  require('node:vm').runInNewContext(feedSrc, sandbox, { filename: 'wallpaper-feed.js' });
+  const W = sandbox.WallpaperFeed;
+  const chief = W.botId('Chief Master');
+  const doc = W.botId('Doc Master');
+  const mon = W.botId('Monitor Master');
+  const dock = W.botId('Dockhand Master');
+  const prox = W.botId('Proxmox Master');
+  const sessions = [
+    { key: 'pc:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x' },
+    { key: 'gb:doc', id: 'doc', agent: 'grokbot', project: 'Doc Master', status: 'idle', activity: null },
+    { key: 'gb:mon', id: 'mon', agent: 'grokbot', project: 'Monitor Master', status: 'waiting', activity: 'needs you' },
+    { key: 'gb:dock', id: 'dock', agent: 'grokbot', project: 'Dockhand Master', status: 'idle', activity: null },
+    { key: 'gb:prox', id: 'prox', agent: 'grokbot', project: 'Proxmox Master', status: 'idle', activity: null },
+  ];
+  const before = W.towerState(sessions, {});
+  assert.equal(before.bots[chief].floor, 'ops');
+  assert.equal(before.bots[doc].floor, 'ops');
+  assert.equal(before.bots[mon].floor, 'watch');
+  assert.equal(before.bots[dock].floor, 'infra');
+  assert.equal(before.bots[prox].floor, 'infra');
+
+  W.assignSeat(chief, 7, before.floors.find((f) => f.id === 'ops').bots);
+  W.assignSeat(dock, 1, before.floors.find((f) => f.id === 'infra').bots);
+  W.assignSeat(prox, 6, before.floors.find((f) => f.id === 'infra').bots);
+  assert.equal(W.loadSeatAssign()[chief], 7);
+
+  const moved = W.moveToFloor(mon, 'infra', sessions, {});
+  assert.equal(moved.ok, true);
+  assert.equal(moved.desk, 7); // first free open Infra desk
+  const seats = W.loadSeatAssign();
+  assert.equal(seats[mon], 7);
+  assert.equal(seats[chief], 7, 'Ops drag-drop seat must survive a same-number Infra move');
+  assert.equal(seats[dock], 1);
+  assert.equal(seats[prox], 6);
+
+  const after = W.towerState(sessions, {});
+  assert.equal(after.bots[mon].floor, 'infra');
+  assert.equal(after.bots[mon].desk, 7);
+  assert.equal(after.bots[chief].floor, 'ops');
+  assert.equal(after.bots[chief].desk, 7);
 });

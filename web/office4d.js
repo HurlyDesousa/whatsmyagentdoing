@@ -109,7 +109,12 @@ export class Office4D {
   assignSeat(botId, desk) {
     const feed = globalThis.WallpaperFeed;
     if (!feed || typeof feed.assignSeat !== 'function') return;
-    if (!feed.assignSeat(botId, desk)) return;
+    // Same-floor peers only — desk numbers collide across floors in the seat map.
+    const bot = this._state && this._state.bots && this._state.bots[botId];
+    const floorId = (bot && bot.floor) || this.viewFloorId;
+    const floor = ((this._state && this._state.floors) || []).find((f) => f.id === floorId);
+    const peers = floor && Array.isArray(floor.bots) ? floor.bots : [];
+    if (!feed.assignSeat(botId, desk, peers)) return;
     sfx.select(true);
     this.update(this.sessions);
   }

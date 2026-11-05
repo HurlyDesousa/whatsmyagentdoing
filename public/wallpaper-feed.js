@@ -218,19 +218,28 @@
     } catch (_) { /* private mode */ }
   }
 
-  function assignSeat(botId, desk) {
+  // Desk numbers are per floor on screen; the seat map may hold the same
+  // number for bots on different floors. Only swap/displace peers on the
+  // same floor (peerIds). Without peerIds, write the seat and leave others
+  // alone — never delete a cross-floor placement.
+  function assignSeat(botId, desk, peerIds) {
     const id = String(botId || '').slice(0, 64);
     const n = Number(desk);
     if (!id || !isDeskOpen(n)) return null;
     const map = loadSeatAssign();
     const prev = map[id];
-    let displaced = null;
-    for (const [other, d] of Object.entries(map)) {
-      if (other !== id && d === n) { displaced = other; break; }
-    }
-    if (displaced) {
-      if (prev && isDeskOpen(prev)) map[displaced] = prev;
-      else delete map[displaced];
+    const peers = peerIds == null ? null : new Set(
+      (Array.isArray(peerIds) ? peerIds : []).map((p) => String(p || '').slice(0, 64)).filter(Boolean),
+    );
+    if (peers) {
+      let displaced = null;
+      for (const [other, d] of Object.entries(map)) {
+        if (other !== id && d === n && peers.has(other)) { displaced = other; break; }
+      }
+      if (displaced) {
+        if (prev && isDeskOpen(prev)) map[displaced] = prev;
+        else delete map[displaced];
+      }
     }
     map[id] = n;
     saveSeatAssign(map);
@@ -348,7 +357,10 @@
     const fmap = loadFloorAssign();
     fmap[id] = want;
     saveFloorAssign(fmap);
-    if (!assignSeat(id, desk)) return { ok: false, reason: 'seat' };
+    // Peers = bots already on the target floor. Same desk number on another
+    // floor must not be wiped (QA FAIL on PR #32 / SWA-3213).
+    const peers = (floor.bots || []).filter((bid) => bid && bid !== id);
+    if (!assignSeat(id, desk, peers)) return { ok: false, reason: 'seat' };
     return { ok: true, floorId: want, desk };
   }
 
