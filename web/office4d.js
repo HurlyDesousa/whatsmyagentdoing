@@ -56,7 +56,7 @@ export class Office4D {
     this.visible = true;
     this.framesShown = 0;
     this.deskOf = new Map();
-    this.plan = { desks: Array.from({ length: 20 }, (_, i) => i) };
+    this.plan = { desks: Array.from({ length: 21 }, (_, i) => i) };
     this.pal = { dark: false };
     this.sessions = [];
     this.extras = null;
