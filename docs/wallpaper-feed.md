@@ -2,21 +2,22 @@
 
 The office keeps its own rooms, floors (B / 1 / 2), camera, Berlin sun, hop / ding / done flash, and Share PNG. A Grok Bot wallpaper feed is an extra client-side layer: status, looks, usage, chat links and routines from the same JSON lines the wallpaper dashboard reads.
 
-The topic is a secret. It is not in this repository, not in Docker env, and the office process does not log request URLs (a `?feed=` query would otherwise be the only way the topic reached the server).
+The office process does not log request URLs (a `?feed=` query would otherwise be the only way a custom topic reached the server). On the Hurly office stack (`hurly-live`), a default wallpaper topic is baked into the client so plain `https://office.s-w.art/` connects without a hash or Settings paste. Hash and Settings still override that default.
 
 ## Set the feed
 
-Pick one. All of them stay in the browser.
+Priority (first match wins), all in the browser:
 
-1. **Settings → Wallpaper feed.** Paste one of:
+1. **Hash link**, same forms as the wallpaper: `https://office.s-w.art/#topic` or `https://office.s-w.art/#topic@relay.example.com`. The hash is not sent to the office server.
+2. **Settings → Wallpaper feed.** Paste one of:
    - `#topic` — read `https://relay.0xcodila.com/<topic>` and `https://ntfy.sh/<topic>`
    - `#topic@relay.example.com` — that mailbox only
    - `https://relay.example.com/<topic>` — that mailbox only
    Save stores the string in `localStorage` (`wmad.wallpaperLink`) and removes it from the address bar, so a copied office link does not carry it.
-2. **Hash link**, same forms as the wallpaper: `https://office.s-w.art/#topic` or `https://office.s-w.art/#topic@relay.example.com`. The hash is not sent to the office server. A hash on the link wins over the saved Settings value until you clear it.
 3. **`?feed=`** is accepted once (old wallpaper links). The page moves it into the hash and drops the query so a refresh does not send it again.
+4. **Office default** (`WallpaperFeed.DEFAULT_FEED_TOPIC`) when nothing else is set — so Open chat works on a plain office origin.
 
-Clear in Settings forgets the saved value, the hash, and the local line cache.
+Clear in Settings forgets the saved value, the hash, and the local line cache, then falls back to the office default.
 
 The page polls `/json?poll=1&since=12h`, then follows `/sse`, and replays the last lines from `localStorage` so a quiet night is not an empty roster. Cache entries are `{id, time, message}` only — not the topic. Nothing is posted back to the relay (no usage beacon).
 

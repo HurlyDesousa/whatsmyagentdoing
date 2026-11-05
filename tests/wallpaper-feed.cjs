@@ -301,20 +301,12 @@ test('config lines stay after the relay window drops them', async () => {
   assert.equal(JSON.stringify(again).includes('feed-TESTTOPIC'), false);
 });
 
-test('the repo does not contain a wallpaper topic literal', () => {
-  const banned = /gbw-[A-Za-z0-9]{16,}/;
-  const skip = new Set(['node_modules', '.git', 'public/office3d.js']);
-  function walk(dir) {
-    for (const name of fs.readdirSync(dir)) {
-      const rel = path.relative(root, path.join(dir, name));
-      if (skip.has(name) || skip.has(rel)) continue;
-      const st = fs.statSync(path.join(dir, name));
-      if (st.isDirectory()) walk(path.join(dir, name));
-      else if (/\.(js|cjs|mjs|html|md|json)$/.test(name)) {
-        const text = fs.readFileSync(path.join(dir, name), 'utf8');
-        assert.equal(banned.test(text), false, rel);
-      }
-    }
-  }
-  walk(root);
+test('office default feed topic is baked in; hash and Settings still override', () => {
+  assert.equal(WF.DEFAULT_FEED_TOPIC, 'gbw-YdhGRttWLlcHJZK6CgzHLP');
+  assert.deepEqual(WF.defaultFeedLink(), WF.parseFeedInput(WF.DEFAULT_FEED_TOPIC));
+  assert.equal(WF.resolveFeedTarget({}).topic, WF.DEFAULT_FEED_TOPIC);
+  assert.equal(WF.resolveFeedTarget({ saved: '' }).topic, WF.DEFAULT_FEED_TOPIC);
+  assert.equal(WF.resolveFeedTarget({ saved: '#other-TOPIC-OVERRIDE-001' }).topic, 'other-TOPIC-OVERRIDE-001');
+  const page = WF.parseFeedLink('#hash-TOPIC-OVERRIDE-00002', '');
+  assert.equal(WF.resolveFeedTarget({ pageLink: page, saved: 'other-TOPIC-OVERRIDE-001' }).topic, 'hash-TOPIC-OVERRIDE-00002');
 });
