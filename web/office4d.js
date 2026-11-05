@@ -1,7 +1,7 @@
 // 4D is the wallpaper dashboard: the tower fills the viewport and the glass panels
 // (floors, team, activity, usage) sit on top of it. The feed topic never comes through here.
 import { initScene, renderScene, destroyScene, setSceneVisible, sceneCanvas, focusBot, captureScene, zoom, setTowerTheme } from './tower/scene.js';
-import { initUI, renderUI, destroyUI, setStartBusy } from './tower-ui/ui.js';
+import { initUI, renderUI, destroyUI, setStartBusy, setClearErrorBusy } from './tower-ui/ui.js';
 import { initSound, destroySound, sfx } from './tower-ui/sound.js';
 
 const LIGHT_TIME = { day: '13:00', evening: '18:50', night: '23:00' };
@@ -93,6 +93,7 @@ export class Office4D {
       onZoom: (dir) => { zoom(dir); sfx.zoom(dir); },
       onOpenChat: (_id, url) => openWallpaperChat(url),
       onStartAgent: (_id, agentId) => startPaperclipAgent(agentId),
+      onClearErrorAgent: (_id, agentId) => clearPaperclipError(agentId),
       onShare: () => {
         const shot = this.captureShare();
         if (!shot) return;
@@ -269,6 +270,27 @@ async function startPaperclipAgent(agentId) {
     console.warn('[office] Start error:', e);
   } finally {
     setStartBusy(false);
+  }
+}
+
+async function clearPaperclipError(agentId) {
+  if (!agentId) return;
+  setClearErrorBusy(true);
+  try {
+    const r = await fetch('/api/paperclip/clear-error', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentId }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok || !body.ok) {
+      console.warn('[office] Clear error failed:', (body && body.error) || `HTTP ${r.status}`);
+    }
+  } catch (e) {
+    console.warn('[office] Clear error:', e);
+  } finally {
+    setClearErrorBusy(false);
   }
 }
 

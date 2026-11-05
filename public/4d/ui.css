@@ -376,10 +376,15 @@
   background: #34C759; color: #0B1F12;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 4px 12px rgba(0, 0, 0, .28);
 }
+.bhq-cta--clear {
+  background: #F2F2F7; color: #1D1D22;
+  box-shadow: inset 0 1px 0 #fff, 0 4px 12px rgba(0, 0, 0, .28);
+}
 .bhq-cta:not(:disabled):hover { filter: brightness(1.05); }
 .bhq-cta:not(:disabled):active { transform: scale(.97); }
 .bhq-cta:disabled { background: rgba(255, 255, 255, .1); color: var(--dim); box-shadow: none; }
 .bhq-wbtn--start { background: rgba(52, 199, 89, .28); color: #d8ffe4; }
+.bhq-wbtn--clear { background: rgba(255, 255, 255, .14); color: var(--hi); }
 .hq-scene.is-seating { cursor: grabbing; }
 
 /* ====================================================================== live feed */
