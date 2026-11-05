@@ -449,7 +449,7 @@
               <button class="btn" id="wallpaperSave" type="button">Save in this browser</button>
               <button class="btn" id="wallpaperClear" type="button">Clear</button>
             </div>
-            <p class="setting-hint" id="wallpaperHint">The topic stays in this browser. It is not sent to the office server.</p>
+            <p class="setting-hint" id="wallpaperHint">Office default feed is on. Paste another topic to override; Clear restores the default. The topic stays in this browser.</p>
           </div>
         </div>
       </details>
@@ -1789,11 +1789,16 @@ syncLight();
 
 let feedHandle = null;
 function feedTarget() {
-  if (!window.WallpaperFeed) return null;
-  if (WallpaperFeed.pageLink) return WallpaperFeed.pageLink;
+  if (!window.WallpaperFeed || !WallpaperFeed.resolveFeedTarget) return null;
   let saved = '';
   try { saved = localStorage.getItem(WallpaperFeed.STORE_KEY) || ''; } catch (_) {}
-  return WallpaperFeed.parseFeedInput(saved);
+  return WallpaperFeed.resolveFeedTarget({ pageLink: WallpaperFeed.pageLink, saved });
+}
+function feedUsingDefault(link) {
+  if (!window.WallpaperFeed || !link) return false;
+  let saved = '';
+  try { saved = localStorage.getItem(WallpaperFeed.STORE_KEY) || ''; } catch (_) {}
+  return !WallpaperFeed.pageLink && !saved && link.topic === WallpaperFeed.DEFAULT_FEED_TOPIC;
 }
 function setFeedHint(text) {
   const el = document.getElementById('wallpaperHint');
@@ -1808,14 +1813,28 @@ function startFeed() {
     if (state.baseSessions) render();
     return;
   }
-  setFeedHint('Reading the feed in this browser…');
+  const officeDefault = feedUsingDefault(link);
+  setFeedHint(officeDefault
+    ? 'Reading the office default feed in this browser…'
+    : 'Reading the feed in this browser…');
   feedHandle = WallpaperFeed.connectFeed(link, (feed) => {
     wallpaperFeed = feed;
     if (state.baseSessions || state.loaded) render();
   }, (st) => {
-    if (st.phase === 'live') setFeedHint('Live feed · ' + st.bots + (st.bots === 1 ? ' bot' : ' bots') + '. The topic stays in this browser.');
-    else if (st.phase === 'error') setFeedHint('Could not reach the feed. The topic was not sent to the office server.');
-    else setFeedHint('Reading the feed in this browser…');
+    if (st.phase === 'live') {
+      setFeedHint('Live feed · ' + st.bots + (st.bots === 1 ? ' bot' : ' bots')
+        + (officeDefault
+          ? '. Office default — paste another topic in Settings to override.'
+          : '. The topic stays in this browser.'));
+    } else if (st.phase === 'error') {
+      setFeedHint(officeDefault
+        ? 'Could not reach the office default feed.'
+        : 'Could not reach the feed. The topic was not sent to the office server.');
+    } else {
+      setFeedHint(officeDefault
+        ? 'Reading the office default feed in this browser…'
+        : 'Reading the feed in this browser…');
+    }
   });
 }
 document.getElementById('wallpaperSave').addEventListener('click', () => {

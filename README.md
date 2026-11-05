@@ -105,7 +105,7 @@ No hooks, no config, no API keys. Both tools already append every message and to
 
 ## Wallpaper feed
 
-The Hurly office can also show a [Grok Bot wallpaper](https://github.com/Bodila51/grokbot-wallpaper) feed: live step text, blob looks, a usage pill, chat links and routines. **4D** (the default quality) draws that feed as the wallpaper tower — glossy blobs on stacked floors — beside the existing 2D and 3D offices. The browser reads the relay or ntfy topic itself. The office server never sees the topic, and the topic is not in this repo. Setup, and what happens when a bot is in both Paperclip and the feed: [docs/wallpaper-feed.md](docs/wallpaper-feed.md).
+The Hurly office can also show a [Grok Bot wallpaper](https://github.com/Bodila51/grokbot-wallpaper) feed: live step text, blob looks, a usage pill, chat links and routines. **4D** (the default quality) draws that feed as the wallpaper tower — glossy blobs on stacked floors — beside the existing 2D and 3D offices. The browser reads the relay or ntfy topic itself; the office server never sees a custom topic from the address bar. On the Hurly office deploy a default topic is baked into the client so Open chat works without a hash or Settings paste (Settings/hash still override). Setup: [docs/wallpaper-feed.md](docs/wallpaper-feed.md).
 
 ## Development checks
 

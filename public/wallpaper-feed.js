@@ -1,7 +1,7 @@
 // Client-side Grok Bot wallpaper feed. The office page reads a relay / ntfy
-// topic itself (hash, ?feed= once, or a Settings value in localStorage).
-// Nothing here is sent to the office server, and this file never writes the
-// topic into a log line.
+// topic itself (hash, ?feed= once, Settings localStorage, or the baked office
+// default). Nothing here is sent to the office server, and connect/publish
+// paths never put the topic into a log line.
 //
 // Line shapes match grokbot-wallpaper (docs/CONTRACT.md, README, web/feed.js):
 //   {"bot","status","step","group"?}
@@ -21,6 +21,10 @@
   const DONE_MS = 60 * 1000;
   const IDLE_MS = 3 * 60 * 60 * 1000;
   const STORE_KEY = 'wmad.wallpaperLink';
+  // Office.s-w.art default so Open chat works on a plain origin with no hash
+  // and no Settings paste. Hash and Settings still override. Clear drops the
+  // override and falls back here.
+  const DEFAULT_FEED_TOPIC = 'gbw-YdhGRttWLlcHJZK6CgzHLP';
   const STATUSES = new Set(['working', 'idle', 'waiting_user', 'error', 'done']);
 
   // Wallpaper picker shapes -> the office blobs that already exist
@@ -130,6 +134,19 @@
     if (raw.includes('@')) return parseFeedLink('#' + raw, '');
     if (TOPIC.test(raw)) return { topic: raw, bases: [RELAY, NTFY] };
     return null;
+  }
+
+  function defaultFeedLink() {
+    return parseFeedInput(DEFAULT_FEED_TOPIC);
+  }
+
+  // Priority: URL/page link → Settings localStorage → office default topic.
+  function resolveFeedTarget(opts) {
+    const page = opts && opts.pageLink;
+    if (page && page.topic) return page;
+    const fromSaved = parseFeedInput(opts && opts.saved);
+    if (fromSaved) return fromSaved;
+    return defaultFeedLink();
   }
 
   function hashTag(link) {
@@ -830,8 +847,9 @@
 
   root.WallpaperFeed = {
     RELAY, NTFY, STORE_KEY, REMEMBERED,
-    DEFAULT_QUALITY, QUALITIES,
-    parseFeedLink, parseFeedInput, mapLook, reduceFeed, mergeSessions, officeStatus,
+    DEFAULT_FEED_TOPIC, DEFAULT_QUALITY, QUALITIES,
+    parseFeedLink, parseFeedInput, defaultFeedLink, resolveFeedTarget,
+    mapLook, reduceFeed, mergeSessions, officeStatus,
     resolveQuality, towerState,
     connectFeed, hashTag, rememberedFor, botId,
     configPinKey, pinsFromLines, mergePinned,
