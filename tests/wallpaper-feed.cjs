@@ -198,20 +198,22 @@ test('4D tower keeps Paperclip status and shows usage share, chat and routines',
   const nas = merged.find((s) => s.id === 'truenas');
   assert.equal(nas.status, 'thinking');
   assert.equal(nas.activity, 'scrubbing a pool');
-  assert.equal(nas.wallpaper.chat.startsWith('grokbot://'), true);
+  // Feed still carried grokbot://; office resolves to Paperclip chat.
+  assert.equal(nas.wallpaper.chat, 'https://paperclip.s-w.art/SWA/chats/truenas-master');
   assert.equal(nas.wallpaper.usagePct, 3);
   const tower = WF.towerState(merged, { usage: feed.usage, routines: feed.routines });
   const nasBot = tower.bots[WF.botId('TrueNAS Master')];
   assert.equal(nasBot.effective_status, 'working');
   assert.equal(nasBot.step, 'scrubbing a pool');
-  assert.equal(nasBot.chat_url, 'grokbot://app/v1/agent?id=truenas');
+  assert.equal(nasBot.chat_url, 'https://paperclip.s-w.art/SWA/chats/truenas-master');
   assert.equal(nasBot.usage_share, 0.174);
   assert.equal(tower.usage.period, 'week');
   assert.equal(tower.usage.total_used_pct, 17.2);
   assert.equal(tower.usage.resets_at, '2026-11-08T14:19:00Z');
   const chiefBot = tower.bots[WF.botId('Chief Master')];
   assert.equal(chiefBot.effective_status, 'idle');
-  assert.equal(chiefBot.chat_url, null);
+  // Chief's feed chat was javascript: (rejected); office map still supplies Paperclip.
+  assert.equal(chiefBot.chat_url, 'https://paperclip.s-w.art/SWA/chats/chief');
   assert.equal(chiefBot.usage_share, 1);
   assert.equal(tower.routines.length, 2);
   assert.equal(tower.routines[0].routine, 'Morning dispatch');
@@ -231,7 +233,7 @@ test('towerState sets last_seen from wallpaper seenMs', () => {
   const withFeed = WF.towerState(merged, { feedLive: true });
   const bot = withFeed.bots[WF.botId('Monitor Master')];
   assert.equal(bot.last_seen, new Date(statusAt).toISOString());
-  assert.equal(bot.chat_url, 'grokbot://app/v1/agent?id=monitor');
+  assert.equal(bot.chat_url, 'https://paperclip.s-w.art/SWA/chats/monitor-master');
   assert.equal(withFeed.wallpaper_feed, true);
   const quiet = WF.towerState([{
     key: 'paperclip:chief', id: 'chief', agent: 'claude', project: 'Chief Master',
@@ -239,6 +241,20 @@ test('towerState sets last_seen from wallpaper seenMs', () => {
   }], {});
   assert.equal(quiet.bots[WF.botId('Chief Master')].last_seen, null);
   assert.equal(quiet.wallpaper_feed, false);
+  // No feed chat line — office map still enables Open chat for known agents.
+  assert.equal(quiet.bots[WF.botId('Chief Master')].chat_url, 'https://paperclip.s-w.art/SWA/chats/chief');
+});
+
+test('resolveChatUrl prefers Paperclip urlKey and drops grokbot://', () => {
+  assert.equal(WF.paperclipUrlKey('Chief Master'), 'chief');
+  assert.equal(WF.paperclipUrlKey('Monitor'), 'monitor-master');
+  assert.equal(WF.resolveChatUrl('Chief Master', 'grokbot://app/v1/agent?id=x'),
+    'https://paperclip.s-w.art/SWA/chats/chief');
+  assert.equal(WF.resolveChatUrl('Doc Master', 'grokbot://app/v1/agent?id=doc'), '');
+  assert.equal(WF.resolveChatUrl('Doc Master', 'https://example.com/chat'), 'https://example.com/chat');
+  assert.equal(WF.isPaperclipChatUrl('https://paperclip.s-w.art/SWA/chats/chief'), true);
+  assert.equal(WF.isPaperclipChatUrl('https://example.com/SWA/chats/chief'), false);
+  assert.equal(JSON.stringify(WF.resolveChatUrl('Chief Master', 'grokbot://x')).includes('grokbot'), false);
 });
 
 test('config lines stay after the relay window drops them', async () => {
@@ -309,4 +325,47 @@ test('office default feed topic is baked in; hash and Settings still override', 
   assert.equal(WF.resolveFeedTarget({ saved: '#other-TOPIC-OVERRIDE-001' }).topic, 'other-TOPIC-OVERRIDE-001');
   const page = WF.parseFeedLink('#hash-TOPIC-OVERRIDE-00002', '');
   assert.equal(WF.resolveFeedTarget({ pageLink: page, saved: 'other-TOPIC-OVERRIDE-001' }).topic, 'hash-TOPIC-OVERRIDE-00002');
+});
+
+test('paperclipAgentId maps names and session pc; seats persist via assignSeat', () => {
+  assert.equal(WF.paperclipAgentId('Grok'), '2b483eac-3320-4c85-9f05-c88db157c63c');
+  assert.equal(WF.paperclipAgentId('Chief Master'), '2842a7bf-9527-42c1-aa86-ba5b599c8878');
+  assert.equal(WF.paperclipAgentId('Doc Master'), null);
+  assert.equal(
+    WF.paperclipAgentId('Someone', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'),
+    'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+  );
+  const mem = new Map();
+  const sandbox = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, v),
+      removeItem: (k) => mem.delete(k),
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  const feedSrc = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'public/wallpaper-feed.js'), 'utf8');
+  require('node:vm').runInNewContext(feedSrc, sandbox, { filename: 'wallpaper-feed.js' });
+  const W = sandbox.WallpaperFeed;
+  const a = W.botId('Chief Master');
+  const b = W.botId('Monitor Master');
+  assert.equal(W.assignSeat(a, 5), 5);
+  assert.equal(W.assignSeat(b, 7), 7);
+  assert.equal(W.assignSeat(a, 7), 7); // Chief takes Monitor's desk; Monitor keeps prior seat 5 via swap
+  const seats = W.loadSeatAssign();
+  assert.equal(seats[a], 7);
+  assert.equal(seats[b], 5);
+  const tower = W.towerState([
+    { key: 'paperclip:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x', pc: '2842a7bf-9527-42c1-aa86-ba5b599c8878' },
+    { key: 'paperclip:mon', id: 'mon', agent: 'grokbot', project: 'Monitor Master', status: 'waiting', activity: 'needs you' },
+  ], {});
+  assert.equal(tower.bots[a].desk, 7);
+  assert.equal(tower.bots[b].desk, 5);
+  assert.equal(tower.bots[a].paperclip_agent_id, '2842a7bf-9527-42c1-aa86-ba5b599c8878');
+  assert.equal(tower.bots[b].paperclip_agent_id, '4f2ddf7b-26ee-4beb-8424-beddd98a0247');
 });

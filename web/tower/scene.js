@@ -435,7 +435,11 @@ function onDown(e) {
     drag = null;
     return;
   }
-  drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY, lt: performance.now(), panning: false, vx: 0, vz: 0 };
+  const hitBot = pick();
+  drag = {
+    id: e.pointerId, x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY,
+    lt: performance.now(), panning: false, seating: false, seatBot: hitBot, vx: 0, vz: 0,
+  };
 }
 
 function onMove(e) {
@@ -449,7 +453,16 @@ function onMove(e) {
     return;
   }
   if (!drag || drag.id !== e.pointerId) return;
-  if (!drag.panning && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 5) drag.panning = true;
+  const moved = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 5;
+  if (!drag.panning && !drag.seating && moved) {
+    // Drag starting on a blob reseats it; empty-floor drag pans the camera.
+    if (drag.seatBot && callbacks.onAssignSeat) drag.seating = true;
+    else drag.panning = true;
+  }
+  if (drag.seating) {
+    container.classList.add('is-seating');
+    return;
+  }
   if (!drag.panning) return;
   const now = performance.now();
   const dx = e.clientX - drag.lx, dy = e.clientY - drag.ly;
@@ -467,10 +480,18 @@ function onMove(e) {
 
 function onUp(e) {
   touches.delete(e.pointerId);
+  container.classList.remove('is-seating');
   if (pinch) { if (touches.size < 2) pinch = null; drag = null; return; }
   if (!drag || drag.id !== e.pointerId) return;
   const d = drag;
   drag = null;
+  if (d.seating && d.seatBot) {
+    setPointer(e);
+    const desk = nearestDeskLogical();
+    if (desk) callbacks.onAssignSeat?.(d.seatBot, desk);
+    callbacks.onSelectBot?.(d.seatBot);
+    return;
+  }
   if (d.panning) {                                   // let it glide a little, then settle
     const vx = clamp(d.vx, -30, 30), vz = clamp(d.vz, -30, 30);
     cam.x.v = vx; cam.z.v = vz;
@@ -479,6 +500,27 @@ function onUp(e) {
   }
   setPointer(e);
   callbacks.onSelectBot?.(pick());
+}
+
+// Visual desk index → logical desk number (1..20) used by towerState / seat map.
+function nearestDeskLogical() {
+  if (!assets || !assets.spots || !assets.spots.desks) return null;
+  raycaster.setFromCamera(pointer, camera);
+  if (!raycaster.ray.intersectPlane(groundPlane, tmp)) return null;
+  const gx = tmp.x, gz = tmp.z;
+  let best = null, bestD = Infinity;
+  const world = new THREE.Vector3();
+  for (let visual = 0; visual < assets.spots.desks.length; visual++) {
+    const spot = assets.spots.desks[visual];
+    if (!spot) continue;
+    spot.getWorldPosition(world);
+    const d = (world.x - gx) ** 2 + (world.z - gz) ** 2;
+    if (d < bestD) { bestD = d; best = visual; }
+  }
+  if (best == null || bestD > 4.5) return null; // ~2.1 m radius
+  const visualNum = best + 1;
+  const logical = DESK_ORDER.indexOf(visualNum) + 1;
+  return logical > 0 ? logical : visualNum;
 }
 
 function onWheel(e) {

@@ -1,7 +1,7 @@
 // 4D is the wallpaper dashboard: the tower fills the viewport and the glass panels
 // (floors, team, activity, usage) sit on top of it. The feed topic never comes through here.
 import { initScene, renderScene, destroyScene, setSceneVisible, sceneCanvas, focusBot, captureScene, zoom, setTowerTheme } from './tower/scene.js';
-import { initUI, renderUI, destroyUI } from './tower-ui/ui.js';
+import { initUI, renderUI, destroyUI, setStartBusy } from './tower-ui/ui.js';
 import { initSound, destroySound, sfx } from './tower-ui/sound.js';
 
 const LIGHT_TIME = { day: '13:00', evening: '18:50', night: '23:00' };
@@ -85,12 +85,14 @@ export class Office4D {
       },
       onSelectBot: (id) => this.selectBot(id),
       onHoverBot: (id) => sfx.hover(id),
+      onAssignSeat: (id, desk) => this.assignSeat(id, desk),
     });
     initUI({
       onSelectBot: (id) => this.selectBot(id),
       onSelectFloor: (id) => this.setTowerFloor(id),
       onZoom: (dir) => { zoom(dir); sfx.zoom(dir); },
       onOpenChat: (_id, url) => openWallpaperChat(url),
+      onStartAgent: (_id, agentId) => startPaperclipAgent(agentId),
       onShare: () => {
         const shot = this.captureShare();
         if (!shot) return;
@@ -116,6 +118,14 @@ export class Office4D {
     if (next !== this.pickedId) sfx.select(!!next);
     this.pickedId = next;
     this._followPick = !!next;
+    this.update(this.sessions);
+  }
+
+  assignSeat(botId, desk) {
+    const feed = globalThis.WallpaperFeed;
+    if (!feed || typeof feed.assignSeat !== 'function') return;
+    if (!feed.assignSeat(botId, desk)) return;
+    sfx.select(true);
     this.update(this.sessions);
   }
 
@@ -218,11 +228,20 @@ export class Office4D {
   }
 }
 
-// The wallpaper opens a chat with location.href. A real anchor click is the
-// navigation browsers accept for grokbot:// (assigning location from a button
-// is dropped). https stays in this tab, same as the demo.
+// Open chat: https only (Paperclip agent chats). Never grokbot:// — that
+// triggers the OS "Open Grok Bot?" dialog. Paperclip URLs open an in-page
+// panel (Phase B); if the embed is unusable the user can open the same tab.
 function openWallpaperChat(url) {
-  if (!url || !/^(https|grokbot):\/\//i.test(url)) return;
+  if (!url || !/^https:\/\//i.test(url)) return;
+  const WF = typeof globalThis !== 'undefined' ? globalThis.WallpaperFeed : null;
+  if (WF && typeof WF.isPaperclipChatUrl === 'function' && WF.isPaperclipChatUrl(url)) {
+    openPaperclipChatPanel(url);
+    return;
+  }
+  followHttps(url);
+}
+
+function followHttps(url) {
   const a = document.createElement('a');
   a.href = url;
   a.rel = 'noopener';
@@ -230,4 +249,100 @@ function openWallpaperChat(url) {
   document.body.append(a);
   a.click();
   a.remove();
+}
+
+async function startPaperclipAgent(agentId) {
+  if (!agentId) return;
+  setStartBusy(true);
+  try {
+    const r = await fetch('/api/paperclip/resume', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentId }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok || !body.ok) {
+      console.warn('[office] Start failed:', (body && body.error) || `HTTP ${r.status}`);
+    }
+  } catch (e) {
+    console.warn('[office] Start error:', e);
+  } finally {
+    setStartBusy(false);
+  }
+}
+
+let paperclipPanel = null;
+
+function openPaperclipChatPanel(url) {
+  if (!paperclipPanel) paperclipPanel = buildPaperclipChatPanel();
+  const p = paperclipPanel;
+  p.frame.src = url;
+  p.open.href = url;
+  p.root.hidden = false;
+  p.root.setAttribute('aria-hidden', 'false');
+  try { p.closeBtn.focus(); } catch (_) { /* ignore */ }
+}
+
+function closePaperclipChatPanel() {
+  if (!paperclipPanel) return;
+  paperclipPanel.root.hidden = true;
+  paperclipPanel.root.setAttribute('aria-hidden', 'true');
+  paperclipPanel.frame.removeAttribute('src');
+}
+
+function buildPaperclipChatPanel() {
+  const root = document.createElement('div');
+  root.className = 'bhq-pcchat';
+  root.hidden = true;
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-label', 'Paperclip chat');
+  root.setAttribute('aria-hidden', 'true');
+
+  const sheet = document.createElement('div');
+  sheet.className = 'bhq-pcchat-sheet bhq-surface';
+
+  const head = document.createElement('div');
+  head.className = 'bhq-pcchat-head';
+  const title = document.createElement('b');
+  title.className = 'bhq-pcchat-title';
+  title.textContent = 'Paperclip chat';
+  const open = document.createElement('a');
+  open.className = 'bhq-pcchat-open';
+  open.textContent = 'Open full page';
+  open.rel = 'noopener';
+  open.addEventListener('click', (e) => {
+    // Same-tab navigation (Phase A fallback) — leave the office for Paperclip.
+    e.preventDefault();
+    const href = open.getAttribute('href');
+    closePaperclipChatPanel();
+    if (href) followHttps(href);
+  });
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'bhq-pcchat-close';
+  closeBtn.type = 'button';
+  closeBtn.setAttribute('aria-label', 'Close chat');
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', () => closePaperclipChatPanel());
+  head.append(title, open, closeBtn);
+
+  const note = document.createElement('p');
+  note.className = 'bhq-pcchat-note';
+  note.textContent = 'Uses your Paperclip board login. If the panel stays blank, open the full page.';
+
+  const frame = document.createElement('iframe');
+  frame.className = 'bhq-pcchat-frame';
+  frame.title = 'Paperclip agent chat';
+  frame.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
+  frame.setAttribute('allow', 'clipboard-read; clipboard-write');
+
+  sheet.append(head, note, frame);
+  root.append(sheet);
+  root.addEventListener('click', (e) => { if (e.target === root) closePaperclipChatPanel(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && paperclipPanel && !paperclipPanel.root.hidden) closePaperclipChatPanel();
+  });
+  document.body.append(root);
+  return { root, frame, open, closeBtn };
 }

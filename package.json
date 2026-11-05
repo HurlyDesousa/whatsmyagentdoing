@@ -44,6 +44,6 @@
     "test:ui": "node tests/ui.cjs",
     "test:blobs": "node --test tests/blob-ux.cjs tests/wallpaper-cues.cjs tests/wallpaper-feed.cjs tests/quality-4d.cjs",
     "test:watcher": "node --test tests/watcher.cjs tests/omp.cjs",
-    "test:server": "node --test tests/server.cjs tests/sse.cjs"
+    "test:server": "node --test tests/server.cjs tests/sse.cjs tests/paperclip-resume.cjs"
   }
 }
