@@ -5,11 +5,11 @@
  *   left, under the floors   dock: Status check (while one runs) / Waiting on me / Finished / Routines
  *   bottom-left activity feed (last 4)    bottom-right (left of the card)  zoom - / +
  *
- *   initUI({ onSelectBot, onSelectFloor, onZoom, onOpenChat })
+ *   initUI({ onSelectBot, onSelectFloor, onZoom, onOpenChat, onStartAgent })
  *   renderUI(state, { currentFloor, selectedBot })   // idempotent, cheap, safe to call every second
  *
  * State fields read: bots, floors, feed, usage, demo, now, summary, plus (bots-only mode, may be missing):
- *   bots[id].chat_url, state.finished [{ t, bot, name, step }], state.routines [{ bot, name, routine, schedule, next_run }],
+ *   bots[id].chat_url, bots[id].paperclip_agent_id, state.finished [{ t, bot, name, step }], state.routines [{ bot, name, routine, schedule, next_run }],
  *   bots[id].last_seen (its own last status line), bots[id].unreported { from, to } (usage rose, no status line),
  *   state.check { t, bots: [{ id, name, at }] } (a status check: who has answered).
  *
@@ -616,13 +616,18 @@ function buildPanel(root) {
 
   const body = watchFade(h('div', { class: 'bhq-card-body' }, taskBlock, stats, useBlock, stepsBlock));
 
+  const start = h('button', { class: 'bhq-cta bhq-cta--start', type: 'button', text: 'Start', hidden: true, title: 'Resume this Paperclip agent' });
+  start.addEventListener('click', () => {
+    const id = start.getAttribute('data-agent');
+    if (id) startAgent(U.cardBot, id);
+  });
   const cta = h('button', { class: 'bhq-cta', type: 'button', text: 'Open chat', disabled: true, title: 'Set Wallpaper feed in Settings to enable Open chat' });
   cta.addEventListener('click', () => {
     const url = cta.getAttribute('data-chat');
     if (url) openChat(U.cardBot, url);
   });
 
-  const more = h('div', { class: 'bhq-more bhq-surface bhq-glow bhq-glow--still' }, body, h('div', { class: 'bhq-card-foot' }, cta));
+  const more = h('div', { class: 'bhq-more bhq-surface bhq-glow bhq-glow--still' }, body, h('div', { class: 'bhq-card-foot' }, start, cta));
   const cgrab = h('span', { class: 'bhq-cgrab', 'aria-hidden': 'true' });
   const card = h('section', { class: 'bhq-card', hidden: true, 'aria-label': 'Bot card' }, cgrab, hero, more);
 
@@ -632,7 +637,7 @@ function buildPanel(root) {
     root, team, tcard, teamHead: head, teamTitle, teamSub, teamBig: big, nWait, nErr, rowWait, rowErr, lErr, list, teamEmpty,
     card: {
       root: card, hero, body, av, name, where, status, stDot, stTxt, now, taskBlock, task,
-      sSteps, sTasks, sHours, usageLabel, useBlock, fuel, fillBar, shareNum, reset, hist, histSig: null, cta, fresh: true,
+      sSteps, sTasks, sHours, usageLabel, useBlock, fuel, fillBar, shareNum, reset, hist, histSig: null, start, cta, fresh: true,
     },
   };
 }
@@ -641,6 +646,11 @@ function openChat(id, url) {
   if (!url) return;
   if (U.h.onOpenChat) U.h.onOpenChat(id, url);
   else followChat(url);
+}
+
+function startAgent(botId, agentId) {
+  if (!agentId) return;
+  if (U.h.onStartAgent) U.h.onStartAgent(botId, agentId);
 }
 
 // grokbot:// needs a real link activation. Assigning location from the button
@@ -1478,6 +1488,13 @@ function renderCard(state, bot) {
     ? 'Open this bot chat'
     : (state.wallpaper_feed ? 'No chat link yet' : 'Set Wallpaper feed in Settings to enable Open chat');
   setAttr(c.cta, 'title', ctaTitle);
+
+  // Start when paused / waiting on you (Paperclip resume).
+  const needsStart = (s === 'waiting_user' || s === 'stuck') && !!bot.paperclip_agent_id;
+  setHidden(c.start, !needsStart);
+  setAttr(c.start, 'data-agent', needsStart ? bot.paperclip_agent_id : null);
+  setAttr(c.start, 'disabled', c.startBusy ? 'true' : null);
+  setText(c.start, c.startBusy ? 'Starting…' : 'Start');
   c.fresh = false;
 }
 
@@ -1617,22 +1634,28 @@ function renderCheck(state) {
 function makeWaitRow(id) {
   const av = makeAva();
   const name = h('button', { class: 'bhq-wname', type: 'button' });
+  const start = h('button', { class: 'bhq-wbtn bhq-wbtn--start', type: 'button', text: 'Start', hidden: true });
   const btn = h('button', { class: 'bhq-wbtn', type: 'button', text: 'Open chat', hidden: true });
   const st = h('b');
   const step = h('span');
   const text = h('p', { class: 'bhq-wtext' }, st, step);
   const row = h('div', { class: 'bhq-wrow', 'data-id': id },
     av.root,
-    h('div', { class: 'bhq-wmain' }, h('div', { class: 'bhq-wtop' }, name, btn), text));
+    h('div', { class: 'bhq-wmain' }, h('div', { class: 'bhq-wtop' }, name, start, btn), text));
   const select = () => { if (U.h.onSelectBot) U.h.onSelectBot(id); };
   name.addEventListener('click', select);
   row.addEventListener('click', (e) => { if (!e.target.closest('button')) select(); });
+  start.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const agent = start.getAttribute('data-agent');
+    if (agent) startAgent(id, agent);
+  });
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     const url = btn.getAttribute('data-chat');
     if (url) openChat(id, url);
   });
-  return { row, av, name, btn, st, step };
+  return { row, av, name, start, btn, st, step };
 }
 
 function renderWaiting(state) {
@@ -1663,12 +1686,24 @@ function renderWaiting(state) {
     setText(r.name, bot.name || id);
     setText(r.st, CHIP[s] || statusLabel(s));
     setText(r.step, bot.step ? ' · ' + bot.step : '');
+    const canStart = (s === 'waiting_user' || s === 'stuck') && !!bot.paperclip_agent_id;
+    setHidden(r.start, !canStart);
+    setAttr(r.start, 'data-agent', canStart ? bot.paperclip_agent_id : null);
     setHidden(r.btn, !bot.chat_url);
     setAttr(r.btn, 'data-chat', bot.chat_url || null);
     return r.row;
   });
   reconcile(d.wlist, els, 0);
   setHidden(d.wempty, ids.length > 0);
+}
+
+/** Brief busy state on the selected bot's Start CTA while resume is in flight. */
+export function setStartBusy(busy) {
+  if (!U || !U.panel || !U.panel.card) return;
+  U.panel.card.startBusy = !!busy;
+  const c = U.panel.card;
+  setAttr(c.start, 'disabled', busy ? 'true' : null);
+  setText(c.start, busy ? 'Starting…' : 'Start');
 }
 
 /* Finished: the `done` lines of the last 24 hours, newest first, on a timeline. Hidden when the server sends none. */

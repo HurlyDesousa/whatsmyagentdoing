@@ -29,7 +29,7 @@ The page polls `/json?poll=1&since=12h`, then follows `/sse`, and replays the la
 | `roster` | Quiet bots exist. They do not replace anyone already on the floor |
 | `looks` | Recolours the existing jelly blob (see the map below) |
 | `usage` | A **used N%** pill on the Kenney floors. **4D** shows the week meter (percent, bar, "resets in …") and each bot's share of that total ("N% of all") |
-| `chat` | **Open chat** (`grokbot://` or `https://` only). On **4D** the button follows that link |
+| `chat` | **Open chat.** The office maps known bots to Paperclip (`https://paperclip.s-w.art/SWA/chats/<urlKey>`) and ignores `grokbot://`. Unmapped bots may still use an `https://` feed link. **4D** opens a Paperclip panel (full-page same-tab fallback) |
 | `routines` | A Routines list. **4D** keeps the latest routines, chat, looks, groups and roster lines in this browser after the relay’s 12-hour window drops them |
 | `groups` | A label on the bot (`Ops`, `Infra`, `Watch`, …). Not a new floor |
 

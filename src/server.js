@@ -32,6 +32,7 @@ const scenes = require('./scenes');
 const updater = require('./update');
 const { ompResumeCommand } = require('./omp');
 const { createAuth } = require('./auth');
+const { resumeAgent } = require('./paperclip-resume');
 
 function serveFile(res, root, rel) {
   const file = path.normalize(path.join(root, rel));
@@ -93,6 +94,8 @@ function view(s, now, { privacy }) {
     out.ompProfile = s.ompProfile || null;
     out.resumeCommand = ompResumeCommand(s);
   }
+  // Paperclip agent UUID for office Start → resume (Hurly crew + live ingest).
+  if (s.pc) out.pc = s.pc;
   if (privacy) {
     out.prompt = out.reply = out.title = null;
     if (out.activity) out.activity = out.activity.split(/[:\s]/)[0];
@@ -272,6 +275,13 @@ function createServer(watcher, opts, { onShutdown, onRestart, auth = createAuth(
     } else if (url.pathname === '/api/sessions') {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(snapshot(watcher, opts)));
+    } else if (url.pathname === '/api/paperclip/resume' && req.method === 'POST') {
+      // Start a paused/waiting Paperclip agent from the office UI.
+      readJsonBody(req).then(async (body) => {
+        const id = body && (body.agentId || body.id || body.pc);
+        const result = await resumeAgent(id);
+        json(result.ok ? 200 : result.status || 502, result);
+      });
     } else if (url.pathname === '/api/shutdown' && req.method === 'POST') {
       // Only our CLI sends this header; a web page can't add a custom header
       // to a cross-site request without a CORS preflight, which we never allow.
