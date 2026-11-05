@@ -79,6 +79,16 @@
   const SEAT_STORE_KEY = 'wmad.seatAssign';
   // 20 communal bank stools + 1 department manager desk (SWA-3195).
   const PER_FLOOR = 21;
+  // SWA-3221: logical desks mapping to removed window-side visuals 03/05/07/09 via DESK_ORDER.
+  const REMOVED_LOGICAL_DESKS = new Set([2, 3, 4, 5]);
+  function isDeskOpen(n) {
+    return Number.isInteger(n) && n >= 1 && n <= PER_FLOOR && !REMOVED_LOGICAL_DESKS.has(n);
+  }
+  function nextOpenInRange(start, maxInclusive) {
+    let d = start;
+    while (d <= maxInclusive && !isDeskOpen(d)) d += 1;
+    return d <= maxInclusive ? d : null;
+  }
 
   // Wallpaper picker shapes -> the office blobs that already exist
   // (web/grokblobs.js / public/office.js). Triangle in the wallpaper is the
@@ -191,7 +201,7 @@
       const out = {};
       for (const [id, desk] of Object.entries(parsed)) {
         const n = Number(desk);
-        if (!id || !Number.isInteger(n) || n < 1 || n > PER_FLOOR) continue;
+        if (!id || !isDeskOpen(n)) continue;
         out[String(id).slice(0, 64)] = n;
       }
       return out;
@@ -208,7 +218,7 @@
   function assignSeat(botId, desk) {
     const id = String(botId || '').slice(0, 64);
     const n = Number(desk);
-    if (!id || !Number.isInteger(n) || n < 1 || n > PER_FLOOR) return null;
+    if (!id || !isDeskOpen(n)) return null;
     const map = loadSeatAssign();
     const prev = map[id];
     let displaced = null;
@@ -216,7 +226,7 @@
       if (other !== id && d === n) { displaced = other; break; }
     }
     if (displaced) {
-      if (prev) map[displaced] = prev;
+      if (prev && isDeskOpen(prev)) map[displaced] = prev;
       else delete map[displaced];
     }
     map[id] = n;
@@ -236,7 +246,7 @@
     }
     for (const id of onFloor) {
       const want = map[id];
-      if (!want || !bots[id]) continue;
+      if (!want || !bots[id] || !isDeskOpen(want)) continue;
       const cur = bots[id].desk;
       if (cur === want) continue;
       const other = taken.get(want);
@@ -249,6 +259,35 @@
       bots[id].desk = want;
       taken.set(want, id);
     }
+  }
+
+  // SWA-3221: move anyone still on a cleared window seat to the next free valid desk; scrub seat store.
+  function relocateRemovedDesks(bots, floorIds) {
+    const onFloor = floorIds || [];
+    const taken = new Set();
+    for (const id of onFloor) {
+      const d = bots[id] && bots[id].desk;
+      if (isDeskOpen(d)) taken.add(d);
+    }
+    const map = loadSeatAssign();
+    let dirty = false;
+    for (const [id, d] of Object.entries(map)) {
+      if (!isDeskOpen(d)) { delete map[id]; dirty = true; }
+    }
+    for (const id of onFloor) {
+      const b = bots[id];
+      if (!b || isDeskOpen(b.desk)) continue;
+      let free = null;
+      for (let d = 1; d <= PER_FLOOR; d++) {
+        if (isDeskOpen(d) && !taken.has(d)) { free = d; break; }
+      }
+      if (free == null) continue;
+      b.desk = free;
+      taken.add(free);
+      map[id] = free;
+      dirty = true;
+    }
+    if (dirty) saveSeatAssign(map);
   }
 
   function feedBase(raw) {
@@ -949,11 +988,22 @@
       let desk;
       if (floor.id === 'main-floor' || floor.id.startsWith('main-floor-')) {
         // Dept A → bank A (1–10), Dept B → bank B (11–20); overflow fills the other bank.
-        if (isDeptA(row.name) && floor.nextA <= 10) desk = floor.nextA++;
-        else if (!isDeptA(row.name) && floor.nextB <= 20) desk = floor.nextB++;
-        else if (floor.nextA <= 10) desk = floor.nextA++;
-        else if (floor.nextB <= 20) desk = floor.nextB++;
-        else desk = floor.ids.length + 1;
+        // SWA-3221 skips cleared logical desks 2–5 (removed window-side visuals).
+        const takeA = () => {
+          const d = nextOpenInRange(floor.nextA, 10);
+          if (d == null) return null;
+          floor.nextA = d + 1;
+          return d;
+        };
+        const takeB = () => {
+          const d = nextOpenInRange(floor.nextB, 20);
+          if (d == null) return null;
+          floor.nextB = d + 1;
+          return d;
+        };
+        if (isDeptA(row.name)) desk = takeA() || takeB();
+        else desk = takeB() || takeA();
+        if (desk == null) desk = nextOpenInRange(1, PER_FLOOR) || (floor.ids.length + 1);
       } else {
         desk = floor.ids.length + 1;
       }
@@ -987,7 +1037,10 @@
         history: row.step ? [{ t: nowIso, status, step: row.step }] : [],
       };
     }
-    for (const floor of floors.values()) applySeatOverrides(bots, floor.ids);
+    for (const floor of floors.values()) {
+      applySeatOverrides(bots, floor.ids);
+      relocateRemovedDesks(bots, floor.ids);
+    }
 
     let floorList = [...floors.values()];
     floorList.sort((a, b) => (FLOOR_RANK[a.id] ?? 50) - (FLOOR_RANK[b.id] ?? 50) || a.name.localeCompare(b.name));

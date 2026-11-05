@@ -354,20 +354,30 @@ test('paperclipAgentId maps names and session pc; seats persist via assignSeat',
   const W = sandbox.WallpaperFeed;
   const a = W.botId('Chief Master');
   const b = W.botId('Monitor Master');
-  assert.equal(W.assignSeat(a, 5), 5);
-  assert.equal(W.assignSeat(b, 7), 7);
-  assert.equal(W.assignSeat(a, 7), 7); // Chief takes Monitor's desk; Monitor keeps prior seat 5 via swap
+  assert.equal(W.assignSeat(a, 1), 1);
+  assert.equal(W.assignSeat(b, 6), 6);
+  assert.equal(W.assignSeat(a, 6), 6); // Chief takes Monitor's desk; Monitor keeps prior seat 1 via swap
   assert.equal(W.assignSeat(a, 21), 21); // department manager desk is a valid seating target
+  assert.equal(W.assignSeat(a, 5), null); // SWA-3221: cleared window-side logical desks are not seatable
   assert.equal(W.PER_FLOOR, 21);
   const seats = W.loadSeatAssign();
   assert.equal(seats[a], 21);
-  assert.equal(seats[b], 5);
+  assert.equal(seats[b], 1);
   const tower = W.towerState([
     { key: 'paperclip:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x', pc: '2842a7bf-9527-42c1-aa86-ba5b599c8878' },
     { key: 'paperclip:mon', id: 'mon', agent: 'grokbot', project: 'Monitor Master', status: 'waiting', activity: 'needs you' },
   ], {});
   assert.equal(tower.bots[a].desk, 21);
-  assert.equal(tower.bots[b].desk, 5);
+  assert.equal(tower.bots[b].desk, 1);
   assert.equal(tower.bots[a].paperclip_agent_id, '2842a7bf-9527-42c1-aa86-ba5b599c8878');
   assert.equal(tower.bots[b].paperclip_agent_id, '4f2ddf7b-26ee-4beb-8424-beddd98a0247');
+  // Auto desk fill skips removed logical 2–5 (window-side visuals 03/05/07/09).
+  const filled = W.towerState([
+    { key: 'p1', id: '1', agent: 'paperclip', project: 'Code Master', status: 'thinking', activity: 'a' },
+    { key: 'p2', id: '2', agent: 'paperclip', project: 'Code Master 2', status: 'thinking', activity: 'b' },
+    { key: 'p3', id: '3', agent: 'paperclip', project: 'QA Engineer', status: 'thinking', activity: 'c' },
+  ], {});
+  const desks = Object.values(filled.bots).map((bot) => bot.desk).sort((x, y) => x - y);
+  // QA + Code Master 2 are Dept A (1, skip 2–5 → 6); bare "Code Master" is bank B (11).
+  assert.deepEqual(desks, [1, 6, 11]);
 });
