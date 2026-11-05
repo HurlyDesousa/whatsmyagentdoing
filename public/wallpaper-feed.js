@@ -842,6 +842,15 @@
   };
   const FLOOR_RANK = { ops: 0, infra: 1, watch: 2, 'main-floor': 3 };
   const COUNT_KEYS = ['working', 'idle', 'waiting_user', 'error', 'stuck', 'done'];
+  // SWA-3157: both departments share Main Floor — Dept A on table_1 (desks 1–10), Dept B on table_2 (11–20).
+  const DEPT_A = [
+    'dispatcher', 'code master 1', 'code master 2', 'qa engineer', 'qa engineer 2',
+  ];
+  const MAIN_FLOOR_CREW = new Set([
+    ...DEPT_A,
+    'chief', 'chief master', 'monitor master', 'proxmox master', 'dockhand master',
+    'truenas master', 'doc master', 'claude', 'gpu agent', 'amazon master', 'accountant',
+  ]);
 
   function zeroCounts() {
     return { working: 0, idle: 0, waiting_user: 0, error: 0, stuck: 0, done: 0 };
@@ -854,12 +863,33 @@
     return '#' + (((h >>> 0) & 0xffffff) | 0x303030).toString(16).padStart(6, '0').slice(-6).toUpperCase();
   }
 
+  function normBot(name) {
+    return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function isDeptA(name) {
+    const n = normBot(name);
+    return DEPT_A.some((k) => n === k || n.startsWith(k + ' '));
+  }
+
+  function isMainFloorCrew(name) {
+    const n = normBot(name);
+    return MAIN_FLOOR_CREW.has(n) || DEPT_A.some((k) => n === k || n.startsWith(k + ' '));
+  }
+
   function towerFloorName(session) {
+    const label = (session && (session.project || session.title)) || '';
+    // Named Hurly crew sit together on Main Floor so the dept divider splits them.
+    if (isMainFloorCrew(label)) return 'Main floor';
     const g = session && session.wallpaper && session.wallpaper.group;
     if (g) return clip(g, 60);
-    const row = rememberedFor((session && (session.project || session.title)) || '');
+    const row = rememberedFor(label);
     if (row && row.group) return row.group;
     return 'Main floor';
+  }
+
+  function deptDeskRank(name) {
+    return isDeptA(name) ? 0 : 1;
   }
 
   // Same split as the wallpaper: a bot's posted number over the week's total
@@ -898,7 +928,10 @@
       const pc = paperclipAgentId(name, s.pc || s.paperclipAgentId);
       rows.push({ id, name, floorName: towerFloorName(s), look, status, step, chat, pc, usagePct: posted, seenMs });
     }
-    rows.sort((a, b) => a.floorName.localeCompare(b.floorName) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    rows.sort((a, b) => a.floorName.localeCompare(b.floorName)
+      || deptDeskRank(a.name) - deptDeskRank(b.name)
+      || a.name.localeCompare(b.name)
+      || a.id.localeCompare(b.id));
 
     const floors = new Map();
     function takeFloor(name) {
@@ -909,7 +942,7 @@
         n += 1;
         id = base + '-' + n;
       }
-      if (!floors.has(id)) floors.set(id, { id, name: n === 1 ? name : `${name} · ${n}`, ids: [], counts: zeroCounts() });
+      if (!floors.has(id)) floors.set(id, { id, name: n === 1 ? name : `${name} · ${n}`, ids: [], counts: zeroCounts(), nextA: 1, nextB: 11 });
       return floors.get(id);
     }
 
@@ -924,7 +957,17 @@
     }
     for (const row of rows) {
       const floor = takeFloor(row.floorName);
-      const desk = floor.ids.length + 1;
+      let desk;
+      if (floor.id === 'main-floor' || floor.id.startsWith('main-floor-')) {
+        // Dept A → bank A (1–10), Dept B → bank B (11–20); overflow fills the other bank.
+        if (isDeptA(row.name) && floor.nextA <= 10) desk = floor.nextA++;
+        else if (!isDeptA(row.name) && floor.nextB <= 20) desk = floor.nextB++;
+        else if (floor.nextA <= 10) desk = floor.nextA++;
+        else if (floor.nextB <= 20) desk = floor.nextB++;
+        else desk = floor.ids.length + 1;
+      } else {
+        desk = floor.ids.length + 1;
+      }
       floor.ids.push(row.id);
       const status = COUNT_KEYS.includes(row.status) ? row.status : 'idle';
       floor.counts[status] += 1;

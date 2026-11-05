@@ -23,9 +23,9 @@ const PHONE_SPAN_W = 29.5;                          // m across a phone's scene 
 const ZOOM = { min: 0.75, max: 3, focus: 2 };
 const UI_LEFT = 230, UI_RIGHT = 360;                   // glass panels the building must not hide behind
 const SIN_E = Math.sin(Math.atan(1 / Math.SQRT2));      // sin(35.264°) = ground foreshortening
-// Server desk numbers fill 1..20 in arrival order; seat them on the far side of the tables first (odd desks face
-// the camera), neighbours alternating so tags never collide.
-const DESK_ORDER = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
+// Server desk numbers fill 1..20 in arrival order. Bank A (table_1, desks 01–10) then bank B (table_2, 11–20);
+// within each bank seat the far side first (odd desks face the camera) so tags stay clear of each other.
+const DESK_ORDER = [1, 3, 5, 7, 9, 2, 4, 6, 8, 10, 11, 13, 15, 17, 19, 12, 14, 16, 18, 20];
 
 let renderer, labels, camera, scene, container, callbacks, daylight, building, post;
 let assets = null;
