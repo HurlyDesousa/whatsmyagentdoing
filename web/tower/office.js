@@ -73,14 +73,15 @@ function finish(templates, spots, nightMaps, source) {
     console.warn('[office] dept divider skipped:', err.message);
   }
   try {
-    addManagerDesk(templates.floor_open, spots);
-  } catch (err) {
-    console.warn('[office] manager desk skipped:', err.message);
-  }
-  try {
     clearRemovedWorkstations(templates.floor_open, spots);
   } catch (err) {
     console.warn('[office] removed workstations skipped:', err.message);
+  }
+  try {
+    // After SWA-3221 clears the window bay so the supervisor unit lands in an empty footprint.
+    addManagerDesk(templates.floor_open, spots);
+  } catch (err) {
+    console.warn('[office] manager desk skipped:', err.message);
   }
   return { templates, spots, nightMaps, source, style };
 }
@@ -248,18 +249,21 @@ function addDeptDivider(open) {
   open.add(g);
 }
 
-// SWA-3195: dedicated department-manager desk (not a bank stool). Seat index 21 for drag-drop.
+// SWA-3195 / SWA-3211: dedicated department-manager desk (not a bank stool). Seat index 21 for drag-drop.
+// SWA-3211: move desk + chair + occupant as one unit from the Tasks-board walkway into the
+// rear/window bay cleared by SWA-3221 (visual desks 03/05/07/09). Do not leave a duplicate at
+// the old (-6.7, -0.85) footprint. Chair tucks on the glass side facing the communal table.
 function addManagerDesk(open, spots) {
   if (!open || open.getObjectByName('manager_desk')) return;
   if (spots.desks[20]) return;
   const g = new THREE.Group();
   g.name = 'manager_desk';
-  // Head of the banks, left walkway — clear of communal stools, faces +x toward the floor.
-  const cx = -6.7, cz = -0.85;
+  // Cleared window-side bay (midpoint of removed stool columns ≈ x -4.0..1.1, z ≈ -3.9).
+  const cx = -1.45, cz = -3.75;
   const oak = new THREE.MeshStandardMaterial({ name: 'manager_desk_oak', color: 0xC9A57C, roughness: 0.55 });
   const black = new THREE.MeshStandardMaterial({ name: 'manager_desk_frame', color: 0x1C1C1E, roughness: 0.45, metalness: 0.3 });
   const fabric = new THREE.MeshStandardMaterial({ name: 'manager_desk_seat', color: 0x3A3A3E, roughness: 0.85 });
-  // Distinct rectangular oak desk (not a bank stool / communal table segment).
+  // Distinct rectangular oak desk (not a bank stool / communal table segment); long edge // table.
   const top = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.05, 0.7), oak);
   top.position.set(cx, 0.725, cz);
   g.add(top);
@@ -268,13 +272,13 @@ function addManagerDesk(open, spots) {
     leg.position.set(cx + lx, 0.35, cz + lz);
     g.add(leg);
   }
-  // Task chair behind the desk (seat faces +x / the banks).
-  const seatX = cx - 0.72, seatZ = cz;
+  // Task chair behind the desk on the window side (seat faces +z / the table).
+  const seatX = cx, seatZ = cz - 0.72;
   const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.26, 0.08, 20), fabric);
   pad.position.set(seatX, 0.46, seatZ);
   g.add(pad);
-  const back = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.42, 0.42), fabric);
-  back.position.set(seatX - 0.2, 0.72, seatZ);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.08), fabric);
+  back.position.set(seatX, 0.72, seatZ - 0.2);
   g.add(back);
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.38, 12), black);
   base.position.set(seatX, 0.22, seatZ);
@@ -283,20 +287,20 @@ function addManagerDesk(open, spots) {
   const laptop = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.012, 0.22), new THREE.MeshStandardMaterial({
     name: 'manager_desk_laptop', color: 0xC9CCD0, roughness: 0.35, metalness: 0.75,
   }));
-  laptop.position.set(cx + 0.1, 0.756, cz);
+  laptop.position.set(cx, 0.756, cz + 0.05);
   g.add(laptop);
   const lid = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.2, 0.008), laptop.material);
-  lid.position.set(cx + 0.1, 0.86, cz - 0.1);
-  lid.rotation.x = -0.35;
+  lid.position.set(cx, 0.86, cz + 0.15);
+  lid.rotation.x = 0.35; // screen faces the chair (−z)
   g.add(lid);
   open.add(g);
 
   const seat = new THREE.Object3D();
   seat.name = 'desk_21';
   seat.position.set(seatX, SEAT_Y, seatZ);
-  seat.rotation.y = Math.PI / 2; // face +x toward the banks
+  seat.rotation.y = 0; // face +z toward the communal table
   open.add(seat);
-  spots.desks[20] = { pos: new THREE.Vector3(seatX, SEAT_Y, seatZ), yaw: Math.PI / 2 };
+  spots.desks[20] = { pos: new THREE.Vector3(seatX, SEAT_Y, seatZ), yaw: 0 };
 }
 
 // Baked surfaces are unlit: day lightmap as a basic material (night map is mixed in by the instance patch).
