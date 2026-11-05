@@ -381,3 +381,94 @@ test('paperclipAgentId maps names and session pc; seats persist via assignSeat',
   // QA + Code Master 2 are Dept A (1, skip 2–5 → 6); bare "Code Master" is bank B (11).
   assert.deepEqual(desks, [1, 6, 11]);
 });
+
+test('moveToFloor relocates across floors, persists, and refuses a full floor', () => {
+  const mem = new Map();
+  const sandbox = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, v),
+      removeItem: (k) => mem.delete(k),
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  require('node:vm').runInNewContext(feedSrc, sandbox, { filename: 'wallpaper-feed.js' });
+  const W = sandbox.WallpaperFeed;
+  const chief = W.botId('Chief Master');
+  const mon = W.botId('Monitor Master');
+  const prox = W.botId('Proxmox Master');
+  const sessions = [
+    { key: 'pc:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x' },
+    { key: 'gb:mon', id: 'mon', agent: 'grokbot', project: 'Monitor Master', status: 'waiting', activity: 'needs you' },
+    { key: 'gb:prox', id: 'prox', agent: 'grokbot', project: 'Proxmox Master', status: 'idle', activity: null },
+  ];
+  const before = W.towerState(sessions, {});
+  assert.equal(before.bots[chief].floor, 'ops');
+  assert.equal(before.bots[mon].floor, 'watch');
+  assert.equal(before.bots[prox].floor, 'infra');
+  const floorIds = before.floors.map((f) => f.id).slice().sort();
+  assert.equal(floorIds.join(','), 'infra,ops,watch');
+
+  const moved = W.moveToFloor(chief, 'watch', sessions, {});
+  assert.equal(moved.ok, true);
+  assert.equal(moved.floorId, 'watch');
+  assert.ok(moved.desk >= 1 && moved.desk <= W.PER_FLOOR);
+  assert.equal(W.loadFloorAssign()[chief], 'watch');
+
+  const after = W.towerState(sessions, {});
+  assert.equal(after.bots[chief].floor, 'watch');
+  assert.equal(after.bots[chief].desk, moved.desk);
+  assert.equal(after.bots[mon].floor, 'watch');
+  // Menu source matches floor switcher: still the live floor list, no hardcodes.
+  assert.ok(after.floors.some((f) => f.id === 'watch' && f.name === 'Watch'));
+  assert.equal(after.floors.find((f) => f.id === 'ops'), undefined); // Chief was alone on Ops
+
+  // Reload persistence: fresh WallpaperFeed + same localStorage keeps the move.
+  const sandbox2 = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: sandbox.localStorage,
+  };
+  sandbox2.window = sandbox2;
+  sandbox2.globalThis = sandbox2;
+  require('node:vm').runInNewContext(feedSrc, sandbox2, { filename: 'wallpaper-feed.js' });
+  const W2 = sandbox2.WallpaperFeed;
+  const reloaded = W2.towerState(sessions, {});
+  assert.equal(reloaded.bots[chief].floor, 'watch');
+  assert.equal(reloaded.bots[chief].desk, moved.desk);
+
+  // Fill Watch to capacity, then refuse another move without dropping the agent.
+  const fillers = [];
+  for (let i = 0; i < W.PER_FLOOR; i++) {
+    fillers.push({
+      key: `gb:fill-${i}`, id: `fill-${i}`, agent: 'grokbot',
+      project: `Fill Bot ${i}`, status: 'idle', activity: null,
+      wallpaper: { group: 'Watch', step: 'pad' },
+    });
+  }
+  const packedSessions = [
+    { key: 'pc:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x' },
+    ...fillers,
+  ];
+  // Clear prior override so Chief starts on Ops; Watch is full of fillers.
+  W2.saveFloorAssign({});
+  W2.saveSeatAssign({});
+  const packed = W2.towerState(packedSessions, {});
+  const baseWatch = packed.floors.find((f) => f.id === 'watch');
+  assert.ok(baseWatch);
+  assert.equal(baseWatch.free_desks, 0);
+  assert.equal(packed.bots[chief].floor, 'ops');
+  const refuse = W2.moveToFloor(chief, 'watch', packedSessions, {});
+  assert.equal(refuse.ok, false);
+  assert.equal(refuse.reason, 'full');
+  const stayed = W2.towerState(packedSessions, {});
+  assert.ok(stayed.bots[chief], 'full-floor refusal must not drop the agent');
+  assert.equal(stayed.bots[chief].floor, 'ops');
+});

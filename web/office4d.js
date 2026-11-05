@@ -66,7 +66,12 @@ export class Office4D {
       onSelectBot: (id) => this.selectBot(id),
       onHoverBot: (id) => sfx.hover(id),
       onAssignSeat: (id, desk) => this.assignSeat(id, desk),
+      onBotContextMenu: (id, x, y) => this.showBotMenu(id, x, y),
     });
+    this._onDocPointer = (e) => {
+      if (this._botMenu && !this._botMenu.hidden && !this._botMenu.contains(e.target)) this.hideBotMenu();
+    };
+    document.addEventListener('pointerdown', this._onDocPointer, true);
     initUI({
       onSelectBot: (id) => this.selectBot(id),
       onSelectFloor: (id) => this.setTowerFloor(id),
@@ -106,6 +111,139 @@ export class Office4D {
     if (!feed || typeof feed.assignSeat !== 'function') return;
     if (!feed.assignSeat(botId, desk)) return;
     sfx.select(true);
+    this.update(this.sessions);
+  }
+
+  ensureBotMenu() {
+    if (this._botMenu) return this._botMenu;
+    if (!document.getElementById('tower-bot-menu-style')) {
+      const css = document.createElement('style');
+      css.id = 'tower-bot-menu-style';
+      css.textContent = [
+        '.tower-bot-menu{position:fixed;z-index:60;min-width:188px;padding:6px;border-radius:10px;',
+        'border:1px solid rgba(0,0,0,.12);background:rgba(255,255,255,.96);color:#1c1c1a;',
+        'box-shadow:0 10px 28px rgba(0,0,0,.16);font:13px/1.3 ui-sans-serif,system-ui,sans-serif;}',
+        '.tower-bot-menu[hidden]{display:none;}',
+        '.tower-bot-menu button,.tower-bot-menu .tower-bot-subhead{display:block;width:100%;text-align:left;border:0;',
+        'background:transparent;color:inherit;font:inherit;padding:7px 10px;border-radius:7px;cursor:pointer;}',
+        '.tower-bot-menu button:hover:not(:disabled){background:rgba(0,0,0,.06);}',
+        '.tower-bot-menu button:disabled{opacity:.38;cursor:default;}',
+        '.tower-bot-menu .tower-bot-subhead{font-weight:700;cursor:default;opacity:.72;padding-bottom:2px;}',
+        '.tower-bot-menu .tower-bot-floors{display:flex;flex-direction:column;gap:1px;margin:0 0 2px;}',
+        '.tower-bot-menu .tower-bot-note{display:none;margin:4px 6px 2px;font-size:12px;opacity:.75;}',
+        '.tower-bot-menu .tower-bot-note.is-on{display:block;}',
+        'html[data-theme="dark"] .tower-bot-menu{background:rgba(28,28,30,.96);color:#f5f5f7;border-color:rgba(255,255,255,.12);}',
+        'html[data-theme="dark"] .tower-bot-menu button:hover:not(:disabled){background:rgba(255,255,255,.08);}',
+      ].join('');
+      document.head.appendChild(css);
+    }
+    const menu = document.createElement('div');
+    menu.className = 'tower-bot-menu';
+    menu.hidden = true;
+    menu.setAttribute('role', 'menu');
+    menu.addEventListener('contextmenu', (ev) => ev.preventDefault());
+    // Hover/open must never change the viewed floor — only explicit Move clicks relocate.
+    menu.addEventListener('pointerenter', (ev) => ev.stopPropagation());
+    const head = document.createElement('div');
+    head.className = 'tower-bot-subhead';
+    head.textContent = 'Move to floor';
+    const floors = document.createElement('div');
+    floors.className = 'tower-bot-floors';
+    floors.setAttribute('role', 'group');
+    floors.setAttribute('aria-label', 'Other floors');
+    const note = document.createElement('div');
+    note.className = 'tower-bot-note';
+    note.setAttribute('role', 'status');
+    menu.append(head, floors, note);
+    document.body.appendChild(menu);
+    menu._floors = floors;
+    menu._note = note;
+    this._botMenu = menu;
+    return menu;
+  }
+
+  showBotMenu(botId, clientX, clientY) {
+    const state = this._state;
+    const bot = state && state.bots && state.bots[botId];
+    if (!bot) return;
+    // Do not change viewFloorId / follow the pick — menu open must not navigate.
+    const menu = this.ensureBotMenu();
+    menu.dataset.key = botId;
+    const floorsHost = menu._floors;
+    floorsHost.textContent = '';
+    menu._note.classList.remove('is-on');
+    menu._note.textContent = '';
+    const floors = (state.floors || []).slice().sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+    const others = floors.filter((f) => f.id !== bot.floor);
+    if (!others.length) {
+      menu._note.textContent = 'No other floors';
+      menu._note.classList.add('is-on');
+    }
+    for (const fl of others) {
+      const full = (fl.free_desks | 0) <= 0;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('role', 'menuitem');
+      b.dataset.floor = fl.id;
+      b.textContent = fl.name || fl.id;
+      b.disabled = full;
+      b.title = full ? 'Floor is full' : `Move to ${fl.name || fl.id}`;
+      b.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (b.disabled) {
+          menu._note.textContent = 'Floor is full — pick another';
+          menu._note.classList.add('is-on');
+          return;
+        }
+        this.moveBotToFloor(botId, fl.id, menu);
+      });
+      floorsHost.appendChild(b);
+    }
+    menu.hidden = false;
+    const pad = 8;
+    const w = 200;
+    const h = Math.min(320, 40 + others.length * 34 + 24);
+    let x = clientX, y = clientY;
+    const vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
+    if (x + w > vw - pad) x = Math.max(pad, vw - w - pad);
+    if (y + h > vh - pad) y = Math.max(pad, vh - h - pad);
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+  }
+
+  hideBotMenu() {
+    if (!this._botMenu) return;
+    this._botMenu.hidden = true;
+    this._botMenu.dataset.key = '';
+    if (this._botMenu._note) {
+      this._botMenu._note.classList.remove('is-on');
+      this._botMenu._note.textContent = '';
+    }
+  }
+
+  moveBotToFloor(botId, floorId, menu) {
+    const feed = globalThis.WallpaperFeed;
+    if (!feed || typeof feed.moveToFloor !== 'function') return;
+    // Keep the viewed floor — relocate the agent only; no accidental navigation.
+    const view = this.viewFloorId;
+    const result = feed.moveToFloor(botId, floorId, this.sessions, this.extras || {});
+    if (!result || !result.ok) {
+      const why = result && result.reason;
+      const msg = why === 'full' ? 'Floor is full — agent stayed put'
+        : why === 'missing' ? 'That floor is gone'
+          : why === 'same' ? 'Already on that floor'
+            : 'Could not move agent';
+      if (menu && menu._note) {
+        menu._note.textContent = msg;
+        menu._note.classList.add('is-on');
+      }
+      return;
+    }
+    sfx.select(true);
+    this.viewFloorId = view;
+    this._followPick = false;
+    this.hideBotMenu();
     this.update(this.sessions);
   }
 
@@ -201,6 +339,9 @@ export class Office4D {
   }
 
   destroy() {
+    if (this._onDocPointer) document.removeEventListener('pointerdown', this._onDocPointer, true);
+    this.hideBotMenu();
+    if (this._botMenu) { this._botMenu.remove(); this._botMenu = null; }
     try { destroySound(); } catch (e) { console.error(e); }
     try { destroyUI(); } catch (e) { console.error(e); }
     try { destroyScene(); } catch (e) { console.error(e); }

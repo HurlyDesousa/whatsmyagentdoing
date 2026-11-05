@@ -77,6 +77,7 @@
     'cursor-cloud': '1103a0e7-abc7-42fd-a5c9-66cfb37ce344',
   };
   const SEAT_STORE_KEY = 'wmad.seatAssign';
+  const FLOOR_STORE_KEY = 'wmad.floorAssign';
   // 20 communal bank stools + 1 department manager desk (SWA-3195).
   const PER_FLOOR = 21;
   // SWA-3221: logical desks mapping to removed window-side visuals 03/05/07/09 via DESK_ORDER.
@@ -290,6 +291,93 @@
       dirty = true;
     }
     if (dirty) saveSeatAssign(map);
+  }
+
+  function loadFloorAssign() {
+    try {
+      const raw = globalThis.localStorage && localStorage.getItem(FLOOR_STORE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      const out = {};
+      for (const [id, floorId] of Object.entries(parsed)) {
+        const fid = String(floorId || '').slice(0, 64);
+        if (!id || !fid) continue;
+        out[String(id).slice(0, 64)] = fid;
+      }
+      return out;
+    } catch (_) { return {}; }
+  }
+
+  function saveFloorAssign(map) {
+    try {
+      if (!globalThis.localStorage) return;
+      localStorage.setItem(FLOOR_STORE_KEY, JSON.stringify(map || {}));
+    } catch (_) { /* private mode */ }
+  }
+
+  function firstFreeDesk(bots, floorIds) {
+    const taken = new Set();
+    for (const id of floorIds || []) {
+      const b = bots[id];
+      if (b && isDeskOpen(b.desk)) taken.add(b.desk);
+    }
+    for (let d = 1; d <= PER_FLOOR; d++) if (isDeskOpen(d) && !taken.has(d)) return d;
+    return null;
+  }
+
+  // Relocate a bot onto another existing floor id (same source as the floor
+  // switcher). Persists floor + a free desk via the seat map. Never drops the
+  // agent when the target is full — returns { ok:false, reason:'full' }.
+  function moveToFloor(botId, floorId, sessions, extras) {
+    const id = String(botId || '').slice(0, 64);
+    const want = String(floorId || '').slice(0, 64);
+    if (!id || !want) return { ok: false, reason: 'bad_args' };
+    const state = towerState(sessions, extras || {});
+    const bot = state.bots && state.bots[id];
+    if (!bot) return { ok: false, reason: 'unknown' };
+    if (bot.floor === want) return { ok: false, reason: 'same' };
+    const floor = (state.floors || []).find((f) => f.id === want);
+    if (!floor) return { ok: false, reason: 'missing' };
+    const taken = new Set((floor.bots || []).map((bid) => state.bots[bid] && state.bots[bid].desk).filter((d) => isDeskOpen(d)));
+    let desk = null;
+    for (let d = 1; d <= PER_FLOOR; d++) {
+      if (isDeskOpen(d) && !taken.has(d)) { desk = d; break; }
+    }
+    if (!desk) return { ok: false, reason: 'full' };
+    const fmap = loadFloorAssign();
+    fmap[id] = want;
+    saveFloorAssign(fmap);
+    if (!assignSeat(id, desk)) return { ok: false, reason: 'seat' };
+    return { ok: true, floorId: want, desk };
+  }
+
+  // After natural group→floor placement, honor persisted floor overrides.
+  // Full / missing targets are skipped so the bot stays on its natural floor.
+  function applyFloorOverrides(bots, floors) {
+    const map = loadFloorAssign();
+    const ids = Object.keys(map);
+    if (!ids.length) return;
+    const byId = floors instanceof Map ? floors : new Map((floors || []).map((f) => [f.id, f]));
+    for (const botId of ids) {
+      const want = map[botId];
+      const bot = bots[botId];
+      if (!bot || !want) continue;
+      if (bot.floor === want) continue;
+      const target = byId.get(want);
+      if (!target || !Array.isArray(target.ids)) continue;
+      if (target.ids.length >= PER_FLOOR) continue;
+      const prev = byId.get(bot.floor);
+      if (prev && Array.isArray(prev.ids)) {
+        const i = prev.ids.indexOf(botId);
+        if (i >= 0) prev.ids.splice(i, 1);
+      }
+      target.ids.push(botId);
+      bot.floor = want;
+      bot.group = target.name;
+      const desk = firstFreeDesk(bots, target.ids.filter((x) => x !== botId));
+      if (desk) bot.desk = desk;
+    }
   }
 
   function feedBase(raw) {
@@ -1045,10 +1133,21 @@
         history: row.step ? [{ t: nowIso, status, step: row.step }] : [],
       };
     }
+    applyFloorOverrides(bots, floors);
+    // Drop empty overflow floors after overrides (keep named floors that still have people).
+    for (const [fid, floor] of [...floors.entries()]) {
+      if (!floor.ids.length && floors.size > 1) floors.delete(fid);
+    }
     for (const floor of floors.values()) {
+      floor.counts = zeroCounts();
+      for (const id of floor.ids) {
+        const st = bots[id] && COUNT_KEYS.includes(bots[id].status) ? bots[id].status : 'idle';
+        floor.counts[st] += 1;
+      }
       applySeatOverrides(bots, floor.ids);
       relocateRemovedDesks(bots, floor.ids);
     }
+
 
     let floorList = [...floors.values()];
     floorList.sort((a, b) => (FLOOR_RANK[a.id] ?? 50) - (FLOOR_RANK[b.id] ?? 50) || a.name.localeCompare(b.name));
@@ -1109,12 +1208,13 @@
     RELAY, NTFY, STORE_KEY, REMEMBERED,
     DEFAULT_FEED_TOPIC, DEFAULT_QUALITY, QUALITIES,
     PAPERCLIP_ORIGIN, PAPERCLIP_PREFIX, PAPERCLIP_CHAT_KEYS, PAPERCLIP_AGENT_IDS,
-    SEAT_STORE_KEY, PER_FLOOR,
+    SEAT_STORE_KEY, FLOOR_STORE_KEY, PER_FLOOR,
     parseFeedLink, parseFeedInput, defaultFeedLink, resolveFeedTarget,
     mapLook, reduceFeed, mergeSessions, officeStatus,
     resolveQuality, towerState,
     paperclipUrlKey, paperclipChatUrl, paperclipAgentId, resolveChatUrl, isPaperclipChatUrl,
     loadSeatAssign, saveSeatAssign, assignSeat, applySeatOverrides,
+    loadFloorAssign, saveFloorAssign, moveToFloor, applyFloorOverrides, firstFreeDesk,
     connectFeed, hashTag, rememberedFor, botId,
     configPinKey, pinsFromLines, mergePinned,
     get pageLink() { return pageLink; },
