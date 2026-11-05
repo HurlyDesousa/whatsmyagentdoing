@@ -52,7 +52,7 @@ body.tower-site #office {
 }
 body.tower-site .office-loader { color: #6e6e73; }
 
-body:not(.tower-site) :is(#topbar, #floors, #panel, #feed, .bhq-zoom, .bhq-dock, .bhq-sheet, .bhq-qual) {
+body:not(.tower-site) :is(#topbar, #floors, #panel, #feed, .bhq-zoom, .bhq-dock, .bhq-sheet) {
   display: none !important;
 }
 
@@ -80,16 +80,6 @@ body:not(.tower-site) :is(#topbar, #floors, #panel, #feed, .bhq-zoom, .bhq-dock,
   #feed { display: none; }
 }
 
-/* Quiet way back to the Kenney floors. Sits in the dashboard's top-right cluster. */
-.bhq-qual {
-  display: inline-flex; align-items: center; gap: 2px; height: 40px; padding: 4px;
-  border-radius: 20px; pointer-events: auto;
-}
-.bhq-qual button {
-  height: 32px; padding: 0 12px; border-radius: 16px; cursor: pointer;
-  font: 800 12px/1 var(--bhq-round, Nunito, system-ui, sans-serif); color: #b4b4ba;
-}
-.bhq-qual button.on { background: rgba(255, 255, 255, .14); color: #f2f2f7; }
 html[data-theme="dark"] body.tower-site {
   background: radial-gradient(70% 70% at 42% 38%, #1b2240 0%, #10162b 55%, #080b18 100%);
 }
