@@ -87,24 +87,22 @@ function finish(templates, spots, nightMaps, source) {
 
 // SWA-3221: drop stool/laptop/mug props + desk/screen empties at the four marked window-side seats.
 // Spots are nulled so drag-drop and sync skip them; agents on those logical desks are relocated in wallpaper-feed.
+// Window and aisle laptops on table_1 share an x column and sit only ~0.35 m apart in z, so laptop
+// bodies are cut by the table mid-plane (z < -2.7) per removed column — not a large sphere radius.
 function clearRemovedWorkstations(open, spots) {
   if (!open || !spots) return;
-  const centers = [];
+  const seatCenters = [];
+  const laptopColumns = []; // { x, zMax } — strip laptop tris with |Δx|<halfSpan and z < zMax
+  const TABLE1_MID_Z = -2.7; // midway between window screens (~-2.87) and aisle screens (~-2.53)
   for (const n of REMOVED_BANK_DESKS) {
     const id = String(n).padStart(2, '0');
     const desk = open.getObjectByName(`desk_${id}`);
-    if (desk) {
-      centers.push(desk.position.clone());
-      // Window-side laptop sits on the table toward +z from the seat (screen empties ~z=-2.87).
-      centers.push(new THREE.Vector3(desk.position.x, 0.75, desk.position.z + 1.03));
-      desk.parent.remove(desk);
-    } else {
-      // GLB / placeholder pair columns: desk_03/05/07/09 → x=-4/-2.3/-0.6/1.1 at z=-3.9.
-      const pair = Math.floor((n - 1) / 2);
-      const x = [-5.7, -4.0, -2.3, -0.6, 1.1][pair] ?? -2.3;
-      centers.push(new THREE.Vector3(x, SEAT_Y, -3.9));
-      centers.push(new THREE.Vector3(x, 0.75, -2.87));
-    }
+    const pair = Math.floor((n - 1) / 2);
+    const fallbackX = [-5.7, -4.0, -2.3, -0.6, 1.1][pair] ?? -2.3;
+    const x = desk ? desk.position.x : fallbackX;
+    seatCenters.push(desk ? desk.position.clone() : new THREE.Vector3(x, SEAT_Y, -3.9));
+    laptopColumns.push({ x, zMax: TABLE1_MID_Z });
+    if (desk?.parent) desk.parent.remove(desk);
     for (const prefix of ['screen_', 'laptop_screen_']) {
       const o = open.getObjectByName(prefix + id);
       if (o?.parent) o.parent.remove(o);
@@ -112,44 +110,58 @@ function clearRemovedWorkstations(open, spots) {
     spots.desks[n - 1] = undefined;
     spots.screens[n - 1] = undefined;
   }
-  for (const name of ['poufs', 'laptops', 'mugs']) {
-    const root = open.getObjectByName(name);
-    if (root) stripMeshesNear(root, centers, name === 'mugs' ? 0.55 : 0.85);
-  }
+
+  const poufs = open.getObjectByName('poufs');
+  if (poufs) stripMeshesNear(poufs, seatCenters, 0.55);
+  const laptops = open.getObjectByName('laptops');
+  if (laptops) stripMeshesInColumns(laptops, laptopColumns, 0.55);
+  const mugs = open.getObjectByName('mugs');
+  if (mugs) stripMeshesNear(mugs, seatCenters, 0.45);
 }
 
 function stripMeshesNear(root, centers, radius) {
-  const r2 = radius * radius;
+  stripMeshTris(root, (x, y, z) => {
+    const r2 = radius * radius;
+    for (const c of centers) {
+      const dx = x - c.x, dz = z - c.z;
+      if (dx * dx + dz * dz <= r2 && Math.abs(y - c.y) < 1.4) return true;
+    }
+    return false;
+  });
+}
+
+function stripMeshesInColumns(root, columns, halfSpan) {
+  stripMeshTris(root, (x, y, z) => {
+    if (y < 0.5 || y > 1.2) return false; // laptop band on the table top
+    for (const col of columns) {
+      if (Math.abs(x - col.x) <= halfSpan && z < col.zMax) return true;
+    }
+    return false;
+  });
+}
+
+function stripMeshTris(root, dropCentroid) {
   root.traverse((o) => {
     if (!o.isMesh || !o.geometry?.attributes?.position) return;
     const geo = o.geometry;
     const pos = geo.attributes.position;
     const idx = geo.index;
     const keep = [];
-    const near = (x, y, z) => {
-      for (const c of centers) {
-        const dx = x - c.x, dz = z - c.z;
-        if (dx * dx + dz * dz <= r2 && Math.abs(y - c.y) < 1.4) return true;
-      }
-      return false;
-    };
-    const triNear = (a, b, c) => {
+    const triDrop = (a, b, c) => {
       const cx = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3;
       const cy = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3;
       const cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
-      return near(cx, cy, cz);
+      return dropCentroid(cx, cy, cz);
     };
     if (idx) {
       for (let i = 0; i < idx.count; i += 3) {
         const a = idx.getX(i), b = idx.getX(i + 1), c = idx.getX(i + 2);
-        if (!triNear(a, b, c)) keep.push(a, b, c);
+        if (!triDrop(a, b, c)) keep.push(a, b, c);
       }
       geo.setIndex(keep);
     } else {
       for (let i = 0; i < pos.count; i += 3) {
-        if (!triNear(i, i + 1, i + 2)) {
-          keep.push(i, i + 1, i + 2);
-        }
+        if (!triDrop(i, i + 1, i + 2)) keep.push(i, i + 1, i + 2);
       }
       if (keep.length !== pos.count) {
         const next = new Float32Array(keep.length * 3);

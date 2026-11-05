@@ -84,9 +84,9 @@
   function isDeskOpen(n) {
     return Number.isInteger(n) && n >= 1 && n <= PER_FLOOR && !REMOVED_LOGICAL_DESKS.has(n);
   }
-  function nextOpenInRange(start, maxInclusive) {
+  function nextOpenInRange(start, maxInclusive, taken) {
     let d = start;
-    while (d <= maxInclusive && !isDeskOpen(d)) d += 1;
+    while (d <= maxInclusive && (!isDeskOpen(d) || (taken && taken.has(d)))) d += 1;
     return d <= maxInclusive ? d : null;
   }
 
@@ -199,11 +199,13 @@
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
       const out = {};
+      let dropped = false;
       for (const [id, desk] of Object.entries(parsed)) {
         const n = Number(desk);
-        if (!id || !isDeskOpen(n)) continue;
+        if (!id || !isDeskOpen(n)) { if (id && Number.isInteger(n)) dropped = true; continue; }
         out[String(id).slice(0, 64)] = n;
       }
+      if (dropped) saveSeatAssign(out);
       return out;
     } catch (_) { return {}; }
   }
@@ -983,30 +985,34 @@
     if (!(usageTotal > 0) && usageBots) {
       usageTotal = Object.values(usageBots).reduce((sum, v) => sum + (Number(v) || 0), 0);
     }
+    const takenByFloor = new Map();
     for (const row of rows) {
       const floor = takeFloor(row.floorName);
+      if (!takenByFloor.has(floor.id)) takenByFloor.set(floor.id, new Set());
+      const taken = takenByFloor.get(floor.id);
       let desk;
       if (floor.id === 'main-floor' || floor.id.startsWith('main-floor-')) {
         // Dept A → bank A (1–10), Dept B → bank B (11–20); overflow fills the other bank.
         // SWA-3221 skips cleared logical desks 2–5 (removed window-side visuals).
         const takeA = () => {
-          const d = nextOpenInRange(floor.nextA, 10);
+          const d = nextOpenInRange(floor.nextA, 10, taken);
           if (d == null) return null;
           floor.nextA = d + 1;
           return d;
         };
         const takeB = () => {
-          const d = nextOpenInRange(floor.nextB, 20);
+          const d = nextOpenInRange(floor.nextB, 20, taken);
           if (d == null) return null;
           floor.nextB = d + 1;
           return d;
         };
         if (isDeptA(row.name)) desk = takeA() || takeB();
         else desk = takeB() || takeA();
-        if (desk == null) desk = nextOpenInRange(1, PER_FLOOR) || (floor.ids.length + 1);
+        if (desk == null) desk = nextOpenInRange(1, PER_FLOOR, taken) || (floor.ids.length + 1);
       } else {
         desk = floor.ids.length + 1;
       }
+      if (Number.isInteger(desk)) taken.add(desk);
       floor.ids.push(row.id);
       const status = COUNT_KEYS.includes(row.status) ? row.status : 'idle';
       floor.counts[status] += 1;
