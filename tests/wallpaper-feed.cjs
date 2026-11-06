@@ -255,6 +255,37 @@ test('resolveChatUrl prefers Paperclip urlKey and drops grokbot://', () => {
   assert.equal(WF.isPaperclipChatUrl('https://paperclip.s-w.art/SWA/chats/chief'), true);
   assert.equal(WF.isPaperclipChatUrl('https://example.com/SWA/chats/chief'), false);
   assert.equal(JSON.stringify(WF.resolveChatUrl('Chief Master', 'grokbot://x')).includes('grokbot'), false);
+  assert.equal(WF.paperclipIssueUrl('SWA-3263'), 'https://paperclip.s-w.art/SWA/issues/SWA-3263');
+  assert.equal(WF.isPaperclipIssueUrl('https://paperclip.s-w.art/SWA/issues/SWA-3263'), true);
+  assert.equal(WF.isPaperclipBoardUrl('https://paperclip.s-w.art/SWA/issues/SWA-3263'), true);
+  assert.equal(WF.isPaperclipBoardUrl('https://paperclip.s-w.art/SWA/chats/chief'), true);
+  assert.equal(WF.isPaperclipIssueUrl('https://example.com/SWA/issues/SWA-3263'), false);
+});
+
+test('towerState passes Pipeline board issues through extras', () => {
+  const sessions = [{
+    key: 'paperclip:cm1', id: 'cm1', agent: 'paperclip', project: 'Code Master 1',
+    status: 'thinking', activity: 'editing', title: 'SWA-3263 Pipeline',
+    pc: 'a08c0cb1-355a-4cd6-ade3-91fe773d05ea',
+  }];
+  const tower = WF.towerState(sessions, {
+    pipeline: [{
+      id: 'ea9d630d-91f3-4858-b270-ccbdecc69481',
+      identifier: 'SWA-3263',
+      title: 'office sidebar Pipeline',
+      status: 'in_progress',
+      assigneeAgentId: 'a08c0cb1-355a-4cd6-ade3-91fe773d05ea',
+      assigneeName: 'Code Master 1',
+      updatedAt: '2026-11-06T11:00:00.000Z',
+      url: 'https://paperclip.s-w.art/SWA/issues/SWA-3263',
+    }],
+  });
+  assert.equal(tower.pipeline.length, 1);
+  assert.equal(tower.pipeline[0].identifier, 'SWA-3263');
+  assert.equal(tower.pipeline[0].status, 'in_progress');
+  assert.equal(tower.pipeline[0].assigneeName, 'Code Master 1');
+  assert.equal(tower.pipeline[0].url, 'https://paperclip.s-w.art/SWA/issues/SWA-3263');
+  assert.equal(WF.towerState(sessions, {}).pipeline.length, 0);
 });
 
 test('config lines stay after the relay window drops them', async () => {

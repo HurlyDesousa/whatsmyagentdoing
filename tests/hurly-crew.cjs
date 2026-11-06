@@ -192,3 +192,36 @@ test('an agent that leaves the roster goes idle instead of back to seed', () => 
   assert.notEqual(chief.title, CHIEF_SEED);
   assert.ok(w.sessions().some((s) => s.name === 'Newbie'));
 });
+
+test('pipeline lists active board issues with assignee and issue URL', () => {
+  const w = crew();
+  assert.deepEqual(w.pipeline(), []);
+  const cm1 = 'a08c0cb1-355a-4cd6-ade3-91fe773d05ea';
+  const qa = '47312222-173f-478e-bdb3-c36938e012dd';
+  w.ingestLive({
+    agents: [
+      agent(cm1, 'Code Master 1', 'running'),
+      agent(qa, 'QA Engineer', 'idle'),
+    ],
+    issues: [
+      { id: 'a', identifier: 'SWA-3263', title: 'Pipeline sidebar', status: 'in_progress', assigneeAgentId: cm1, updatedAt: '2026-11-06T11:00:00.000Z' },
+      { id: 'b', identifier: 'SWA-3258', title: 'Watch recreation', status: 'in_review', assigneeAgentId: qa, updatedAt: '2026-11-06T10:00:00.000Z' },
+      { id: 'c', identifier: 'SWA-9', title: 'Done already', status: 'done', assigneeAgentId: cm1 },
+      { id: 'd', identifier: 'SWA-10', title: 'Queued', status: 'todo', assigneeAgentId: cm1, updatedAt: '2026-11-06T09:00:00.000Z' },
+    ],
+    runs: [],
+  });
+  const pipe = w.pipeline();
+  assert.equal(pipe.length, 3);
+  assert.equal(pipe[0].identifier, 'SWA-3263');
+  assert.equal(pipe[0].status, 'in_progress');
+  assert.equal(pipe[0].assigneeName, 'Code Master 1');
+  assert.match(pipe[0].url, /\/SWA\/issues\/SWA-3263$/);
+  assert.equal(pipe[1].identifier, 'SWA-3258');
+  assert.equal(pipe[1].status, 'in_review');
+  assert.equal(pipe[2].identifier, 'SWA-10');
+  assert.equal(pipe[2].status, 'todo');
+  const snap = snapshot(w, { hurly: true });
+  assert.equal(snap.pipeline.length, 3);
+  assert.equal(snap.pipeline[0].identifier, 'SWA-3263');
+});

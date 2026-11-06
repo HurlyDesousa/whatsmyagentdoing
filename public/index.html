@@ -850,6 +850,8 @@ function render() {
       usage: wallpaperFeed && wallpaperFeed.usage,
       routines: wallpaperFeed && wallpaperFeed.routines,
       feedLive: !!wallpaperFeed,
+      // Active Paperclip issues from the Hurly crew SSE snapshot (Pipeline card).
+      pipeline: Array.isArray(state.data && state.data.pipeline) ? state.data.pipeline : [],
     };
   }
   if (office && state.loaded) {

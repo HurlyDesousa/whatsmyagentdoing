@@ -481,6 +481,32 @@
 }
 .bhq-wrow[data-s="error"] .bhq-wtext { color: #FFB8BF; }
 .bhq-wtext b { color: var(--hi); font-weight: 900; }
+
+/* pipeline: active board issues between Waiting on me and Finished */
+.bhq-plist { display: flex; flex-direction: column; gap: 6px; }
+.bhq-prow {
+  display: flex; align-items: flex-start; gap: 11px; padding: 10px 12px 10px 10px; border-radius: 18px;
+  background: rgba(255, 255, 255, .06); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+  cursor: pointer; transition: background-color .2s;
+}
+.bhq-prow:hover { background: rgba(255, 255, 255, .1); }
+.bhq-prow[data-s="working"] { background: linear-gradient(90deg, rgba(52, 199, 89, .28), rgba(52, 199, 89, .08)); }
+.bhq-prow[data-s="waiting_user"] { background: linear-gradient(90deg, rgba(255, 178, 58, .28), rgba(255, 178, 58, .08)); }
+.bhq-prow[data-s="stuck"] { background: linear-gradient(90deg, rgba(255, 159, 10, .28), rgba(255, 159, 10, .08)); }
+.bhq-prow .bhq-ava { width: 32px; height: 32px; margin-top: 1px; }
+.bhq-pmain { flex: 1; min-width: 0; }
+.bhq-ptop { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-height: 18px; }
+.bhq-pid { font: 900 13px/1.2 var(--bhq-round); color: var(--hi); white-space: nowrap; }
+.bhq-pst { flex: none; color: var(--mid); font: 800 11px/1.2 var(--bhq-round); text-transform: uppercase; letter-spacing: .02em; white-space: nowrap; }
+.bhq-prow[data-s="working"] .bhq-pst { color: #C2E784; }
+.bhq-prow[data-s="waiting_user"] .bhq-pst { color: #FFD28E; }
+.bhq-prow[data-s="stuck"] .bhq-pst { color: #FFD28E; }
+.bhq-ptitle {
+  margin-top: 2px; color: var(--hi); font: 800 12.5px/1.3 var(--bhq-round); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.bhq-pwho { margin-top: 3px; color: var(--dim); font: 800 11.5px/1.25 var(--bhq-round); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .bhq-wbtn, .bhq-roff {
   flex: none; height: 26px; padding: 0 11px; border-radius: 13px; display: inline-flex; align-items: center; gap: 5px;
   background: rgba(255, 255, 255, .16); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18);
