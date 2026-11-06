@@ -134,6 +134,59 @@ function issueLabel(iss) {
   return clip(`${id} ${title}`.trim(), 120);
 }
 
+// Active board statuses that belong in the office Pipeline card (not Finished).
+const PIPELINE_STATUSES = new Set(['todo', 'in_progress', 'in_review', 'blocked']);
+const PIPELINE_STATUS_Q = 'todo,in_progress,in_review,blocked';
+const PIPELINE_MAX = 80;
+
+function issueUrl(iss) {
+  if (!iss || typeof iss !== 'object') return null;
+  const id = String(iss.identifier || iss.key || iss.issueIdentifier || '').trim();
+  if (!id) return null;
+  const base = String(PAPERCLIP_URL || '').replace(/\/+$/, '');
+  return `${base}/SWA/issues/${encodeURIComponent(id)}`;
+}
+
+function statusRank(st) {
+  const s = String(st || '').toLowerCase();
+  if (s === 'in_progress') return 0;
+  if (s === 'in_review') return 1;
+  if (s === 'blocked') return 2;
+  if (s === 'todo') return 3;
+  return 9;
+}
+
+/** Compact rows for the sidebar Pipeline card — everything currently in flight. */
+function buildPipeline(issues, agents) {
+  const agentList = unwrapList(agents).filter((a) => a && a.id);
+  const byId = new Map(agentList.map((a) => [a.id, a]));
+  const rows = [];
+  for (const iss of unwrapList(issues)) {
+    if (!iss || typeof iss !== 'object') continue;
+    const st = String(iss.status || '').toLowerCase();
+    if (!PIPELINE_STATUSES.has(st)) continue;
+    const identifier = String(iss.identifier || iss.key || iss.issueIdentifier || '').trim();
+    if (!identifier) continue;
+    const aid = assigneeId(iss);
+    const agent = aid && byId.get(aid);
+    const assigneeName = (agent && (agent.name || agent.title)) || null;
+    rows.push({
+      id: iss.id || identifier,
+      identifier,
+      title: clip(iss.title || iss.name || '', 90) || identifier,
+      status: st,
+      assigneeAgentId: aid || null,
+      assigneeName: assigneeName ? clip(assigneeName, 48) : null,
+      updatedAt: iss.updatedAt || iss.startedAt || null,
+      url: issueUrl(iss),
+    });
+  }
+  rows.sort((a, b) => statusRank(a.status) - statusRank(b.status)
+    || String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+    || String(a.identifier).localeCompare(String(b.identifier)));
+  return rows.slice(0, PIPELINE_MAX);
+}
+
 function liveActivity(run) {
   if (!run || typeof run !== 'object') return null;
   const tool = clip(run.currentToolName, 48);
@@ -224,9 +277,13 @@ class HurlyCrew extends EventEmitter {
     this.polling = false;
     this.overrides = {};
     this.overridesMtime = 0;
+    this._pipeline = [];
     const now = Date.now();
     this.list = CREW.map((c, i) => this.entry(c, i, now));
   }
+
+  /** Active Paperclip issues for the office Pipeline dock card. */
+  pipeline() { return this._pipeline.slice(); }
 
   entry(c, i, now = Date.now()) {
     return {
@@ -281,8 +338,9 @@ class HurlyCrew extends EventEmitter {
     try {
       const [agents, issues, runs] = await Promise.all([
         getJSON(`${base}/agents`, token),
-        getJSON(`${base}/issues?status=in_progress,in_review,blocked`, token).catch(() =>
-          getJSON(`${base}/issues?status=in_progress`, token).catch(() => [])),
+        getJSON(`${base}/issues?status=${PIPELINE_STATUS_Q}`, token).catch(() =>
+          getJSON(`${base}/issues?status=in_progress,in_review,blocked`, token).catch(() =>
+            getJSON(`${base}/issues?status=in_progress`, token).catch(() => []))),
         getJSON(`${base}/live-runs?limit=100`, token).catch(() => []),
       ]);
       this.ingestLive({ agents, issues, runs });
@@ -339,6 +397,7 @@ class HurlyCrew extends EventEmitter {
     }
     const issueList = unwrapList(issues);
     const runList = unwrapList(runs);
+    this._pipeline = buildPipeline(issueList, agentList);
     for (const s of this.list) {
       if (!s.pc || !byId.has(s.pc)) {
         // Linked-then-gone: idle with last heartbeat. Never-linked after a
@@ -441,4 +500,7 @@ class HurlyCrew extends EventEmitter {
   sessions() { return this.list; }
 }
 
-module.exports = { HurlyCrew, CREW, unwrapList, liveActivity, pickIssue, pickRun, normName, nameAliases, resolveAgent };
+module.exports = {
+  HurlyCrew, CREW, unwrapList, liveActivity, pickIssue, pickRun, normName, nameAliases, resolveAgent,
+  buildPipeline, PIPELINE_STATUSES, PIPELINE_STATUS_Q, issueUrl,
+};

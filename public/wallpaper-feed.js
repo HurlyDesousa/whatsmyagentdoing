@@ -194,6 +194,26 @@
     } catch (_) { return false; }
   }
 
+  // Issue deep-links for the Pipeline card (same origin as Open chat).
+  function isPaperclipIssueUrl(url) {
+    const u = String(url == null ? '' : url).trim();
+    if (!/^https:\/\//i.test(u)) return false;
+    try {
+      const parsed = new URL(u);
+      return parsed.origin === PAPERCLIP_ORIGIN && /\/issues\//i.test(parsed.pathname);
+    } catch (_) { return false; }
+  }
+
+  function isPaperclipBoardUrl(url) {
+    return isPaperclipChatUrl(url) || isPaperclipIssueUrl(url);
+  }
+
+  function paperclipIssueUrl(identifier) {
+    const id = String(identifier == null ? '' : identifier).trim();
+    if (!id) return '';
+    return PAPERCLIP_ORIGIN + '/' + PAPERCLIP_PREFIX + '/issues/' + encodeURIComponent(id);
+  }
+
   function paperclipAgentId(name, sessionPc) {
     const fromSession = String(sessionPc || '').trim();
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fromSession)) {
@@ -1247,6 +1267,23 @@
       schedule: r.schedule || '',
       next_run: r.next_run || null,
     })).filter((r) => r.routine);
+    // Active Paperclip board issues from the Hurly crew poller (Pipeline card).
+    const pipeline = (Array.isArray(extra.pipeline) ? extra.pipeline : []).map((p) => {
+      if (!p || typeof p !== 'object') return null;
+      const identifier = String(p.identifier || '').trim();
+      if (!identifier) return null;
+      const st = String(p.status || '').toLowerCase();
+      return {
+        id: p.id || identifier,
+        identifier,
+        title: String(p.title || identifier).slice(0, 120),
+        status: st,
+        assigneeAgentId: p.assigneeAgentId || null,
+        assigneeName: p.assigneeName ? String(p.assigneeName).slice(0, 64) : null,
+        updatedAt: p.updatedAt || null,
+        url: p.url || paperclipIssueUrl(identifier),
+      };
+    }).filter(Boolean);
     return {
       version: 1,
       now: nowIso,
@@ -1272,6 +1309,7 @@
         t: nowIso, bot: b.id, name: b.name, step: b.step || 'done',
       })),
       routines,
+      pipeline,
     };
   }
 
@@ -1293,6 +1331,7 @@
     mapLook, reduceFeed, mergeSessions, officeStatus,
     resolveQuality, towerState,
     paperclipUrlKey, paperclipChatUrl, paperclipAgentId, resolveChatUrl, isPaperclipChatUrl,
+    isPaperclipIssueUrl, isPaperclipBoardUrl, paperclipIssueUrl,
     loadSeatAssign, saveSeatAssign, assignSeat, applySeatOverrides,
     loadFloorAssign, saveFloorAssign, moveToFloor, applyFloorOverrides, firstFreeDesk,
     loadLoungeAssign, saveLoungeAssign, assignLounge, clearLounge,

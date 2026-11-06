@@ -404,7 +404,12 @@ export class Office4D {
 function openWallpaperChat(url) {
   if (!url || !/^https:\/\//i.test(url)) return;
   const WF = typeof globalThis !== 'undefined' ? globalThis.WallpaperFeed : null;
-  if (WF && typeof WF.isPaperclipChatUrl === 'function' && WF.isPaperclipChatUrl(url)) {
+  const isBoard = WF && (
+    (typeof WF.isPaperclipBoardUrl === 'function' && WF.isPaperclipBoardUrl(url))
+    || (typeof WF.isPaperclipChatUrl === 'function' && WF.isPaperclipChatUrl(url))
+    || (typeof WF.isPaperclipIssueUrl === 'function' && WF.isPaperclipIssueUrl(url))
+  );
+  if (isBoard) {
     openPaperclipChatPanel(url);
     return;
   }

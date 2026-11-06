@@ -119,7 +119,11 @@ function snapshot(watcher, opts) {
   const raw = watcher.sessions();
   const sessions = raw.map((s) => view(s, now, opts));
   sessions.sort((a, b) => (b.lastEventAt || 0) - (a.lastEventAt || 0));
-  return { now, lang: opts.demo || opts.hurly ? null : promptLanguage(raw), sessions };
+  const out = { now, lang: opts.demo || opts.hurly ? null : promptLanguage(raw), sessions };
+  // Hurly crew exposes active Paperclip issues for the Pipeline dock card.
+  if (typeof watcher.pipeline === 'function') out.pipeline = watcher.pipeline();
+  else if (Array.isArray(watcher.pipeline)) out.pipeline = watcher.pipeline.slice();
+  return out;
 }
 
 function createServer(watcher, opts, { onShutdown, onRestart, auth = createAuth() } = {}) {

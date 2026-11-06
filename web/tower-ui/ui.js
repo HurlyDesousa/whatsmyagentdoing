@@ -2,7 +2,7 @@
  * Bot HQ UI: live cards on top of the full-bleed 3D scene (CONTRACT v2.3; look = the wallpaper's cards, web/face/face.css).
  *   top-left   brand + live clock         top-center  status counters        top-right  DEMO + usage meter
  *   left       floors "elevator"          right       floor team / bot card
- *   left, under the floors   dock: Status check (while one runs) / Waiting on me / Finished / Routines
+ *   left, under the floors   dock: Status check (while one runs) / Waiting on me / Pipeline / Finished / Routines
  *   bottom-left activity feed (last 4)    bottom-right (left of the card)  zoom - / +
  *
  *   initUI({ onSelectBot, onSelectFloor, onZoom, onOpenChat, onStartAgent, onClearErrorAgent })
@@ -10,6 +10,7 @@
  *
  * State fields read: bots, floors, feed, usage, demo, now, summary, plus (bots-only mode, may be missing):
  *   bots[id].chat_url, bots[id].paperclip_agent_id, state.finished [{ t, bot, name, step }], state.routines [{ bot, name, routine, schedule, next_run }],
+ *   state.pipeline [{ id, identifier, title, status, assigneeName, assigneeAgentId, url, updatedAt }],
  *   bots[id].last_seen (its own last status line), bots[id].unreported { from, to } (usage rose, no status line),
  *   state.check { t, bots: [{ id, name, at }] } (a status check: who has answered).
  *
@@ -19,7 +20,7 @@
  * The UI text is English. The cards are graphite at every hour; no day/night switch here (see ui.css).
  *
  * Phones (<= 600 px wide, and landscape phones): <html> gets .bhq-phone (+ .bhq-land). The floors become a chip row,
- * and the floor team, "Waiting on me", Finished, Routines and the activity feed move into one bottom sheet (a grabber, a
+ * and the floor team, "Waiting on me", Pipeline, Finished, Routines and the activity feed move into one bottom sheet (a grabber, a
  * peek with the floor name and counts, a spring snap between peek and ~60% of the height); the bot card becomes a sheet
  * of its own (swipe down or x to close). Landscape: the sheet is a side column. Desktop is untouched: the same nodes move
  * back when the window grows. ?sheet=open starts with the sheet expanded (for screenshots).
@@ -700,7 +701,7 @@ function buildZoom() {
   U.zoom = { root };
 }
 
-/* ------------------------------------------------------------------ build: dock (waiting on me / finished / routines) */
+/* ------------------------------------------------------------------ build: dock (waiting on me / pipeline / finished / routines) */
 
 function dockCard(id, title, opts) {
   const count = h('span', { class: 'bhq-dcount bhq-num', text: '0' });
@@ -741,7 +742,7 @@ function setDockOpen(card, on, save = true) {
   }
   if (save) {
     const o = {};
-    for (const k of ['waiting', 'finished', 'routines']) o[k] = !!d[k].open;
+    for (const k of ['waiting', 'pipeline', 'finished', 'routines']) o[k] = !!d[k].open;
     lsSet(LS_DOCK, JSON.stringify(o));
   }
   fitDock(d.avail == null ? Infinity : d.avail);
@@ -751,7 +752,7 @@ function setDockOpen(card, on, save = true) {
 function fitDock(avail) {
   const d = U.dock;
   d.avail = avail;
-  const cards = [d.check, d.waiting, d.finished, d.routines];
+  const cards = [d.check, d.waiting, d.pipeline, d.finished, d.routines];
   const live = cards.filter((c) => !c.root.hidden);
   const on = new Set(live.filter((c) => c.open));
   const need = () => live.reduce((n, c) => n + (on.has(c) ? (c.rows ? DOCK_OPEN_MIN : DOCK_OPEN_EMPTY) : DOCK_HEAD), 0) + DOCK_GAP * Math.max(0, live.length - 1);
@@ -774,15 +775,20 @@ function setWaitBlur(on, save = true) {
 }
 
 function buildDock(floors, feed) {
-  const root = own(h('aside', { class: 'bhq-dock', 'aria-label': 'Waiting on me, finished work and routines' }));
+  const root = own(h('aside', { class: 'bhq-dock', 'aria-label': 'Waiting on me, pipeline, finished work and routines' }));
   const check = dockCard('check', 'Status check');
   const waiting = dockCard('waiting', 'Waiting on me', { eye: true });
+  const pipeline = dockCard('pipeline', 'Pipeline');
   const finished = dockCard('finished', 'Finished');
   const routines = dockCard('routines', 'Routines');
 
   const wlist = h('div', { class: 'bhq-wlist' });
   const wempty = h('p', { class: 'bhq-note', text: 'Nothing is waiting on you.', hidden: true });
   waiting.inner.append(wlist, wempty);
+
+  const plist = h('ul', { class: 'bhq-plist', role: 'list' });
+  const pempty = h('p', { class: 'bhq-note', text: 'Nothing in the pipeline.', hidden: true });
+  pipeline.inner.append(plist, pempty);
 
   const tl = h('ol', { class: 'bhq-tl', role: 'list' });
   const fempty = h('p', { class: 'bhq-note', text: 'Nothing finished in the last 24 hours.', hidden: true });
@@ -797,19 +803,20 @@ function buildDock(floors, feed) {
   check.inner.append(cl, cnote);
   check.root.hidden = true;                                   // only while a check runs
 
-  root.append(check.root, waiting.root, finished.root, routines.root);
+  root.append(check.root, waiting.root, pipeline.root, finished.root, routines.root);
   document.body.append(root);
 
   U.dock = {
-    root, check, waiting, finished, routines, wlist, wempty, tl, fempty, rl, rempty, cl, cnote,
-    lru: [], wrows: new Map(), crows: new Map(), checkT: null, finSig: null, finRefs: [], routSig: null, routRefs: [], copied: new Map(), blurred: false,
+    root, check, waiting, pipeline, finished, routines, wlist, wempty, plist, pempty, tl, fempty, rl, rempty, cl, cnote,
+    lru: [], wrows: new Map(), prows: new Map(), crows: new Map(), checkT: null, finSig: null, finRefs: [],
+    pipeSig: null, routSig: null, routRefs: [], copied: new Map(), blurred: false,
     floors, feed,
   };
 
   // open / folded: what the person left last time (the waiting card is open by default)
   let saved = null;
   try { saved = JSON.parse(lsGet(LS_DOCK) || 'null'); } catch { saved = null; }
-  for (const k of ['routines', 'finished', 'waiting']) { // waiting last: it is the one that stays open when there is no room for all
+  for (const k of ['routines', 'finished', 'pipeline', 'waiting']) { // waiting last: it is the one that stays open when there is no room for all
     setDockOpen(U.dock[k], saved && typeof saved[k] === 'boolean' ? saved[k] : k === 'waiting', false);
   }
   waiting.eye.addEventListener('click', () => setWaitBlur(!U.dock.blurred));
@@ -1083,7 +1090,7 @@ function setPhone(on, land) {
   html.classList.toggle('bhq-land', U.land);
   if (on && !was) {
     if (p) S.headSlot.append(p.teamHead);
-    S.body.append(...[d && d.waiting.root, p && p.tcard, d && d.finished.root, d && d.routines.root, S.feed].filter(Boolean));
+    S.body.append(...[d && d.waiting.root, d && d.pipeline.root, p && p.tcard, d && d.finished.root, d && d.routines.root, S.feed].filter(Boolean));
     S.open = S.start || U.land;
     S.start = false;
     sheetMeasure();
@@ -1095,7 +1102,7 @@ function setPhone(on, land) {
     S.body.style.opacity = '';
     S.body.inert = false;
     cardReset();
-    if (d) d.root.append(d.waiting.root, d.finished.root, d.routines.root);
+    if (d) d.root.append(d.waiting.root, d.pipeline.root, d.finished.root, d.routines.root);
     if (p) p.team.append(p.teamHead, p.tcard);
     if (S.feed) { if (d && d.root.parentNode) d.root.parentNode.insertBefore(S.feed, d.root); else document.body.append(S.feed); }
     for (const k of Object.keys(rootVars)) document.documentElement.style.removeProperty(k);
@@ -1584,6 +1591,7 @@ function renderFeed(state) {
 function renderDock(state) {
   renderCheck(state);
   renderWaiting(state);
+  renderPipeline(state);
   renderFinished(state);
   renderRoutines(state);
   layoutDock(); // after the cards know whether they are shown
@@ -1721,6 +1729,99 @@ function renderWaiting(state) {
   });
   reconcile(d.wlist, els, 0);
   setHidden(d.wempty, ids.length > 0);
+}
+
+/* Pipeline: every active Paperclip board issue (todo / in_progress / in_review / blocked). */
+
+const PIPE_UI = {
+  in_progress: { s: 'working', label: 'In progress' },
+  in_review: { s: 'waiting_user', label: 'In review' },
+  blocked: { s: 'stuck', label: 'Blocked' },
+  todo: { s: 'idle', label: 'Todo' },
+};
+
+function botForAssignee(state, item) {
+  const bots = (state && state.bots) || {};
+  const aid = item && item.assigneeAgentId;
+  if (aid) {
+    for (const b of Object.values(bots)) {
+      if (b && b.paperclip_agent_id === aid) return b;
+    }
+  }
+  const name = item && item.assigneeName;
+  if (name) {
+    for (const b of Object.values(bots)) {
+      if (b && String(b.name || '').toLowerCase() === String(name).toLowerCase()) return b;
+    }
+  }
+  return { id: aid || (item && item.identifier) || 'pipeline', name: name || 'Unassigned', avatar: aid || 'pipeline' };
+}
+
+function makePipeRow(id) {
+  const av = makeAva({ orb: false });
+  const ident = h('b', { class: 'bhq-pid' });
+  const st = h('span', { class: 'bhq-pst' });
+  const title = h('div', { class: 'bhq-ptitle' });
+  const who = h('div', { class: 'bhq-pwho' });
+  const li = h('li', { class: 'bhq-prow', 'data-id': id, role: 'button', tabindex: '0' },
+    av.root,
+    h('div', { class: 'bhq-pmain' },
+      h('div', { class: 'bhq-ptop' }, ident, st),
+      title, who));
+  const open = () => {
+    const url = li.getAttribute('data-url');
+    if (url) openChat(id, url);
+  };
+  li.addEventListener('click', open);
+  li.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+  });
+  return { li, av, ident, st, title, who };
+}
+
+function renderPipeline(state) {
+  const d = U.dock;
+  const items = Array.isArray(state.pipeline) ? state.pipeline.filter((p) => p && p.identifier) : [];
+  setText(d.pipeline.count, items.length);
+  d.pipeline.rows = items.length;
+  setCls(d.pipeline.root, 'has-rows', items.length > 0);
+  setAttr(d.pipeline.count, 'data-s', items.length ? 'working' : null);
+  setHidden(d.pempty, items.length > 0);
+
+  const sig = items.map((p) => [p.identifier, p.status, p.title, p.assigneeName || '', p.url || ''].join('|')).join('\n');
+  if (sig === d.pipeSig) {
+    // Still refresh relative avatars / status tints if bots moved.
+    for (const [id, r] of d.prows) {
+      const item = items.find((p) => (p.id || p.identifier) === id);
+      if (!item) continue;
+      const ui = PIPE_UI[item.status] || PIPE_UI.todo;
+      setAttr(r.li, 'data-s', ui.s);
+      setAvatar(r.av, botForAssignee(state, item), ui.s);
+    }
+    return;
+  }
+  d.pipeSig = sig;
+
+  const seen = new Set();
+  const els = items.map((item) => {
+    const id = item.id || item.identifier;
+    seen.add(id);
+    let r = d.prows.get(id);
+    if (!r) { r = makePipeRow(id); d.prows.set(id, r); }
+    const ui = PIPE_UI[item.status] || PIPE_UI.todo;
+    const bot = botForAssignee(state, item);
+    setAttr(r.li, 'data-s', ui.s);
+    setAttr(r.li, 'data-url', item.url || null);
+    setAttr(r.li, 'title', 'Open ' + item.identifier);
+    setAvatar(r.av, bot, ui.s);
+    setText(r.ident, item.identifier);
+    setText(r.st, ui.label);
+    setText(r.title, item.title || item.identifier);
+    setText(r.who, item.assigneeName || 'Unassigned');
+    return r.li;
+  });
+  for (const [id, r] of d.prows) if (!seen.has(id)) { r.li.remove(); d.prows.delete(id); }
+  reconcile(d.plist, els, 0);
 }
 
 /** Brief busy state on the selected bot's Start CTA while resume is in flight. */
