@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { Spring, REDUCED, clamp, smoothstep } from './spring.js';
+import { aislePath } from './ambient.js';
 
 export const STATUS_COLOR = {
   working: '#34C759', idle: '#A1A1A6', waiting_user: '#FF9F0A', error: '#FF3B30', stuck: '#FF9500', done: '#0A84FF',
@@ -48,6 +49,7 @@ export class Actor {
     this.ambientAct = null;          // SWA-3262: short pose while at an interact
     this._pathQueue = null;          // remaining aisle waypoints while ambient / send traveling
     this._ambientTrip = false;       // ambient director owns motion; sync must not yank
+    this._reseatPending = false;     // one-shot: cancel hop and path to seat (even same desk)
 
     this.yawS = new Spring(RESTING_TURN, 0.3);
     this.scaleS = new Spring(1, 0.28);
@@ -155,7 +157,19 @@ export class Actor {
     this.selected = view.selectedBot === bot.id;
     this.renderTag();
 
-    if (spot && (!this.spot || spotPosDist2(this.spot.pos, spot.pos) > 1e-4)) {
+    if (spot && this._reseatPending) {
+      // Drag / meeting / move-floor: cancel in-flight ambient hop even when the desk id is unchanged.
+      this._reseatPending = false;
+      this._ambientTrip = false;
+      this.cancelTravel();
+      this.spot = spot;
+      if (!this.root.position || spotPosDist2(this.root.position, spot.pos) < 0.04) {
+        this.root.position.copy(spot.pos);
+        this.baseYaw = spot.yaw;
+      } else {
+        this.travelTo(spot);
+      }
+    } else if (spot && (!this.spot || spotPosDist2(this.spot.pos, spot.pos) > 1e-4)) {
       if (this._ambientTrip) {
         // Record the home / destination seat; ambient travelPath owns the hops.
         this.spot = spot;
@@ -201,6 +215,7 @@ export class Actor {
   markUserBusy(ms = 12_000) {
     this.userBusyUntil = Math.max(this.userBusyUntil || 0, performance.now() + ms);
     this.ambientAct = null;
+    this._reseatPending = true;
   }
 
   setAmbientAct(act, yaw) {
@@ -214,12 +229,17 @@ export class Actor {
     return !!(this.anim && this.anim.kind === 'travel') || !!(this._pathQueue && this._pathQueue.length);
   }
 
+  cancelTravel() {
+    this.anim = null;
+    this._pathQueue = null;
+  }
+
   beginAmbientTrip() { this._ambientTrip = true; this.ambientAct = null; }
 
   endAmbientTrip() {
     this._ambientTrip = false;
     this.ambientAct = null;
-    this._pathQueue = null;
+    this.cancelTravel();
   }
 
   /** Multi-waypoint aisle path (SWA-3262). Each point: {x,y,z} or Vector3-like. */
@@ -230,7 +250,7 @@ export class Actor {
     if (!pts.length) return;
     this._pathQueue = pts.slice(1);
     this._pathFinalYaw = finalYaw;
-    this.travelTo({ pos: pts[0], yaw: finalYaw ?? this.baseYaw ?? 0 });
+    this.travelTo({ pos: pts[0], yaw: finalYaw ?? this.baseYaw ?? 0 }, { direct: true });
   }
 
   setHovered(on) {
@@ -261,11 +281,16 @@ export class Actor {
     if (this.ctx.dropDelay > 0) this.scaleS.to(1, this.ctx.dropDelay);
   }
 
-  travelTo(spot) {
-    const to = spot.pos?.clone ? spot.pos.clone() : new THREE.Vector3(spot.pos.x, spot.pos.y, spot.pos.z);
+  travelTo(spot, { direct = false } = {}) {
+    const to = spot.pos?.clone ? spot.pos.clone() : new THREE.Vector3(spot.pos.x, spot.pos.y ?? 0.48, spot.pos.z);
     const toYaw = spot.yaw ?? this._pathFinalYaw ?? this.baseYaw ?? 0;
     const from = this.root.position.clone();
     const dist = from.distanceTo(to);
+    // Long seat changes (meeting send, lounge, desk) route around communal tables.
+    if (!direct && !this._pathQueue?.length && dist >= 1.2) {
+      this.travelPath(aislePath(from, to), toYaw);
+      return;
+    }
     if (REDUCED || dist < 0.05) {
       this.root.position.copy(to);
       this.baseYaw = toYaw;
@@ -283,7 +308,10 @@ export class Actor {
       return;
     }
     const next = this._pathQueue.shift();
-    this.travelTo({ pos: next, yaw: this._pathQueue.length ? Math.atan2(next.x - this.root.position.x, next.z - this.root.position.z) : (this._pathFinalYaw ?? yaw) });
+    const yawNext = this._pathQueue.length
+      ? Math.atan2(next.x - this.root.position.x, next.z - this.root.position.z)
+      : (this._pathFinalYaw ?? yaw);
+    this.travelTo({ pos: next, yaw: yawNext }, { direct: true });
   }
 
   hop(height) {

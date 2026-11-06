@@ -5,12 +5,14 @@ import {
   INTERACT_ACTIONS,
   buildFloorInteracts,
   aislePath,
+  crossesCommunalTable,
   pickAmbientWalker,
   pickInteract,
   assertTenInteracts,
   createFloorAmbient,
   stepFloorAmbient,
   AISLE_Z,
+  AISLE_ENDS,
 } from '../web/tower/ambient.js';
 
 test('every floor layout exposes exactly 10 distinct interacts', () => {
@@ -42,6 +44,30 @@ test('aisle path detours through the corridor for long desk-crossing trips', () 
   const path = aislePath(from, to);
   assert.ok(path.length >= 2);
   assert.ok(path.some((p) => Math.abs(p.z - AISLE_Z) < 0.01));
+  assert.ok(path.some((p) => AISLE_ENDS.includes(p.x)), 'routes via a table-end column');
+  const last = path[path.length - 1];
+  assert.equal(last.x, to.x);
+  assert.equal(last.z, to.z);
+});
+
+test('aisle path never changes z on a desk-column x through table_1 (QA FAIL)', () => {
+  // desk_05 → desk_06 style: same PAIR_X, far stool to near stool / across table_1.
+  const pairX = -2.1;
+  const from = { x: pairX, y: 0.48, z: -4.45 };
+  const to = { x: pairX, y: 0.48, z: -2.35 };
+  assert.equal(crossesCommunalTable(from.z, to.z), true);
+  const path = aislePath(from, to);
+  let prev = from;
+  for (const p of path) {
+    if (Math.abs(p.z - prev.z) > 0.2) {
+      assert.ok(
+        AISLE_ENDS.some((ex) => Math.abs(p.x - ex) < 0.05) || AISLE_ENDS.some((ex) => Math.abs(prev.x - ex) < 0.05),
+        `Δz segment must be at an aisle end, got ${prev.x},${prev.z} → ${p.x},${p.z}`,
+      );
+      assert.ok(Math.abs(p.x - pairX) > 0.5 || Math.abs(prev.x - pairX) > 0.5, 'must leave PAIR_X before crossing table');
+    }
+    prev = p;
+  }
   const last = path[path.length - 1];
   assert.equal(last.x, to.x);
   assert.equal(last.z, to.z);

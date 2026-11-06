@@ -17,7 +17,11 @@ export const INTERACT_ACTIONS = Object.freeze([
 // Default gap between ambient trips on a floor (ms). SWA-3107 spirit: sparse, minutes not seconds.
 export const AMBIENT_GAP_MS = Object.freeze([120_000, 300_000]); // 2–5 min
 export const ACT_DWELL_MS = Object.freeze([3_500, 7_000]);
-export const AISLE_Z = -1.25;
+// Mid-gap between communal table banks (TABLE_Z -3.4 / 0.8). Never walk Δz at a desk-column x —
+// that clips table tops and the paired stool on the same PAIR_X (QA FAIL on PR #38).
+export const AISLE_Z = -1.3;
+// Outside TABLE_X±TABLE_LEN/2 (−6.5…2.3): safe columns for changing z around the desks.
+export const AISLE_ENDS = Object.freeze([-7.0, 3.2]);
 
 const SEAT_Y = 0.48;
 
@@ -94,15 +98,58 @@ export function buildFloorInteracts(spots = {}, layout = 'sofa') {
   });
 }
 
-/** Aisle-aware waypoints so travel does not clip through communal desks. */
+function pickAisleEnd(x0, x1) {
+  const mid = (x0 + x1) / 2;
+  return Math.abs(mid - AISLE_ENDS[0]) <= Math.abs(mid - AISLE_ENDS[1]) ? AISLE_ENDS[0] : AISLE_ENDS[1];
+}
+
+/** True when a straight Δz at fixed x would cross a communal table slab. */
+export function crossesCommunalTable(z0, z1) {
+  const lo = Math.min(z0, z1), hi = Math.max(z0, z1);
+  // table_1 slab ~ z∈[-3.95,-2.85]; table_2 ~ z∈[0.25,1.35]
+  if (lo < -2.85 && hi > -3.95) return true;
+  if (lo < 1.35 && hi > 0.25) return true;
+  return false;
+}
+
+/**
+ * Aisle-aware waypoints so travel does not clip communal desks/tables.
+ * Long Δz moves go via a table-end column, then the mid-bank aisle, then in —
+ * never straight through a PAIR_X column (desk_05→desk_06 / table_1).
+ */
 export function aislePath(from, to) {
   const ax = from.x, az = from.z, bx = to.x, bz = to.z;
+  const y = to.y ?? from.y ?? SEAT_Y;
   const dist = Math.hypot(bx - ax, bz - az);
-  if (dist < 1.6) return [{ x: bx, y: to.y ?? SEAT_Y, z: bz }];
+  if (dist < 1.2) return [{ x: bx, y, z: bz }];
+
+  // Same side of both tables and no slab cross: direct is fine (short lounge hops).
+  if (!crossesCommunalTable(az, bz) && Math.abs(az - bz) < 1.4) {
+    return [{ x: bx, y, z: bz }];
+  }
+
+  const end = pickAisleEnd(ax, bx);
   const pts = [];
-  if (Math.abs(az - AISLE_Z) > 0.55) pts.push({ x: ax, y: SEAT_Y, z: AISLE_Z });
-  if (Math.abs(ax - bx) > 0.4) pts.push({ x: bx, y: SEAT_Y, z: AISLE_Z });
-  pts.push({ x: bx, y: to.y ?? SEAT_Y, z: bz });
+  const push = (x, z) => {
+    const last = pts[pts.length - 1];
+    if (last && Math.hypot(last.x - x, last.z - z) < 0.08) return;
+    if (Math.hypot(ax - x, az - z) < 0.08 && !pts.length) return;
+    pts.push({ x, y, z });
+  };
+
+  // 1) Lateral along the current stool/lounge row to a clear end column (outside the oak tables).
+  if (Math.abs(ax - end) > 0.35) push(end, az);
+  // 2) Change z at the end column into the mid-bank aisle.
+  if (Math.abs(az - AISLE_Z) > 0.35) push(end, AISLE_Z);
+  // 3) If the target is far in x, stay on aisle until the end nearer the target (optional second end).
+  const endTo = pickAisleEnd(bx, bx);
+  if (endTo !== end && Math.abs(bx - end) > 2.5) push(endTo, AISLE_Z);
+  const gate = pts.length ? pts[pts.length - 1].x : end;
+  // 4) Leave aisle at the gate x to the target's z, then seat.
+  if (Math.abs(bz - AISLE_Z) > 0.35) push(gate, bz);
+  push(bx, bz);
+
+  if (!pts.length) return [{ x: bx, y, z: bz }];
   return pts;
 }
 
