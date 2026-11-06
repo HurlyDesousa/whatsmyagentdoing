@@ -596,6 +596,48 @@ test('lounge assign persists meeting sit and clears on desk assign (SWA-3257)', 
   assert.equal(W.loadLoungeAssign()[qa], undefined);
 });
 
+test('SWA-3258 Watch middle desks are closed; other floors keep them', () => {
+  const mem = new Map();
+  const sandbox = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, v),
+      removeItem: (k) => mem.delete(k),
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  require('node:vm').runInNewContext(feedSrc, sandbox, { filename: 'wallpaper-feed.js' });
+  const W = sandbox.WallpaperFeed;
+  assert.equal(W.isDeskOpen(7), true);
+  assert.equal(W.isDeskOpen(7, 'ops'), true);
+  assert.equal(W.isDeskOpen(7, 'watch'), false);
+  assert.equal(W.isDeskOpen(12, 'watch'), false);
+  assert.equal(W.isDeskOpen(1, 'watch'), true);
+  assert.equal(W.isDeskOpen(21, 'watch'), true);
+  assert.equal(W.assignSeat(W.botId('Monitor Master'), 7, null, 'watch'), null);
+  assert.equal(W.assignSeat(W.botId('Monitor Master'), 1, null, 'watch'), 1);
+  assert.equal(W.assignSeat(W.botId('Chief Master'), 7, null, 'ops'), 7);
+
+  const sessions = [
+    { key: 'gb:mon', id: 'mon', agent: 'grokbot', project: 'Monitor Master', status: 'waiting', activity: 'needs you' },
+    { key: 'pc:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x' },
+  ];
+  const mon = W.botId('Monitor Master');
+  const chief = W.botId('Chief Master');
+  W.saveSeatAssign({ [mon]: 12, [chief]: 7 }); // Watch-removed logical for Monitor; Ops keeps 7
+  const tower = W.towerState(sessions, {});
+  assert.equal(tower.bots[mon].floor, 'watch');
+  assert.ok(W.isDeskOpen(tower.bots[mon].desk, 'watch'));
+  assert.notEqual(tower.bots[mon].desk, 12);
+  assert.equal(tower.bots[chief].floor, 'ops');
+  assert.equal(tower.bots[chief].desk, 7);
+});
+
 test('SWA-3259 Infra middle desks are closed; other floors keep them', () => {
   const mem = new Map();
   const sandbox = {

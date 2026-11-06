@@ -20,6 +20,9 @@ export const REMOVED_BANK_DESKS = Object.freeze([3, 5, 7, 9]);
 export const INFRA_MIDDLE_VISUAL_DESKS = Object.freeze([4, 6, 8, 13, 14, 15, 16, 17, 18]);
 // Logical bot.desk via DESK_ORDER [1,3,5,7,9,2,4,6,8,10,11,13,15,17,19,12,14,16,18,20,21].
 export const INFRA_REMOVED_LOGICAL_DESKS = Object.freeze([7, 8, 9, 12, 13, 14, 17, 18, 19]);
+// SWA-3258: Watch uses the same mid columns → recreation lounge (shared clear + infra_mid_desks restore).
+export const WATCH_MIDDLE_VISUAL_DESKS = INFRA_MIDDLE_VISUAL_DESKS;
+export const WATCH_REMOVED_LOGICAL_DESKS = INFRA_REMOVED_LOGICAL_DESKS;
 const SPOT_RE = /^(desk|screen|lounge)_(\d{2})$/;
 const LAMP_RE = /^lamp_(\d{2})$/;
 const NAMES = ['floor_open', 'floor_closed', 'roof', 'elevator_shaft', 'elevator_cabin'];
@@ -29,6 +32,11 @@ const INFRA_MIDDLE_SET = new Set(INFRA_MIDDLE_VISUAL_DESKS);
 export function isInfraFloor(floorId) {
   const id = String(floorId || '');
   return id === 'infra' || id.startsWith('infra-');
+}
+
+export function isWatchFloor(floorId) {
+  const id = String(floorId || '');
+  return id === 'watch' || id.startsWith('watch-');
 }
 
 export async function loadOfficeAssets(baseUrl) {
@@ -96,6 +104,7 @@ function finish(templates, spots, nightMaps, source) {
   }
   let infraDeskBackup = null;
   let infraKitchenSeats = null;
+  let watchRecreationSeats = null;
   try {
     const ik = setupInfraKitchen(templates.floor_open, spots);
     infraDeskBackup = ik.deskBackup;
@@ -103,7 +112,19 @@ function finish(templates, spots, nightMaps, source) {
   } catch (err) {
     console.warn('[office] Infra kitchen skipped:', err.message);
   }
-  return { templates, spots, nightMaps, source, style, infraDeskBackup, infraKitchenSeats };
+  try {
+    // Reuses the shared mid-bay clear from setupInfraKitchen; only adds the lounge props.
+    const wr = buildWatchRecreation(templates.floor_open);
+    watchRecreationSeats = wr.seats;
+    wr.group.visible = false;
+  } catch (err) {
+    console.warn('[office] Watch recreation skipped:', err.message);
+  }
+  return {
+    templates, spots, nightMaps, source, style,
+    infraDeskBackup, infraKitchenSeats,
+    watchDeskBackup: infraDeskBackup, watchRecreationSeats,
+  };
 }
 
 // SWA-3221: drop stool/laptop/mug props + desk/screen empties at the four marked window-side seats.
@@ -412,6 +433,29 @@ export function applyInfraFloor(obj, isInfra) {
   if (divider) divider.visible = !isInfra;
 }
 
+/**
+ * SWA-3258: on Watch, hide the shared mid-desk restore + kitchen and show recreation.
+ * Call after applyInfraFloor so Watch wins over the default mid-desk restore.
+ */
+export function applyWatchFloor(obj, isWatch) {
+  if (!obj) return;
+  const rec = obj.getObjectByName('watch_recreation');
+  if (!isWatch) {
+    if (rec) rec.visible = false;
+    return;
+  }
+  const mid = obj.getObjectByName('infra_mid_desks');
+  const kit = obj.getObjectByName('infra_kitchen');
+  const divider = obj.getObjectByName('dept_divider');
+  if (mid) mid.visible = false;
+  if (kit) kit.visible = false;
+  if (rec) rec.visible = true;
+  if (divider) divider.visible = false;
+  // Legacy name from earlier SWA-3258 attempts — keep hidden if present.
+  const legacy = obj.getObjectByName('watch_mid_desks');
+  if (legacy) legacy.visible = false;
+}
+
 /** Null or restore shared desk spots for the Infra middle columns. */
 export function applyInfraDeskSpots(spots, isInfra, backup) {
   if (!spots?.desks) return;
@@ -427,6 +471,103 @@ export function applyInfraDeskSpots(spots, isInfra, backup) {
       if (spots.screens && backup.screens) spots.screens[i] = backup.screens[i];
     }
   }
+}
+
+/** Null or restore shared desk spots for the Watch middle columns (same bay as Infra). */
+export function applyWatchDeskSpots(spots, isWatch, backup) {
+  applyInfraDeskSpots(spots, isWatch, backup);
+}
+
+function buildWatchRecreation(open) {
+  let g = open.getObjectByName('watch_recreation');
+  if (g) return { group: g, seats: g.userData.seats || [] };
+  g = new THREE.Group();
+  g.name = 'watch_recreation';
+  const oak = new THREE.MeshStandardMaterial({ name: 'watch_rec_oak', color: 0xC9A57C, roughness: 0.55 });
+  const black = new THREE.MeshStandardMaterial({ name: 'watch_rec_frame', color: 0x1C1C1E, roughness: 0.45, metalness: 0.25 });
+  const fabric = new THREE.MeshStandardMaterial({ name: 'watch_rec_fabric', color: 0x5B6B7A, roughness: 0.88 });
+  const cushion = new THREE.MeshStandardMaterial({ name: 'watch_rec_cushion', color: 0xC79F89, roughness: 0.9 });
+  const rugMat = new THREE.MeshStandardMaterial({ name: 'watch_rec_rug', color: 0x9CAA93, roughness: 1 });
+  const pot = new THREE.MeshStandardMaterial({ name: 'watch_rec_pot', color: 0xF1EFEB, roughness: 0.7 });
+  const leaf = new THREE.MeshStandardMaterial({ name: 'watch_rec_leaf', color: 0x5F8F6B, roughness: 0.85 });
+
+  // Soft rug covering the cleared middle columns.
+  const rug = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.02, 5.6), rugMat);
+  rug.position.set(-2.1, 0.012, -1.2);
+  g.add(rug);
+
+  // Low sectional sofa facing the lounge / elevator side.
+  const sofa = new THREE.Group();
+  sofa.position.set(-2.3, 0, -0.2);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.38, 1.05), fabric);
+  base.position.y = 0.22;
+  sofa.add(base);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.55, 0.22), fabric);
+  back.position.set(0, 0.55, -0.42);
+  sofa.add(back);
+  for (const sx of [-1.35, 1.35]) {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.42, 1.05), fabric);
+    arm.position.set(sx, 0.42, 0);
+    sofa.add(arm);
+  }
+  for (const sx of [-0.9, 0, 0.9]) {
+    const c = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.12, 0.7), cushion);
+    c.position.set(sx, 0.44, 0.05);
+    sofa.add(c);
+  }
+  g.add(sofa);
+
+  // Round oak coffee table + two lounge chairs.
+  const table = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.05, 28), oak);
+  table.position.set(-2.1, 0.36, 1.35);
+  g.add(table);
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 0.32, 14), black);
+  pedestal.position.set(-2.1, 0.18, 1.35);
+  g.add(pedestal);
+
+  const chairAt = (x, z, yaw) => {
+    const ch = new THREE.Group();
+    ch.position.set(x, 0, z);
+    ch.rotation.y = yaw;
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.14, 0.78), fabric);
+    seat.position.y = 0.38;
+    ch.add(seat);
+    const backrest = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.55, 0.12), fabric);
+    backrest.position.set(0, 0.65, -0.33);
+    ch.add(backrest);
+    g.add(ch);
+  };
+  chairAt(-3.55, 1.55, Math.PI / 2);
+  chairAt(-0.65, 1.55, -Math.PI / 2);
+
+  // Beanbags toward the window bank for a clear play / chill read.
+  for (const [x, z] of [[-3.4, -2.5], [-0.8, -2.55], [-2.1, -3.15]]) {
+    const bean = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 12), cushion);
+    bean.scale.set(1.15, 0.72, 1.15);
+    bean.position.set(x, 0.28, z);
+    g.add(bean);
+  }
+
+  // Small plant markers so the cleared bay is not a void.
+  for (const [x, z] of [[-4.35, -1.2], [0.15, -1.1]]) {
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.35, 14), pot);
+    p.position.set(x, 0.18, z);
+    g.add(p);
+    const foliage = new THREE.Mesh(new THREE.IcosahedronGeometry(0.28, 1), leaf);
+    foliage.position.set(x, 0.55, z);
+    g.add(foliage);
+  }
+
+  const seats = [
+    { pos: new THREE.Vector3(-3.2, 0.48, -0.05), yaw: 0 },
+    { pos: new THREE.Vector3(-2.3, 0.48, -0.05), yaw: 0 },
+    { pos: new THREE.Vector3(-1.4, 0.48, -0.05), yaw: 0 },
+    { pos: new THREE.Vector3(-3.55, 0.42, 1.55), yaw: Math.PI / 2 },
+    { pos: new THREE.Vector3(-0.65, 0.42, 1.55), yaw: -Math.PI / 2 },
+  ];
+  g.userData.seats = seats;
+  open.add(g);
+  return { group: g, seats };
 }
 
 function stripMeshesInColumns(root, columns, halfSpan) {

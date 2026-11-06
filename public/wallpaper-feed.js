@@ -86,14 +86,21 @@
   const REMOVED_LOGICAL_DESKS = new Set([2, 3, 4, 5]);
   // SWA-3259: Infra middle columns (visual 04/06/08/13–18) — kitchen replaces those seats on Infra only.
   const INFRA_REMOVED_LOGICAL_DESKS = new Set([7, 8, 9, 12, 13, 14, 17, 18, 19]);
+  // SWA-3258: Watch middle columns (same bay) — recreation replaces those seats on Watch only.
+  const WATCH_REMOVED_LOGICAL_DESKS = new Set([7, 8, 9, 12, 13, 14, 17, 18, 19]);
   function isInfraFloor(floorId) {
     const id = String(floorId || '');
     return id === 'infra' || id.startsWith('infra-');
+  }
+  function isWatchFloor(floorId) {
+    const id = String(floorId || '');
+    return id === 'watch' || id.startsWith('watch-');
   }
   function isDeskOpen(n, floorId) {
     if (!Number.isInteger(n) || n < 1 || n > PER_FLOOR) return false;
     if (REMOVED_LOGICAL_DESKS.has(n)) return false;
     if (floorId != null && isInfraFloor(floorId) && INFRA_REMOVED_LOGICAL_DESKS.has(n)) return false;
+    if (floorId != null && isWatchFloor(floorId) && WATCH_REMOVED_LOGICAL_DESKS.has(n)) return false;
     return true;
   }
   function nextOpenInRange(start, maxInclusive, taken, floorId) {
@@ -351,8 +358,8 @@
     }
   }
 
-  // SWA-3221 / SWA-3259: move anyone still on a cleared seat to the next free valid desk.
-  // Seat-map scrub only drops globally removed desks (2–5); Infra-middle seats stay valid on other floors.
+  // SWA-3221 / SWA-3259 / SWA-3258: move anyone still on a cleared seat to the next free valid desk.
+  // Seat-map scrub only drops globally removed desks (2–5); Infra/Watch-middle seats stay valid on other floors.
   function relocateRemovedDesks(bots, floorIds) {
     const onFloor = floorIds || [];
     const floorId = onFloor.length && bots[onFloor[0]] ? bots[onFloor[0]].floor : null;
@@ -1326,7 +1333,8 @@
     DEFAULT_FEED_TOPIC, DEFAULT_QUALITY, QUALITIES,
     PAPERCLIP_ORIGIN, PAPERCLIP_PREFIX, PAPERCLIP_CHAT_KEYS, PAPERCLIP_AGENT_IDS,
     SEAT_STORE_KEY, FLOOR_STORE_KEY, LOUNGE_STORE_KEY, PER_FLOOR, LOUNGE_MAX,
-    REMOVED_LOGICAL_DESKS, INFRA_REMOVED_LOGICAL_DESKS, isInfraFloor, isDeskOpen,
+    REMOVED_LOGICAL_DESKS, INFRA_REMOVED_LOGICAL_DESKS, WATCH_REMOVED_LOGICAL_DESKS,
+    isInfraFloor, isWatchFloor, isDeskOpen,
     parseFeedLink, parseFeedInput, defaultFeedLink, resolveFeedTarget,
     mapLook, reduceFeed, mergeSessions, officeStatus,
     resolveQuality, towerState,
