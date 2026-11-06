@@ -6,7 +6,9 @@ import {
   buildFloorInteracts,
   aislePath,
   crossesCommunalTable,
+  crossesDeptDivider,
   canDropToAisle,
+  isSeatRowZ,
   pickAmbientWalker,
   pickInteract,
   assertTenInteracts,
@@ -14,6 +16,9 @@ import {
   stepFloorAmbient,
   AISLE_Z,
   AISLE_ENDS,
+  DIVIDER_X,
+  SOUTH_X_Z,
+  NORTH_X_Z,
 } from '../web/tower/ambient.js';
 
 test('every floor layout exposes exactly 10 distinct interacts', () => {
@@ -44,8 +49,16 @@ test('aisle path detours through the corridor for long desk-crossing trips', () 
   const to = { x: 6, y: 0.48, z: 1.2 };
   const path = aislePath(from, to);
   assert.ok(path.length >= 2);
-  assert.ok(path.some((p) => Math.abs(p.z - AISLE_Z) < 0.01));
-  assert.ok(path.some((p) => AISLE_ENDS.includes(p.x)), 'routes via a table-end column');
+  // Cross-divider trips use south/north gates; same-side may use mid-aisle.
+  assert.ok(
+    path.some((p) => Math.abs(p.z - AISLE_Z) < 0.01
+      || Math.abs(p.z - SOUTH_X_Z) < 0.01
+      || Math.abs(p.z - NORTH_X_Z) < 0.01),
+    'routes via a clear X corridor',
+  );
+  assert.ok(path.some((p) => AISLE_ENDS.includes(p.x)
+    || Math.abs(p.z - SOUTH_X_Z) < 0.01
+    || Math.abs(p.z - NORTH_X_Z) < 0.01), 'routes via an end column or gate');
   const last = path[path.length - 1];
   assert.equal(last.x, to.x);
   assert.equal(last.z, to.z);
@@ -77,15 +90,24 @@ test('aisle path never changes z on a desk-column x through table_1 (QA FAIL)', 
   assert.equal(last.z, to.z);
 });
 
-test('return home and elevator paths stay off the z≈-1.5 stool row (SWA-3273)', () => {
-  const assertNoAisleStoolLateral = (path, start, label) => {
+test('return home and elevator paths stay off seat rows + divider (SWA-3273/3276)', () => {
+  const assertSafeLongX = (path, start, label) => {
     let prev = start;
     for (const p of path) {
       if (Math.abs(p.x - prev.x) > 1.0) {
-        // Forbidden: long X travel on the live aisle-stool row (z≈-1.5 ± pouf radius).
-        const onStoolRow = (z) => z > -1.95 && z < -1.1;
-        assert.ok(!(onStoolRow(prev.z) || onStoolRow(p.z)),
-          `${label}: no lateral on stool row, got ${prev.x},${prev.z} → ${p.x},${p.z}`);
+        assert.ok(!isSeatRowZ(prev.z) && !isSeatRowZ(p.z),
+          `${label}: no lateral on seat row, got ${prev.x},${prev.z} → ${p.x},${p.z}`);
+        if (Math.abs(prev.z - AISLE_Z) < 0.05 || Math.abs(p.z - AISLE_Z) < 0.05) {
+          assert.ok(!crossesDeptDivider(prev.x, p.x),
+            `${label}: mid-aisle must not cross divider x=${DIVIDER_X}, got ${prev.x}→${p.x} at z≈${prev.z}`);
+        }
+        // Supervisor oak top ≈ x[-2.13,-0.78] z[-4.10,-3.40].
+        const onSupervisorZ = (z) => z > -4.15 && z < -3.35;
+        if (onSupervisorZ(prev.z) || onSupervisorZ(p.z)) {
+          const crossesDesk = Math.min(prev.x, p.x) < -0.775 && Math.max(prev.x, p.x) > -2.125;
+          assert.ok(!crossesDesk,
+            `${label}: no long X through supervisor desk, got ${prev.x},${prev.z} → ${p.x},${p.z}`);
+        }
       }
       prev = p;
     }
@@ -94,24 +116,28 @@ test('return home and elevator paths stay off the z≈-1.5 stool row (SWA-3273)'
   const coffee = { x: 3.85, y: 0.48, z: 1.55 };
   const desk01 = { x: -5.7, y: 0.48, z: -3.9 };
   const home = aislePath(coffee, desk01);
-  assertNoAisleStoolLateral(home, coffee, 'home');
+  assertSafeLongX(home, coffee, 'home');
   assert.equal(home[home.length - 1].x, desk01.x);
   assert.equal(home[home.length - 1].z, desk01.z);
+  assert.ok(home.some((p) => Math.abs(p.z - SOUTH_X_Z) < 0.05 || Math.abs(p.z - NORTH_X_Z) < 0.05),
+    'cross-divider home uses a gate corridor');
 
-  // desk_02 aisle stool → elevator must detour (live table_1 z to -2.0).
   const desk02 = { x: -5.7, y: 0.48, z: -1.5 };
   const elev = { x: 7.55, y: 0.48, z: -2.6 };
   assert.equal(crossesCommunalTable(desk02.z, elev.z), true);
   const elevPath = aislePath(desk02, elev);
   assert.ok(elevPath.length > 1, 'elevator hop must not be a straight clip through table_1');
-  assert.ok(elevPath.some((p) => Math.abs(p.z - AISLE_Z) < 0.05));
-  assertNoAisleStoolLateral(elevPath, desk02, 'elevator');
+  assertSafeLongX(elevPath, desk02, 'elevator');
 
-  // Meeting from aisle stool must not lateral through neighbors on z=-1.5.
   const desk06 = { x: -2.3, y: 0.48, z: -1.5 };
   const chair = { x: 4.75, y: 0.48, z: 1.03 };
   const meet = aislePath(desk06, chair);
-  assertNoAisleStoolLateral(meet, desk06, 'meeting');
+  assertSafeLongX(meet, desk06, 'meeting');
+
+  const desk12 = { x: -5.7, y: 0.48, z: 2.7 };
+  const desk11 = { x: -5.7, y: 0.48, z: 0.3 };
+  assertSafeLongX(aislePath(desk12, elev), desk12, 'desk_12');
+  assertSafeLongX(aislePath(desk11, elev), desk11, 'desk_11');
 });
 
 test('user-busy abort releases ambient without cancelTravel (SWA-3273 reseat race)', () => {

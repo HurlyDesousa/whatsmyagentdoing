@@ -17,16 +17,24 @@ export const INTERACT_ACTIONS = Object.freeze([
 // Default gap between ambient trips on a floor (ms). SWA-3107 spirit: sparse, minutes not seconds.
 export const AMBIENT_GAP_MS = Object.freeze([120_000, 300_000]); // 2–5 min
 export const ACT_DWELL_MS = Object.freeze([3_500, 7_000]);
-// Live GLB aisle stools/poufs sit near z≈-1.5; front-bank stools near z≈-0.25.
-// Corridor between them (never z=-1.3 — that clipped the return leg through desk_02/06/10).
+// Live GLB aisle stools/poufs sit near z≈-1.5; front-bank stools near z≈-0.25 / 0.30 / 2.70.
+// Mid corridor between stool rows — OK for same-side travel, but crosses the dept divider.
 export const AISLE_Z = -0.85;
 // Outside live table_1 x≈[-6.8, 2.2]: safe columns for changing z around the desks.
 export const AISLE_ENDS = Object.freeze([-7.0, 3.2]);
-// Live office.glb table_1 ≈ z[-3.4,-2.0]; table_2 ≈ z[0.25,1.35] (placeholder TABLE_Z ± half-width).
+// Live office.glb table_1 ≈ z[-3.4,-2.0]; table_2 ≈ z[0.8, 2.2].
 export const TABLE1_Z = Object.freeze([-3.5, -1.95]);
-export const TABLE2_Z = Object.freeze([0.15, 1.45]);
+export const TABLE2_Z = Object.freeze([0.8, 2.2]);
+// Frosted dept divider at x=-3.15; panels cover ~z[-2.375, 1.08]. Mid-aisle long X clips it.
+export const DIVIDER_X = -3.15;
+// Cross-divider long-X lanes past both tables and the divider ends (SWA-3276 FAIL).
+export const SOUTH_X_Z = -4.55; // glass strip, south of supervisor top z[-4.10,-3.40]
+export const NORTH_X_Z = 3.20;  // north of desk_12 poufs (z=2.70 + seat-row tol) and table_2
 
 const SEAT_Y = 0.48;
+// Live stool/pouf/supervisor seat rows — never long-lateral on these z values.
+const SEAT_ROW_Z = Object.freeze([-3.9, -1.5, 0.3, 2.7]);
+const SEAT_ROW_TOL = 0.35;
 
 function rnd(a, b) {
   return a + Math.random() * (b - a);
@@ -72,8 +80,9 @@ export function buildFloorInteracts(spots = {}, layout = 'sofa') {
     ? { x: chatDesk.pos.x + 0.85, y: SEAT_Y, z: chatDesk.pos.z, yaw: Math.atan2(-0.85, 0) }
     : { x: -0.3, y: SEAT_Y, z: -2.2, yaw: 0 };
 
-  const paceA = { x: -4.0, y: SEAT_Y, z: AISLE_Z, yaw: Math.PI / 2 };
-  const paceB = { x: 1.2, y: SEAT_Y, z: AISLE_Z, yaw: -Math.PI / 2 };
+  // Pace stays east of the dept divider so the loop never walks the frosted wall.
+  const paceA = { x: -2.0, y: SEAT_Y, z: AISLE_Z, yaw: Math.PI / 2 };
+  const paceB = { x: 2.5, y: SEAT_Y, z: AISLE_Z, yaw: -Math.PI / 2 };
 
   const byAct = {
     coffee: { act: 'coffee', ...pantry.coffee },
@@ -106,6 +115,11 @@ function pickAisleEnd(x0, x1) {
   return Math.abs(mid - AISLE_ENDS[0]) <= Math.abs(mid - AISLE_ENDS[1]) ? AISLE_ENDS[0] : AISLE_ENDS[1];
 }
 
+/** End column on the same side of the divider as x — Δx there never crosses the frost wall. */
+function sameSideEnd(x) {
+  return x < DIVIDER_X ? AISLE_ENDS[0] : AISLE_ENDS[1];
+}
+
 function rangesOverlap(a0, a1, b0, b1) {
   return Math.min(a0, a1) < Math.max(b0, b1) && Math.max(a0, a1) > Math.min(b0, b1);
 }
@@ -116,16 +130,44 @@ export function crossesCommunalTable(z0, z1) {
     || rangesOverlap(z0, z1, TABLE2_Z[0], TABLE2_Z[1]);
 }
 
+/** True when an X segment would walk through the frosted dept divider. */
+export function crossesDeptDivider(x0, x1) {
+  return Math.min(x0, x1) < DIVIDER_X && Math.max(x0, x1) > DIVIDER_X;
+}
+
+/** Live stool / pouf / supervisor seat rows — long X on these clips neighbors. */
+export function isSeatRowZ(z) {
+  return SEAT_ROW_Z.some((row) => Math.abs(z - row) < SEAT_ROW_TOL);
+}
+
+/** Can move between z0 and targetZ at a fixed desk-column x without hitting a table. */
+export function canDropToZ(z, targetZ) {
+  return !crossesCommunalTable(z, targetZ);
+}
+
 /** Can move between z0 and AISLE_Z at a fixed desk-column x without hitting a table. */
 export function canDropToAisle(z) {
-  return !crossesCommunalTable(z, AISLE_Z);
+  return canDropToZ(z, AISLE_Z);
 }
 
 /**
- * Aisle-aware waypoints so travel does not clip communal desks/tables/stools.
+ * Z lane for long X travel.
+ * Mid-aisle is fine on one side of the divider; crossing x=-3.15 needs a gate
+ * past the frosted panels (and past the communal tables).
+ */
+export function pickXCorridorZ(az, bz, ax, bx) {
+  if (crossesDeptDivider(ax, bx)) {
+    const mid = (az + bz) / 2;
+    return Math.abs(mid - SOUTH_X_Z) <= Math.abs(mid - NORTH_X_Z) ? SOUTH_X_Z : NORTH_X_Z;
+  }
+  return AISLE_Z;
+}
+
+/**
+ * Aisle-aware waypoints so travel does not clip communal desks/tables/stools/divider.
  * - Never Δz at a PAIR_X through a table top.
- * - Never long lateral along the z≈-1.5 stool row (walk neighbors' seats).
- * - All long X travel happens on AISLE_Z, clear of aisle poufs/stools.
+ * - Never long lateral along stool/pouf/supervisor seat rows.
+ * - Long X on AISLE_Z only when it does not cross the dept divider; otherwise SOUTH/NORTH gate.
  */
 export function aislePath(from, to) {
   const ax = from.x, az = from.z, bx = to.x, bz = to.z;
@@ -134,12 +176,13 @@ export function aislePath(from, to) {
   if (dist < 1.0) return [{ x: bx, y, z: bz }];
 
   // Short hop on the same open side of both tables (e.g. lounge-only).
-  if (!crossesCommunalTable(az, bz) && Math.abs(az - bz) < 0.9 && Math.abs(ax - bx) < 2.5) {
+  if (!crossesCommunalTable(az, bz) && Math.abs(az - bz) < 0.9 && Math.abs(ax - bx) < 2.5
+      && !crossesDeptDivider(ax, bx) && !isSeatRowZ(az) && !isSeatRowZ(bz)) {
     return [{ x: bx, y, z: bz }];
   }
 
-  const endFrom = pickAisleEnd(ax, bx);
-  const endTo = pickAisleEnd(bx, ax);
+  const corridorZ = pickXCorridorZ(az, bz, ax, bx);
+  const endTo = canDropToZ(bz, corridorZ) ? null : sameSideEnd(bx);
   const pts = [];
   const push = (x, z) => {
     const last = pts[pts.length - 1];
@@ -148,24 +191,36 @@ export function aislePath(from, to) {
     pts.push({ x, y, z });
   };
 
-  // 1) Reach the clear mid-bank corridor — never lateral along the stool row first.
-  if (Math.abs(az - AISLE_Z) > 0.2) {
-    if (canDropToAisle(az)) {
-      push(ax, AISLE_Z);
+  // Reach corridorZ without: seat-row laterals, table Δz at desk columns, or mid-aisle
+  // long X across the dept divider (use same-side end, then Δz there).
+  if (Math.abs(az - corridorZ) > 0.2) {
+    if (canDropToZ(az, corridorZ)) {
+      push(ax, corridorZ);
     } else {
-      push(endFrom, az);
-      push(endFrom, AISLE_Z);
+      let curX = ax;
+      let curZ = az;
+      if (isSeatRowZ(curZ) && canDropToAisle(curZ) && Math.abs(curZ - AISLE_Z) > 0.15) {
+        push(curX, AISLE_Z);
+        curZ = AISLE_Z;
+      }
+      if (canDropToZ(curZ, corridorZ)) {
+        push(curX, corridorZ);
+      } else {
+        const end = sameSideEnd(curX);
+        if (Math.abs(curX - end) > 0.08) push(end, curZ);
+        push(end, corridorZ);
+      }
     }
   }
 
-  // 2) All long X travel on AISLE_Z.
-  const enterAtOwnX = canDropToAisle(bz);
-  if (enterAtOwnX) {
-    push(bx, AISLE_Z);
-    if (Math.abs(bz - AISLE_Z) > 0.2) push(bx, bz);
+  // Long X on corridorZ (gates clear divider+tables; mid-aisle only same-side).
+  if (canDropToZ(bz, corridorZ)) {
+    push(bx, corridorZ);
+    if (Math.abs(bz - corridorZ) > 0.2) push(bx, bz);
   } else {
-    push(endTo, AISLE_Z);
-    push(endTo, bz);
+    const end = endTo || sameSideEnd(bx);
+    push(end, corridorZ);
+    push(end, bz);
     push(bx, bz);
   }
 
