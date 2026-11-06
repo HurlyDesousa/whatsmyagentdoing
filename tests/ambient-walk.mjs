@@ -237,6 +237,32 @@ test('return home and elevator paths stay off seat rows + divider (SWA-3273…32
     prev = p;
   }
 
+  // SWA-3286: north-bank poufs must actually reach z=2.70 (NORTH→seat, not aisle stop).
+  for (const [label, from, seat] of [
+    ['coffee_desk12', coffee, desk12],
+    ['elev_desk12', elev, desk12],
+    ['window_desk16', windowSpot, desk16],
+    ['desk11_desk12', desk11, desk12],
+  ]) {
+    const home = aislePath(from, seat);
+    assertSafeLongX(home, from, label);
+    const last = home[home.length - 1];
+    assert.ok(Math.abs(last.x - seat.x) < 0.08 && Math.abs(last.z - seat.z) < 0.08,
+      `${label} must end on the north pouf, not the aisle`);
+    assert.ok(home.some((p, i) => {
+      if (!i) return false;
+      const a = home[i - 1];
+      return Math.abs(a.x - seat.x) < 0.1 && Math.abs(p.x - seat.x) < 0.1
+        && Math.abs(a.z - NORTH_X_Z) < 0.08 && Math.abs(p.z - seat.z) < 0.08;
+    }), `${label} rises NORTH→seat above table_2`);
+    assert.ok(!home.some((p, i) => {
+      if (!i) return false;
+      const a = home[i - 1];
+      return Math.abs(a.x - seat.x) < 0.1 && Math.abs(p.x - seat.x) < 0.1
+        && Math.abs(a.z - AISLE_Z) < 0.08 && Math.abs(p.z - seat.z) < 0.08;
+    }), `${label} must not rise aisle→seat through table_2`);
+  }
+
   // Return from window/fridge must not long-X on the seat row through the divider.
   const winHome = aislePath(windowSpot, desk06);
   assertSafeLongX(winHome, windowSpot, 'window_home');

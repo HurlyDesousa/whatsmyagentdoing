@@ -655,6 +655,30 @@ export function aislePath(from, to) {
       return;
     }
 
+    // North-bank poufs (z ≈ 2.7): NORTH→seat drop stays above table_2. Never aisle→seat
+    // through the communal top (SWA-3286 FAIL — returns stopped on the aisle).
+    if (tz >= DEEP_NORTH_Z - 0.25 && isSeatColumnX(tx)) {
+      if (Math.abs(z - NORTH_X_Z) > 0.12) {
+        if (canDropToZ(z, NORTH_X_Z, x) && (Math.abs(z - AISLE_Z) > 0.15 || canClimbAisleToNorth(x))) {
+          push(x, NORTH_X_Z); z = NORTH_X_Z;
+        } else {
+          toWestHub();
+          if (Math.abs(z - NORTH_X_Z) > 0.12) {
+            push(WEST_HUB_X, NORTH_X_Z); z = NORTH_X_Z; x = WEST_HUB_X;
+          }
+        }
+      }
+      if (Math.abs(x - tx) > 0.08) { push(tx, NORTH_X_Z); x = tx; z = NORTH_X_Z; }
+      if (Math.abs(z - tz) > 0.12 && canDropToZ(NORTH_X_Z, tz, tx)) {
+        push(tx, tz); z = tz; x = tx;
+      } else if (Math.abs(z - tz) > 0.12) {
+        // Fallback: hub drop then lateral on the seat row (rare).
+        push(WEST_HUB_X, NORTH_X_Z); push(WEST_HUB_X, tz); x = WEST_HUB_X; z = tz;
+        push(tx, tz); x = tx;
+      }
+      return;
+    }
+
     // Near-aisle seats / meeting chairs: aisle approach, never frost-wall aisle cross.
     if (isSeatColumnX(tx) || (tz < NORTH_X_Z - 0.3 && tz > AISLE_Z - 0.2)) {
       const destEast = tx > DIVIDER_X;
