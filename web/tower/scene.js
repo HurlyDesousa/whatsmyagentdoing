@@ -419,7 +419,7 @@ function addPointerHandlers() {
   el.addEventListener('pointerup', onUp);
   el.addEventListener('pointercancel', (e) => { touches.delete(e.pointerId); drag = null; pinch = null; });
   el.addEventListener('wheel', onWheel, { passive: false });
-  el.addEventListener('contextmenu', (e) => e.preventDefault());
+  el.addEventListener('contextmenu', onContextMenu);
 }
 
 function setPointer(e) {
@@ -428,6 +428,8 @@ function setPointer(e) {
 }
 
 function onDown(e) {
+  // Right/middle click: leave drag/select alone so context menus do not reseat or pan.
+  if (e.button != null && e.button !== 0) return;
   renderer.domElement.setPointerCapture?.(e.pointerId);
   setPointer(e);
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -442,6 +444,13 @@ function onDown(e) {
     id: e.pointerId, x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY,
     lt: performance.now(), panning: false, seating: false, seatBot: hitBot, vx: 0, vz: 0,
   };
+}
+
+function onContextMenu(e) {
+  e.preventDefault();
+  setPointer(e);
+  const bot = pick();
+  if (bot && callbacks.onBotContextMenu) callbacks.onBotContextMenu(bot, e.clientX, e.clientY);
 }
 
 function onMove(e) {

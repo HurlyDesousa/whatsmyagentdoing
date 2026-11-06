@@ -354,11 +354,12 @@ test('paperclipAgentId maps names and session pc; seats persist via assignSeat',
   const W = sandbox.WallpaperFeed;
   const a = W.botId('Chief Master');
   const b = W.botId('Monitor Master');
-  assert.equal(W.assignSeat(a, 1), 1);
-  assert.equal(W.assignSeat(b, 6), 6);
-  assert.equal(W.assignSeat(a, 6), 6); // Chief takes Monitor's desk; Monitor keeps prior seat 1 via swap
-  assert.equal(W.assignSeat(a, 21), 21); // department manager desk is a valid seating target
-  assert.equal(W.assignSeat(a, 5), null); // SWA-3221: cleared window-side logical desks are not seatable
+  const peers = [a, b]; // same-floor swap peers
+  assert.equal(W.assignSeat(a, 1, peers), 1);
+  assert.equal(W.assignSeat(b, 6, peers), 6);
+  assert.equal(W.assignSeat(a, 6, peers), 6); // Chief takes Monitor's desk; Monitor keeps prior seat 1 via swap
+  assert.equal(W.assignSeat(a, 21, peers), 21); // department manager desk is a valid seating target
+  assert.equal(W.assignSeat(a, 5, peers), null); // SWA-3221: cleared window-side logical desks are not seatable
   assert.equal(W.PER_FLOOR, 21);
   const seats = W.loadSeatAssign();
   assert.equal(seats[a], 21);
@@ -380,4 +381,155 @@ test('paperclipAgentId maps names and session pc; seats persist via assignSeat',
   const desks = Object.values(filled.bots).map((bot) => bot.desk).sort((x, y) => x - y);
   // QA + Code Master 2 are Dept A (1, skip 2–5 → 6); bare "Code Master" is bank B (11).
   assert.deepEqual(desks, [1, 6, 11]);
+});
+
+test('moveToFloor relocates across floors, persists, and refuses a full floor', () => {
+  const mem = new Map();
+  const sandbox = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, v),
+      removeItem: (k) => mem.delete(k),
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  require('node:vm').runInNewContext(feedSrc, sandbox, { filename: 'wallpaper-feed.js' });
+  const W = sandbox.WallpaperFeed;
+  const chief = W.botId('Chief Master');
+  const mon = W.botId('Monitor Master');
+  const prox = W.botId('Proxmox Master');
+  const sessions = [
+    { key: 'pc:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x' },
+    { key: 'gb:mon', id: 'mon', agent: 'grokbot', project: 'Monitor Master', status: 'waiting', activity: 'needs you' },
+    { key: 'gb:prox', id: 'prox', agent: 'grokbot', project: 'Proxmox Master', status: 'idle', activity: null },
+  ];
+  const before = W.towerState(sessions, {});
+  assert.equal(before.bots[chief].floor, 'ops');
+  assert.equal(before.bots[mon].floor, 'watch');
+  assert.equal(before.bots[prox].floor, 'infra');
+  const floorIds = before.floors.map((f) => f.id).slice().sort();
+  assert.equal(floorIds.join(','), 'infra,ops,watch');
+
+  const moved = W.moveToFloor(chief, 'watch', sessions, {});
+  assert.equal(moved.ok, true);
+  assert.equal(moved.floorId, 'watch');
+  assert.ok(moved.desk >= 1 && moved.desk <= W.PER_FLOOR);
+  assert.equal(W.loadFloorAssign()[chief], 'watch');
+
+  const after = W.towerState(sessions, {});
+  assert.equal(after.bots[chief].floor, 'watch');
+  assert.equal(after.bots[chief].desk, moved.desk);
+  assert.equal(after.bots[mon].floor, 'watch');
+  // Menu source matches floor switcher: still the live floor list, no hardcodes.
+  assert.ok(after.floors.some((f) => f.id === 'watch' && f.name === 'Watch'));
+  assert.equal(after.floors.find((f) => f.id === 'ops'), undefined); // Chief was alone on Ops
+
+  // Reload persistence: fresh WallpaperFeed + same localStorage keeps the move.
+  const sandbox2 = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: sandbox.localStorage,
+  };
+  sandbox2.window = sandbox2;
+  sandbox2.globalThis = sandbox2;
+  require('node:vm').runInNewContext(feedSrc, sandbox2, { filename: 'wallpaper-feed.js' });
+  const W2 = sandbox2.WallpaperFeed;
+  const reloaded = W2.towerState(sessions, {});
+  assert.equal(reloaded.bots[chief].floor, 'watch');
+  assert.equal(reloaded.bots[chief].desk, moved.desk);
+
+  // Fill Watch to capacity, then refuse another move without dropping the agent.
+  const fillers = [];
+  for (let i = 0; i < W.PER_FLOOR; i++) {
+    fillers.push({
+      key: `gb:fill-${i}`, id: `fill-${i}`, agent: 'grokbot',
+      project: `Fill Bot ${i}`, status: 'idle', activity: null,
+      wallpaper: { group: 'Watch', step: 'pad' },
+    });
+  }
+  const packedSessions = [
+    { key: 'pc:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x' },
+    ...fillers,
+  ];
+  // Clear prior override so Chief starts on Ops; Watch is full of fillers.
+  W2.saveFloorAssign({});
+  W2.saveSeatAssign({});
+  const packed = W2.towerState(packedSessions, {});
+  const baseWatch = packed.floors.find((f) => f.id === 'watch');
+  assert.ok(baseWatch);
+  assert.equal(baseWatch.free_desks, 0);
+  assert.equal(packed.bots[chief].floor, 'ops');
+  const refuse = W2.moveToFloor(chief, 'watch', packedSessions, {});
+  assert.equal(refuse.ok, false);
+  assert.equal(refuse.reason, 'full');
+  const stayed = W2.towerState(packedSessions, {});
+  assert.ok(stayed.bots[chief], 'full-floor refusal must not drop the agent');
+  assert.equal(stayed.bots[chief].floor, 'ops');
+});
+
+test('moveToFloor does not wipe another floor’s drag-drop seat at the same desk number', () => {
+  // QA FAIL repro (SWA-3213 / PR #32): Chief drag-seated Ops desk 7; Infra has
+  // open desks 1+6 taken so first free open is 7 (2–5 removed); moving Monitor
+  // to Infra must keep Chief at 7.
+  const mem = new Map();
+  const sandbox = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, v),
+      removeItem: (k) => mem.delete(k),
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  require('node:vm').runInNewContext(feedSrc, sandbox, { filename: 'wallpaper-feed.js' });
+  const W = sandbox.WallpaperFeed;
+  const chief = W.botId('Chief Master');
+  const doc = W.botId('Doc Master');
+  const mon = W.botId('Monitor Master');
+  const dock = W.botId('Dockhand Master');
+  const prox = W.botId('Proxmox Master');
+  const sessions = [
+    { key: 'pc:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x' },
+    { key: 'gb:doc', id: 'doc', agent: 'grokbot', project: 'Doc Master', status: 'idle', activity: null },
+    { key: 'gb:mon', id: 'mon', agent: 'grokbot', project: 'Monitor Master', status: 'waiting', activity: 'needs you' },
+    { key: 'gb:dock', id: 'dock', agent: 'grokbot', project: 'Dockhand Master', status: 'idle', activity: null },
+    { key: 'gb:prox', id: 'prox', agent: 'grokbot', project: 'Proxmox Master', status: 'idle', activity: null },
+  ];
+  const before = W.towerState(sessions, {});
+  assert.equal(before.bots[chief].floor, 'ops');
+  assert.equal(before.bots[doc].floor, 'ops');
+  assert.equal(before.bots[mon].floor, 'watch');
+  assert.equal(before.bots[dock].floor, 'infra');
+  assert.equal(before.bots[prox].floor, 'infra');
+
+  W.assignSeat(chief, 7, before.floors.find((f) => f.id === 'ops').bots);
+  W.assignSeat(dock, 1, before.floors.find((f) => f.id === 'infra').bots);
+  W.assignSeat(prox, 6, before.floors.find((f) => f.id === 'infra').bots);
+  assert.equal(W.loadSeatAssign()[chief], 7);
+
+  const moved = W.moveToFloor(mon, 'infra', sessions, {});
+  assert.equal(moved.ok, true);
+  assert.equal(moved.desk, 7); // first free open Infra desk
+  const seats = W.loadSeatAssign();
+  assert.equal(seats[mon], 7);
+  assert.equal(seats[chief], 7, 'Ops drag-drop seat must survive a same-number Infra move');
+  assert.equal(seats[dock], 1);
+  assert.equal(seats[prox], 6);
+
+  const after = W.towerState(sessions, {});
+  assert.equal(after.bots[mon].floor, 'infra');
+  assert.equal(after.bots[mon].desk, 7);
+  assert.equal(after.bots[chief].floor, 'ops');
+  assert.equal(after.bots[chief].desk, 7);
 });
