@@ -139,16 +139,23 @@ test('return home and elevator paths stay off seat rows + divider (SWA-3273…32
             `${label}: no long X through supervisor desk/chair, got ${prev.x},${prev.z} → ${p.x},${p.z}`);
         }
       }
-      // Lounge columns are not free Δz highways (SWA-3280).
-      // Exceptions (SWA-3282): desk-bank aisle↔NORTH climb; NORTH → meeting-chair drop.
+      // Lounge / desk-bank columns are not free Δz highways (SWA-3280 / SWA-3283).
+      // NORTH→AISLE and AISLE→seat on stool columns are the allowed tall hops.
       if (Math.abs(p.z - prev.z) > 1.0 && Math.abs(p.x - prev.x) < 0.25) {
         const mx = (prev.x + p.x) / 2;
-        const northToChair = Math.abs(prev.z - NORTH_X_Z) < 0.08 && p.z < 1.5 && p.z > 0.5;
-        const deskBankNorth = isDeskBankX(mx)
-          && ((Math.abs(prev.z - AISLE_Z) < 0.08 && Math.abs(p.z - NORTH_X_Z) < 0.08)
-            || (Math.abs(p.z - AISLE_Z) < 0.08 && Math.abs(prev.z - NORTH_X_Z) < 0.08));
-        assert.ok(northToChair || deskBankNorth || canDropToZ(prev.z, p.z, mx),
+        const northToAisle = Math.abs(prev.z - NORTH_X_Z) < 0.08 && Math.abs(p.z - AISLE_Z) < 0.08;
+        const aisleToSeat = Math.abs(prev.z - AISLE_Z) < 0.08 && isSeatRowZ(p.z);
+        const aisleToChair = Math.abs(prev.z - AISLE_Z) < 0.08 && p.z < 1.2 && p.z > 0.5;
+        assert.ok(northToAisle || aisleToSeat || aisleToChair || canDropToZ(prev.z, p.z, mx),
           `${label}: Δz must be furniture-clear at x=${mx.toFixed(2)}, got ${prev.z}→${p.z}`);
+        // Never aisle→NORTH on a desk-bank column (laptop screens).
+        if (isDeskBankX(mx) && Math.abs(prev.z - AISLE_Z) < 0.08 && Math.abs(p.z - NORTH_X_Z) < 0.08) {
+          assert.fail(`${label}: no aisle→NORTH climb on desk bank x=${mx.toFixed(2)}`);
+        }
+        // Never NORTH→meeting-chair through the conference top (aisle drop is fine).
+        if (Math.abs(prev.z - NORTH_X_Z) < 0.08 && p.z > 0.5 && p.z < 1.2 && mx > 4.3 && mx < 6.8) {
+          assert.fail(`${label}: no NORTH→chair drop through conference at x=${mx.toFixed(2)}`);
+        }
       }
       prev = p;
     }
@@ -178,9 +185,10 @@ test('return home and elevator paths stay off seat rows + divider (SWA-3273…32
   assert.ok(!meet.some((p, i) => {
     if (!i) return false;
     const prev = meet[i - 1];
+    // Reject NORTH→chair (through conference); aisle→chair is the required approach.
     return Math.abs(p.x - 4.75) < 0.1 && Math.abs(prev.x - 4.75) < 0.1
-      && Math.min(prev.z, p.z) < 0.5 && Math.max(prev.z, p.z) > 0.9;
-  }), 'meeting must not Δz at x=4.75 through the sofa');
+      && Math.abs(prev.z - NORTH_X_Z) < 0.08 && p.z < 1.2 && p.z > 0.5;
+  }), 'meeting must not Δz from NORTH at x=4.75 through the conference top');
 
   const desk12 = { x: -5.7, y: 0.48, z: 2.7 };
   const desk11 = { x: -5.7, y: 0.48, z: 0.3 };
@@ -231,6 +239,32 @@ test('return home and elevator paths stay off seat rows + divider (SWA-3273…32
   assertSafeLongX(winHome, windowSpot, 'window_home');
   const fridgeHome = aislePath(fridge, desk06);
   assertSafeLongX(fridgeHome, fridge, 'fridge_home');
+
+  // SWA-3283: couch stand is on NORTH rail; home must not long-X on lounge z through frost.
+  const couch = { x: 5.30, y: 0.48, z: NORTH_X_Z };
+  assertSafeLongX(aislePath(couch, desk01), couch, 'couch_home');
+  const sameCol = aislePath(desk02, desk01);
+  assertSafeLongX(sameCol, desk02, 'same_col');
+  assert.ok(sameCol.some((p, i) => {
+    if (!i) return false;
+    const prev = sameCol[i - 1];
+    return Math.abs(prev.z - AISLE_Z) < 0.08 && Math.abs(p.z - desk01.z) < 0.08
+      && Math.abs(p.x - desk01.x) < 0.1;
+  }), 'same-column arrival drops aisle→seat on the seat column');
+  assert.ok(!sameCol.some((p, i) => {
+    if (!i) return false;
+    const prev = sameCol[i - 1];
+    return Math.abs(prev.z - NORTH_X_Z) < 0.08 && Math.abs(p.z - desk01.z) < 0.08
+      && Math.abs(p.x - desk01.x) < 0.1;
+  }), 'same-column must not drop NORTH→seat through laptops');
+  // Meeting chair: arrive via AISLE, never NORTH→chair through conference top.
+  assert.equal(meet[meet.length - 1].z, chair.z);
+  assert.ok(meet.some((p, i) => {
+    if (!i) return false;
+    const prev = meet[i - 1];
+    return Math.abs(prev.z - AISLE_Z) < 0.08 && Math.abs(p.x - chair.x) < 0.1
+      && Math.abs(p.z - chair.z) < 0.08;
+  }), 'meeting chair rises from the aisle, not through the conference top');
 });
 
 test('user-busy abort releases ambient without cancelTravel (SWA-3273 reseat race)', () => {

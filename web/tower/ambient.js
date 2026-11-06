@@ -72,6 +72,8 @@ const FURNITURE_XZ = Object.freeze([
   { name: 'service_panel', x0: 6.70, x1: 7.15, z0: -4.35, z1: -2.45 },
   { name: 'service_panel_mid', x0: 4.15, x1: 4.45, z0: -4.35, z1: -2.45 },
   { name: 'lounge_panel', x0: 3.15, x1: 3.45, z0: 1.30, z1: 2.30 },
+  // Meeting-layout conference top (SWA-3283: NORTH→chair drop punched through).
+  { name: 'conference_table', x0: 4.35, x1: 6.75, z0: 1.50, z1: 2.60 },
 ]);
 
 function rnd(a, b) {
@@ -91,12 +93,21 @@ export function buildFloorInteracts(spots = {}, layout = 'sofa') {
   const coffeeTable = lounges[0]
     ? { x: lounges[0].pos.x, y: SEAT_Y, z: lounges[0].pos.z + 0.85, yaw: Math.PI }
     : { x: 5.9, y: SEAT_Y, z: 1.4, yaw: Math.PI };
+  // Ambient couch stand on the north rail (SWA-3283: sit pose z≈0.7 is inside the sofa
+  // AABB, so any leave Δz/Δx clipped the cushions / frost wall).
   const couch = lounges[1] || lounges[0]
     ? (() => {
       const s = lounges[1] || lounges[0];
-      return { x: s.pos.x, y: s.pos.y ?? SEAT_Y, z: s.pos.z, yaw: s.yaw || 0, sit: 0.36, lounge: true };
+      return {
+        x: Math.min(Math.max(s.pos.x, 4.0), 6.2),
+        y: s.pos.y ?? SEAT_Y,
+        z: NORTH_X_Z,
+        yaw: s.yaw || 0,
+        sit: 0.36,
+        lounge: true,
+      };
     })()
-    : { x: 5.9, y: SEAT_Y, z: 0.12, yaw: 0, sit: 0.36, lounge: true };
+    : { x: 5.5, y: SEAT_Y, z: NORTH_X_Z, yaw: 0, sit: 0.36, lounge: true };
 
   // Floor-appropriate stand-ins: kitchen / media / sofa lounge all map coffee+fridge nearby.
   // Sofa coffee stands on NORTH_X_Z (live machine x≈3.85): z=1.55 embeds in lounge_panel /
@@ -203,6 +214,8 @@ export function isSeatRowZ(z) {
 
 function hitsFurniture(x, z0, z1) {
   for (const b of FURNITURE_XZ) {
+    // Short aisle→meeting-chair rises stay in front of the sofa cushions (SWA-3283).
+    if (b.name === 'sofa' && Math.max(z0, z1) <= 1.08 && Math.min(z0, z1) >= AISLE_Z - 0.05) continue;
     if (x + BLOB_R > b.x0 && x - BLOB_R < b.x1 && rangesOverlap(z0, z1, b.z0, b.z1)) return true;
   }
   return false;
@@ -220,11 +233,22 @@ function hitsFurnitureAlongX(x0, x1, z) {
 
 /**
  * Desk-bank columns between the frost wall and the table east edge.
- * Live stools sit in the aisle band; aisle↔seat / north↔aisle hops here graze the
- * communal table AABB but clear the walk sphere (SWA-3282 seat returns).
+ * Live stools sit in the aisle band; aisle↔seat hops here graze the communal
+ * table AABB but clear the walk sphere (SWA-3282 seat returns).
+ * Never climb aisle→NORTH on these columns — laptop screens sit in the way (SWA-3283).
  */
 export function isDeskBankX(x) {
   return x > DIVIDER_X - 0.15 && x < TABLE_X[1] - 0.1;
+}
+
+/** Any bank stool / west-window seat column (incl. west of the frost wall). */
+export function isSeatColumnX(x) {
+  return x > TABLE_X[0] - 0.2 && x < TABLE_X[1] + 0.15;
+}
+
+/** Climb aisle→NORTH only off the desk bank (staging / hub / lounge). */
+export function canClimbAisleToNorth(x) {
+  return !isDeskBankX(x) && canDropToZ(AISLE_Z, NORTH_X_Z, x);
 }
 
 /**
@@ -234,10 +258,11 @@ export function isDeskBankX(x) {
 export function canDropToZ(z, targetZ, x = null) {
   if (x == null) return !crossesCommunalTable(z, targetZ);
   if (Math.abs(x - WEST_HUB_X) < 0.35) return true;
-  // Only the short aisle↔seat hop (not NORTH→AISLE through the table slab).
-  const seatAisleHop = isDeskBankX(x)
-    && ((isSeatRowZ(targetZ) && Math.abs(z - AISLE_Z) < 0.25)
-      || (isSeatRowZ(z) && Math.abs(targetZ - AISLE_Z) < 0.25));
+  // Short aisle↔seat / aisle-stool hops (not NORTH→dest through the table slab).
+  const nearAisleStool = (t) => isSeatRowZ(t) || (t > -2.55 && t < -1.15);
+  const seatAisleHop = isSeatColumnX(x)
+    && ((nearAisleStool(targetZ) && Math.abs(z - AISLE_Z) < 0.25)
+      || (nearAisleStool(z) && Math.abs(targetZ - AISLE_Z) < 0.25));
   // Pad table x by blob radius so edge columns (x≈2.3) are not treated as free.
   const inTableX = x + BLOB_R > TABLE_X[0] && x - BLOB_R < TABLE_X[1];
   if (inTableX && crossesCommunalTable(z, targetZ) && !seatAisleHop) return false;
@@ -320,12 +345,22 @@ export function aislePath(from, to) {
       push(WEST_HUB_X, z); x = WEST_HUB_X;
       return;
     }
-    // East bank on a blocked lane: climb first, then staging → escape → hub.
+    // East bank on a blocked lane: staging / service / escape — never aisle→NORTH on desk bank
+    // (laptop screens; SWA-3283) and never long-X on the current blocked z (couch; SWA-3283).
     if (x > DIVIDER_X && (longXBlockedZ(z) || crossesDeptDivider(x, WEST_HUB_X))) {
-      // Desk-bank on aisle: climb NORTH on the stool column, then west on NORTH (SWA-3282).
+      // Desk-bank on aisle: slide to staging on the aisle, then service → escape → hub.
       if (isDeskBankX(x) && Math.abs(z - AISLE_Z) < 0.25) {
-        push(x, NORTH_X_Z); z = NORTH_X_Z;
-        push(WEST_HUB_X, NORTH_X_Z); x = WEST_HUB_X;
+        if (!hitsFurnitureAlongX(x, EAST_STAGING_X, AISLE_Z)) {
+          push(EAST_STAGING_X, AISLE_Z); x = EAST_STAGING_X; z = AISLE_Z;
+        }
+        if (canDropToZ(z, SOUTH_SERVICE_Z, x)) { push(x, SOUTH_SERVICE_Z); z = SOUTH_SERVICE_Z; }
+        const escX = Math.min(x, SOUTH_ESCAPE_X_MAX);
+        if (Math.abs(x - escX) > 0.08) { push(escX, z); x = escX; }
+        if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
+        else if (canClimbAisleToNorth(x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
+        push(WEST_HUB_X, Math.abs(z - NORTH_X_Z) < 0.08 ? NORTH_X_Z : SOUTH_ESCAPE_Z);
+        x = WEST_HUB_X;
+        z = Math.abs(z - NORTH_X_Z) < 0.08 ? NORTH_X_Z : SOUTH_ESCAPE_Z;
         return;
       }
       // Never slide on a blocked z (lounge_panel at x≈3.30 / SWA-3282). Seek a climb column.
@@ -334,7 +369,6 @@ export function aislePath(from, to) {
         const climbCols = [x + 1.0, x - 1.0, x + 1.8, x - 1.8, 2.70, EAST_STAGING_X, 1.5];
         for (const cx of climbCols) {
           if (Math.abs(cx - x) < 0.08) continue;
-          // Never slide across the frost wall on a blocked z to “find” a climb column.
           if (crossesDeptDivider(x, cx) && dividerBlocksZ(z)) continue;
           if (hitsFurnitureAlongX(x, cx, z)) continue;
           if (canDropToZ(z, NORTH_X_Z, cx) || canDropToZ(z, SOUTH_ESCAPE_Z, cx)
@@ -363,16 +397,49 @@ export function aislePath(from, to) {
         if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
         else if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
         else {
-          // Never long-X to the hub on SOUTH_SERVICE (supervisor oak / SWA-3282).
+          // Last resort: climb at hub column only after reaching a clear rail — never
+          // long-X on the blocked lounge z through the frost wall (SWA-3283 couch).
           if (Math.abs(z - SOUTH_SERVICE_Z) < 0.08 && x > SOUTH_ESCAPE_X_MAX) {
             push(SOUTH_ESCAPE_X_MAX, SOUTH_SERVICE_Z); x = SOUTH_ESCAPE_X_MAX;
           }
           if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
           else if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
-          push(WEST_HUB_X, z); x = WEST_HUB_X;
-          if (Math.abs(z - SOUTH_ESCAPE_Z) > 0.12) {
-            push(WEST_HUB_X, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z;
+          else {
+            // Seek a column that can climb, then take a clear rail west — never force
+            // Δz through sofa/armchairs at the current lounge x (SWA-3283 couch).
+            const climbX = findDropColumn(z, NORTH_X_Z, EAST_STAGING_X);
+            if (Math.abs(climbX - x) > 0.08 && !hitsFurnitureAlongX(x, climbX, z)
+                && !(crossesDeptDivider(x, climbX) && dividerBlocksZ(z))) {
+              push(climbX, z); x = climbX;
+            }
+            if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
+            else if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
+            else if (canDropToZ(z, AISLE_Z, x)) {
+              push(x, AISLE_Z); z = AISLE_Z;
+              if (Math.abs(x - EAST_STAGING_X) > 0.08 && !hitsFurnitureAlongX(x, EAST_STAGING_X, z)) {
+                push(EAST_STAGING_X, z); x = EAST_STAGING_X;
+              }
+              if (canDropToZ(z, SOUTH_SERVICE_Z, x)) { push(x, SOUTH_SERVICE_Z); z = SOUTH_SERVICE_Z; }
+              const escX = Math.min(x, SOUTH_ESCAPE_X_MAX);
+              if (Math.abs(x - escX) > 0.08) { push(escX, z); x = escX; }
+              if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
+              else if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
+            } else {
+              // Absolute fallback: west hub is always a free Δz column.
+              push(WEST_HUB_X, z); x = WEST_HUB_X;
+              push(WEST_HUB_X, NORTH_X_Z); z = NORTH_X_Z;
+              return;
+            }
           }
+          const rail = Math.abs(z - NORTH_X_Z) < 0.08 ? NORTH_X_Z
+            : (Math.abs(z - SOUTH_ESCAPE_Z) < 0.08 ? SOUTH_ESCAPE_Z : NORTH_X_Z);
+          if (Math.abs(z - rail) > 0.12 && canDropToZ(z, rail, x)) { push(x, rail); z = rail; }
+          else if (Math.abs(z - rail) > 0.12) {
+            push(WEST_HUB_X, z); x = WEST_HUB_X;
+            push(WEST_HUB_X, rail); z = rail;
+            return;
+          }
+          push(WEST_HUB_X, rail); x = WEST_HUB_X; z = rail;
           return;
         }
       }
@@ -410,9 +477,9 @@ export function aislePath(from, to) {
       else { toWestHub(); }
     }
     if ((longXBlockedZ(z) || dividerBlocksZ(z)) && crossesDeptDivider(x, destX)) {
-      // Always reroute via NORTH — never slide to staging across the frost wall on aisle.
+      // Always reroute via NORTH — never aisle→NORTH on desk bank (laptop screens).
       if (Math.abs(z - NORTH_X_Z) > 0.12) {
-        if (isDeskBankX(x) && Math.abs(z - AISLE_Z) < 0.25) {
+        if (canClimbAisleToNorth(x) && Math.abs(z - AISLE_Z) < 0.25) {
           push(x, NORTH_X_Z); z = NORTH_X_Z;
         } else if (canDropToZ(z, NORTH_X_Z, x)) {
           push(x, NORTH_X_Z); z = NORTH_X_Z;
@@ -491,7 +558,7 @@ export function aislePath(from, to) {
       // Same side: long east-lounge hops use NORTH (aisle laterals clip sofa/tree).
       if (Math.abs(x - tx) > 2.0 && (isDeskBankX(x) || tx > EAST_STAGING_X - 0.5)) {
         if (Math.abs(z - NORTH_X_Z) > 0.12) {
-          if (isDeskBankX(x) && Math.abs(z - AISLE_Z) < 0.25) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
+          if (canClimbAisleToNorth(x) && Math.abs(z - AISLE_Z) < 0.25) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
           else if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
           else { toWestHub(); push(WEST_HUB_X, NORTH_X_Z); z = NORTH_X_Z; x = WEST_HUB_X; }
         }
@@ -507,11 +574,31 @@ export function aislePath(from, to) {
     if (Math.abs(z - tz) < 0.12) return;
     if (canDropToZ(z, tz, tx)) { push(tx, tz); z = tz; x = tx; return; }
 
-    // Desk-bank seats: after a NORTH cross, drop aisle→seat on the stool column
-    // (vertical graze of the table AABB; avoids seat-row long-X through frost).
-    if (isDeskBankX(tx) && isSeatRowZ(tz) && Math.abs(z - NORTH_X_Z) < 0.15) {
+    // Seat / bank columns: never drop NORTH→dest through laptop/mug rows (SWA-3283).
+    // Always NORTH → AISLE → dest when the direct drop is blocked.
+    if (isSeatColumnX(tx) && Math.abs(z - NORTH_X_Z) < 0.15 && !canDropToZ(z, tz, tx)) {
       push(tx, AISLE_Z); z = AISLE_Z; x = tx;
-      push(tx, tz); z = tz;
+      if (Math.abs(z - tz) > 0.12 && canDropToZ(AISLE_Z, tz, tx)) { push(tx, tz); z = tz; }
+      return;
+    }
+
+    // Meeting / lounge dest south of NORTH: prefer AISLE then short rise (clears conference top).
+    if (tz < NORTH_X_Z - 0.3 && tz > AISLE_Z - 0.2 && canDropToZ(AISLE_Z, tz, tx)) {
+      if (Math.abs(z - NORTH_X_Z) < 0.15 || Math.abs(z - AISLE_Z) > 0.12) {
+        if (Math.abs(x - tx) > 0.08) {
+          // Reach dest x on NORTH (clear rail), then drop to aisle.
+          if (Math.abs(z - NORTH_X_Z) > 0.12) {
+            if (canClimbAisleToNorth(x) && Math.abs(z - AISLE_Z) < 0.25) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
+            else if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
+            else { toWestHub(); push(WEST_HUB_X, NORTH_X_Z); z = NORTH_X_Z; x = WEST_HUB_X; }
+          }
+          push(tx, NORTH_X_Z); x = tx; z = NORTH_X_Z;
+        }
+        push(tx, AISLE_Z); z = AISLE_Z; x = tx;
+      } else if (Math.abs(x - tx) > 0.08) {
+        moveX(tx);
+      }
+      push(tx, tz); z = tz; x = tx;
       return;
     }
 
@@ -523,17 +610,22 @@ export function aislePath(from, to) {
       return;
     }
 
-    // Lounge / misc dest: NORTH to the dest column, then a short drop (meeting chair;
-    // residual sofa graze is accepted — never long-X on z≈1.0 across the frost wall).
+    // Last resort: NORTH to dest column only when the final drop is furniture-clear.
     if (Math.abs(z - NORTH_X_Z) > 0.12) {
-      if (isDeskBankX(x) && Math.abs(z - AISLE_Z) < 0.25) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
+      if (canClimbAisleToNorth(x) && Math.abs(z - AISLE_Z) < 0.25) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
       else if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
       else { toWestHub(); push(WEST_HUB_X, NORTH_X_Z); z = NORTH_X_Z; x = WEST_HUB_X; }
     }
     if (Math.abs(x - tx) > 0.08) {
       push(tx, NORTH_X_Z); x = tx; z = NORTH_X_Z;
     }
-    if (Math.abs(z - tz) > 0.12) { push(tx, tz); z = tz; x = tx; }
+    if (Math.abs(z - tz) > 0.12) {
+      if (canDropToZ(z, tz, tx)) { push(tx, tz); z = tz; x = tx; }
+      else if (canDropToZ(AISLE_Z, tz, tx)) {
+        push(tx, AISLE_Z); z = AISLE_Z; x = tx;
+        push(tx, tz); z = tz;
+      }
+    }
   };
 
   // 1) Leave seat row.
