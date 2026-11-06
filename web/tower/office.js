@@ -151,11 +151,17 @@ function stripMeshesNear(root, centers, radius) {
   });
 }
 
-// SWA-3259: strip middle-bank stools/laptops from the shared template, then offer either a
-// procedural desk restore (non-Infra floors) or a kitchen bay (Infra floor) via visibility.
+// Mid communal-table X span for the three cleared columns (pairs at −3.9 / −2.1 / −0.3).
+// Wall-side (−5.7) and lounge-side (1.5) table ends stay.
+const INFRA_MID_X0 = -4.8;
+const INFRA_MID_X1 = 0.6;
+
+// SWA-3259: strip middle-bank stools/laptops/table mid-span from the shared template, then offer
+// either a procedural desk+table restore (non-Infra) or a kitchen bay (Infra) via visibility.
 function setupInfraKitchen(open, spots) {
   const deskBackup = { desks: spots.desks.map((s) => (s ? { pos: s.pos.clone(), yaw: s.yaw } : undefined)), screens: spots.screens.slice() };
   const seatCenters = [];
+  const propCenters = []; // seat + laptop on-table points — lids sit ~0.76 m toward the tabletop
   for (const n of INFRA_MIDDLE_VISUAL_DESKS) {
     if (REMOVED_BANK_SET.has(n)) continue;
     const id = String(n).padStart(2, '0');
@@ -168,21 +174,34 @@ function setupInfraKitchen(open, spots) {
     const z = desk ? desk.position.z : fallbackZ;
     const y = desk ? desk.position.y : SEAT_Y;
     const yaw = desk ? desk.rotation.y : (n % 2 === 1 ? 0 : Math.PI);
-    seatCenters.push(desk ? desk.position.clone() : new THREE.Vector3(x, y, z));
+    const seat = desk ? desk.position.clone() : new THREE.Vector3(x, y, z);
+    seatCenters.push(seat);
+    const facing = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    propCenters.push(seat);
+    propCenters.push(new THREE.Vector3(x + facing.x * 0.75, 0.75, z + facing.z * 0.75));
     if (!spots.desks[n - 1]) spots.desks[n - 1] = { pos: new THREE.Vector3(x, y, z), yaw };
-    // Keep empties so non-Infra restore can re-bind spots; props are stripped below.
-    for (const prefix of ['screen_', 'laptop_screen_']) {
-      const o = open.getObjectByName(prefix + id);
-      if (o?.parent) o.parent.remove(o);
-    }
   }
 
   const poufs = open.getObjectByName('poufs');
   if (poufs) stripMeshesNear(poufs, seatCenters, 0.55);
   const laptops = open.getObjectByName('laptops');
-  if (laptops) stripMeshesNear(laptops, seatCenters, 0.7);
+  if (laptops) stripMeshesNear(laptops, propCenters, 0.55);
   const mugs = open.getObjectByName('mugs');
-  if (mugs) stripMeshesNear(mugs, seatCenters, 0.45);
+  if (mugs) stripMeshesNear(mugs, propCenters, 0.55);
+  // Drop mid span of both communal oak tables so Infra kitchen can occupy the bay.
+  for (const name of ['table_1', 'table_2']) {
+    const table = open.getObjectByName(name);
+    if (table) stripMeshTris(table, (x) => x >= INFRA_MID_X0 && x <= INFRA_MID_X1);
+  }
+  // Screen empties only after mesh strip — mid restore draws its own lids.
+  for (const n of INFRA_MIDDLE_VISUAL_DESKS) {
+    if (REMOVED_BANK_SET.has(n)) continue;
+    const id = String(n).padStart(2, '0');
+    for (const prefix of ['screen_', 'laptop_screen_']) {
+      const o = open.getObjectByName(prefix + id);
+      if (o?.parent) o.parent.remove(o);
+    }
+  }
 
   const mid = buildInfraMidDesks(open, spots);
   const { group: kitchen, seats } = buildInfraKitchen(open);
@@ -201,6 +220,21 @@ function buildInfraMidDesks(open, spots) {
   const black = new THREE.MeshStandardMaterial({ name: 'infra_mid_frame', color: 0x1C1C1E, roughness: 0.45, metalness: 0.25 });
   const fabric = new THREE.MeshStandardMaterial({ name: 'infra_mid_seat', color: 0x3A3A3E, roughness: 0.85 });
   const laptopMat = new THREE.MeshStandardMaterial({ name: 'infra_mid_laptop', color: 0xC9CCD0, roughness: 0.35, metalness: 0.7 });
+  // Restore the cut mid table tops on both banks (matches GLB oak height / width).
+  const midLen = INFRA_MID_X1 - INFRA_MID_X0;
+  const midCx = (INFRA_MID_X0 + INFRA_MID_X1) / 2;
+  for (const z0 of [-3.4, 0.8]) {
+    const top = new THREE.Mesh(new THREE.BoxGeometry(midLen, 0.05, 1.1), oak);
+    top.position.set(midCx, 0.725, z0);
+    g.add(top);
+    for (const lx of [midCx - midLen * 0.35, midCx + midLen * 0.35]) {
+      for (const s of [-1, 1]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.7, 0.05), black);
+        leg.position.set(lx, 0.35, z0 + s * 0.48);
+        g.add(leg);
+      }
+    }
+  }
   for (const n of INFRA_MIDDLE_VISUAL_DESKS) {
     if (REMOVED_BANK_SET.has(n)) continue;
     const spot = spots.desks[n - 1];
@@ -210,23 +244,20 @@ function buildInfraMidDesks(open, spots) {
     stool.position.set(x, SEAT_Y / 2, z);
     g.add(stool);
     const facing = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-    const lx = x - facing.x * 0.75, lz = z - facing.z * 0.75;
+    // Laptop sits on the table in front of the seat (toward the communal top), not in the aisle.
+    const lx = x + facing.x * 0.75, lz = z + facing.z * 0.75;
     const base = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.012, 0.22), laptopMat);
     base.position.set(lx, 0.756, lz);
     base.rotation.y = yaw;
     g.add(base);
     const lid = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.2, 0.008), laptopMat);
-    lid.position.set(lx + facing.x * 0.02, 0.86, lz + facing.z * 0.02);
+    lid.position.set(lx - facing.x * 0.02, 0.86, lz - facing.z * 0.02);
     lid.rotation.y = yaw;
     lid.rotation.x = 0.35;
     g.add(lid);
     const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, SEAT_Y - 0.05, 10), black);
     leg.position.set(x, (SEAT_Y - 0.05) / 2, z);
     g.add(leg);
-    const lip = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.03, 0.28), oak);
-    lip.position.set(lx, 0.74, lz);
-    lip.rotation.y = yaw;
-    g.add(lip);
   }
   open.add(g);
   return g;
@@ -246,43 +277,40 @@ function buildInfraKitchen(open) {
   const tile = new THREE.MeshStandardMaterial({ name: 'infra_kit_tile', color: 0xD9E0E4, roughness: 0.85 });
   const fabric = new THREE.MeshStandardMaterial({ name: 'infra_kit_stool', color: 0x3A3A3E, roughness: 0.85 });
 
-  // Light tile pad over the cleared middle columns.
+  // Tile pad over the cleared mid bay (tables cut for x in [INFRA_MID_X0, INFRA_MID_X1]).
   const pad = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.018, 5.8), tile);
   pad.position.set(-2.1, 0.01, -1.2);
   g.add(pad);
 
-  // Island counter along the aisle (sink + coffee).
+  // Island in the aisle between banks (table_1 z≤−2.0, table_2 z≥0.25).
   const island = new THREE.Group();
-  island.position.set(-2.1, 0, -0.15);
+  island.position.set(-2.1, 0, -1.05);
   const base = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.9, 0.72), counter);
   base.position.y = 0.45;
   island.add(base);
   const top = new THREE.Mesh(new THREE.BoxGeometry(3.75, 0.05, 0.82), oak);
   top.position.y = 0.925;
   island.add(top);
-  // Sink basin
   const sink = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 0.4), steel);
   sink.position.set(-0.85, 0.96, 0.05);
   island.add(sink);
   const faucet = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.28, 10), steel);
   faucet.position.set(-0.85, 1.12, -0.18);
   island.add(faucet);
-  // Coffee machine
   const coffee = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.42, 0.3), matte);
   coffee.position.set(1.15, 1.16, 0);
   island.add(coffee);
   const drip = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.18), white);
   drip.position.set(1.15, 1.0, 0.08);
   island.add(drip);
-  // Microwave
   const micro = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.28, 0.32), steel);
   micro.position.set(0.35, 1.1, 0);
   island.add(micro);
   g.add(island);
 
-  // Back-wall fridge (window-bank side of the cleared bay).
+  // Fridge in the cut window-bank mid span (was table_1), doors face the aisle (+z).
   const fridge = new THREE.Group();
-  fridge.position.set(-3.85, 0, -2.55);
+  fridge.position.set(-3.7, 0, -2.7);
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.85, 0.72), white);
   body.position.y = 0.925;
   fridge.add(body);
@@ -302,18 +330,18 @@ function buildInfraKitchen(open) {
   fridge.add(handleR);
   g.add(fridge);
 
-  // Side cabinet run opposite the fridge for a clear kitchen read.
+  // Side cabinet in the same cut mid span, clear of fridge.
   const side = new THREE.Group();
-  side.position.set(-0.35, 0, -2.55);
-  const sideBase = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.9, 0.6), counter);
+  side.position.set(-0.5, 0, -2.7);
+  const sideBase = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.9, 0.6), counter);
   sideBase.position.y = 0.45;
   side.add(sideBase);
-  const sideTop = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.05, 0.68), oak);
+  const sideTop = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.05, 0.68), oak);
   sideTop.position.y = 0.925;
   side.add(sideTop);
   g.add(side);
 
-  // Bar stools facing the island — sit destinations for idle / send-to-kitchen.
+  // Bar stools on the cut table_2 mid span, facing the island (−z).
   const stoolAt = (x, z, yaw) => {
     const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.08, 16), fabric);
     seat.position.set(x, 0.72, z);
@@ -327,9 +355,7 @@ function buildInfraKitchen(open) {
     stoolAt(-3.2, 0.85, Math.PI),
     stoolAt(-2.1, 0.85, Math.PI),
     stoolAt(-1.0, 0.85, Math.PI),
-    // Fridge approach (SWA-3107 hangout vibe).
-    { pos: new THREE.Vector3(-3.85, 0.42, -1.7), yaw: Math.PI, kind: 'fridge' },
-    // Counter / coffee approach.
+    { pos: new THREE.Vector3(-3.7, 0.42, -1.85), yaw: Math.PI, kind: 'fridge' },
     { pos: new THREE.Vector3(-0.9, 0.42, -1.55), yaw: Math.PI, kind: 'kitchen' },
   ];
   g.userData.seats = seats;
