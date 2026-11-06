@@ -52,6 +52,8 @@ export const SOUTH_ESCAPE_Z = -5.20;
 export const SOUTH_ESCAPE_X_MAX = 1.80;
 // Clear east-west lane south of tables / bar stools and south of tree_1 (for elev / plant).
 export const SOUTH_SERVICE_Z = -3.55;
+// Service lane ends west of the head-high roof_equipment panel at x≈6.90 (SWA-3281 FAIL).
+export const SOUTH_SERVICE_X_MAX = 6.20;
 // Live GLB lounge blockers (floor_open space). canDrop pads by BLOB_R.
 const FURNITURE_XZ = Object.freeze([
   { name: 'armchair_1', x0: 3.00, x1: 4.10, z0: 2.29, z1: 3.20 },
@@ -62,6 +64,8 @@ const FURNITURE_XZ = Object.freeze([
   { name: 'tree_3', x0: 2.37, x1: 3.50, z0: -5.72, z1: -4.95 },
   { name: 'coffee_bar', x0: 2.85, x1: 6.35, z0: -5.53, z1: -4.67 },
   { name: 'bar_stools', x0: 3.21, x1: 5.99, z0: -4.34, z1: -3.96 },
+  // Head-high panel in roof_equipment (QA sample x≈6.90, z[-4.33,-2.47]).
+  { name: 'service_panel', x0: 6.70, x1: 7.15, z0: -4.35, z1: -2.45 },
 ]);
 
 function rnd(a, b) {
@@ -97,12 +101,12 @@ export function buildFloorInteracts(spots = {}, layout = 'sofa') {
       : { coffee: { x: coffeeTable.x - 0.55, y: SEAT_Y, z: coffeeTable.z, yaw: coffeeTable.yaw },
         fridge: { x: 1.50, y: SEAT_Y, z: SOUTH_ESCAPE_Z, yaw: Math.PI } };
 
-  // Plant / elevator sit on SOUTH_SERVICE_Z, south of tree_1 (z≥-2.51).
-  const plant = { x: 7.20, y: SEAT_Y, z: SOUTH_SERVICE_Z, yaw: -Math.PI / 2 };
+  // Plant / elevator on SOUTH_SERVICE_Z, west of the x≈6.90 roof panel (SWA-3281).
+  const plant = { x: SOUTH_SERVICE_X_MAX, y: SEAT_Y, z: SOUTH_SERVICE_Z, yaw: -Math.PI / 2 };
   const windowSpot = { x: -2.1, y: SEAT_Y, z: -5.15, yaw: Math.PI };
   const tasks = { x: -6.85, y: SEAT_Y, z: 0.1, yaw: -Math.PI / 2 };
   const screen = { x: -6.85, y: SEAT_Y, z: -4.3, yaw: -Math.PI / 2 };
-  const elevator = { x: 7.55, y: SEAT_Y, z: SOUTH_SERVICE_Z, yaw: Math.PI / 2 };
+  const elevator = { x: SOUTH_SERVICE_X_MAX, y: SEAT_Y, z: SOUTH_SERVICE_Z, yaw: Math.PI / 2 };
 
   // Chat: stand beside a mid-bank desk (furniture spot — no second walker).
   const chatDesk = desks[Math.min(6, desks.length - 1)] || desks[0];
@@ -163,10 +167,24 @@ export function crossesDeptDivider(x0, x1) {
 
 /**
  * Divider frost panels cover ~z[-2.38, 1.08]. Long X on these z values clips the glass.
- * NORTH_X_Z and SOUTH_ESCAPE_Z / SOUTH_SERVICE_Z are clear; AISLE_Z is not.
+ * NORTH_X_Z and SOUTH_ESCAPE_Z are clear rails; AISLE_Z is not.
  */
 export function dividerBlocksZ(z) {
   return z > -2.84 && z < 1.54;
+}
+
+/** Long X also blocked when the lane cuts through a communal table slab (coffee z=1.55). */
+export function tableBlocksLongX(z) {
+  return (z + BLOB_R > TABLE1_Z[0] && z - BLOB_R < TABLE1_Z[1])
+    || (z + BLOB_R > TABLE2_Z[0] && z - BLOB_R < TABLE2_Z[1]);
+}
+
+/** True when a long lateral at this z would clip divider glass or a table top. */
+export function longXBlockedZ(z) {
+  // Declared clear rails — including SOUTH_SERVICE (intentional east lane south of tables).
+  if (Math.abs(z - NORTH_X_Z) < 0.08 || Math.abs(z - SOUTH_ESCAPE_Z) < 0.08
+      || Math.abs(z - SOUTH_SERVICE_Z) < 0.08) return false;
+  return dividerBlocksZ(z) || tableBlocksLongX(z);
 }
 
 /** Live stool / pouf / supervisor / manager seat rows — long X on these clips neighbors. */
@@ -262,29 +280,52 @@ export function aislePath(from, to) {
   let x = ax;
   let z = az;
 
-  /** Reach west hub without crossing the frost wall on a blocked z. */
+  /** Reach west hub without long-X through tables / frost wall. */
   const toWestHub = () => {
     if (Math.abs(x - WEST_HUB_X) < 0.08) return;
-    if (dividerBlocksZ(z) && crossesDeptDivider(x, WEST_HUB_X)) {
-      // East bank: AISLE → SERVICE at staging → ESCAPE → west (bar-safe) → hub.
-      if (x > DIVIDER_X) {
-        if (Math.abs(z - AISLE_Z) < 0.2 || Math.abs(z - NORTH_X_Z) < 0.2 || isSeatRowZ(z)
-            || Math.abs(z - SOUTH_SERVICE_Z) > 0.2) {
-          if (Math.abs(x - EAST_STAGING_X) > 0.08 && !crossesDeptDivider(x, EAST_STAGING_X)) {
-            push(EAST_STAGING_X, z); x = EAST_STAGING_X;
-          }
-          if (canDropToZ(z, SOUTH_SERVICE_Z, x)) { push(x, SOUTH_SERVICE_Z); z = SOUTH_SERVICE_Z; }
-          else if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
-        }
-        if (Math.abs(z - SOUTH_ESCAPE_Z) > 0.12) {
-          const escX = Math.min(x, SOUTH_ESCAPE_X_MAX);
-          if (Math.abs(x - escX) > 0.08) { push(escX, z); x = escX; }
-          if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
-          else { push(WEST_HUB_X, z); x = WEST_HUB_X; push(WEST_HUB_X, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
-        }
-        push(WEST_HUB_X, SOUTH_ESCAPE_Z); x = WEST_HUB_X; z = SOUTH_ESCAPE_Z;
+    // Already on a clear cross-divider rail — walk straight to the hub.
+    if (Math.abs(z - NORTH_X_Z) < 0.08 || Math.abs(z - SOUTH_ESCAPE_Z) < 0.08) {
+      push(WEST_HUB_X, z); x = WEST_HUB_X;
+      return;
+    }
+    // East bank on a blocked lane: climb first, then staging → escape → hub (SWA-3281 coffee z=1.55).
+    if (x > DIVIDER_X && (longXBlockedZ(z) || crossesDeptDivider(x, WEST_HUB_X))) {
+      // Climb off the table lane. Coffee (x=3.85,z=1.55) can drop to SERVICE at staging x=3.2.
+      if (longXBlockedZ(z) && !canDropToZ(z, NORTH_X_Z, x) && !canDropToZ(z, SOUTH_SERVICE_Z, x)
+          && !canDropToZ(z, SOUTH_ESCAPE_Z, x)) {
+        if (Math.abs(x - EAST_STAGING_X) > 0.08) { push(EAST_STAGING_X, z); x = EAST_STAGING_X; }
+      }
+      if (longXBlockedZ(z)) {
+        if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
+        else if (canDropToZ(z, SOUTH_SERVICE_Z, x)) { push(x, SOUTH_SERVICE_Z); z = SOUTH_SERVICE_Z; }
+        else if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
+      }
+      if (Math.abs(x - EAST_STAGING_X) > 0.08 && !crossesDeptDivider(x, EAST_STAGING_X)
+          && !longXBlockedZ(z)) {
+        push(EAST_STAGING_X, z); x = EAST_STAGING_X;
+      }
+      if (Math.abs(z - SOUTH_ESCAPE_Z) > 0.12 && Math.abs(z - NORTH_X_Z) > 0.12) {
+        if (canDropToZ(z, SOUTH_SERVICE_Z, x)) { push(x, SOUTH_SERVICE_Z); z = SOUTH_SERVICE_Z; }
+        else if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
+      }
+      if (Math.abs(z - SOUTH_ESCAPE_Z) > 0.12) {
+        const escX = Math.min(x, SOUTH_ESCAPE_X_MAX);
+        if (Math.abs(x - escX) > 0.08) { push(escX, z); x = escX; }
+        if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
+        else if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
+        else { push(WEST_HUB_X, z); x = WEST_HUB_X; push(WEST_HUB_X, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; return; }
+      }
+      if (Math.abs(z - NORTH_X_Z) < 0.08) {
+        push(WEST_HUB_X, NORTH_X_Z); x = WEST_HUB_X; z = NORTH_X_Z;
         return;
       }
+      push(WEST_HUB_X, SOUTH_ESCAPE_Z); x = WEST_HUB_X; z = SOUTH_ESCAPE_Z;
+      return;
+    }
+    // Climb off a blocked lane before the final westbound leg.
+    if (longXBlockedZ(z)) {
+      if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
+      else if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
     }
     // Never long-lateral on SOUTH_SERVICE across the room (supervisor oak).
     if (Math.abs(z - SOUTH_SERVICE_Z) < 0.08 && x > SOUTH_ESCAPE_X_MAX) {
@@ -297,14 +338,19 @@ export function aislePath(from, to) {
 
   const moveX = (tx) => {
     if (Math.abs(x - tx) < 0.08) return;
+    // Cap service lane east of the roof panel.
+    let destX = tx;
+    if (Math.abs(z - SOUTH_SERVICE_Z) < 0.08 && destX > SOUTH_SERVICE_X_MAX) {
+      destX = SOUTH_SERVICE_X_MAX;
+    }
     // SOUTH_SERVICE is only an east lane; going west crosses the supervisor oak top.
-    if (Math.abs(z - SOUTH_SERVICE_Z) < 0.08 && tx < SOUTH_ESCAPE_X_MAX && x > SOUTH_ESCAPE_X_MAX - 0.05) {
+    if (Math.abs(z - SOUTH_SERVICE_Z) < 0.08 && destX < SOUTH_ESCAPE_X_MAX && x > SOUTH_ESCAPE_X_MAX - 0.05) {
       push(SOUTH_ESCAPE_X_MAX, SOUTH_SERVICE_Z); x = SOUTH_ESCAPE_X_MAX;
       if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
       else { toWestHub(); }
     }
-    if (dividerBlocksZ(z) && crossesDeptDivider(x, tx)) {
-      // Reroute via NORTH.
+    if ((longXBlockedZ(z) || dividerBlocksZ(z)) && crossesDeptDivider(x, destX)) {
+      // Reroute via a clear rail (prefer NORTH).
       if (Math.abs(z - NORTH_X_Z) > 0.12) {
         if (!canDropToZ(z, NORTH_X_Z, x)) {
           if (x > DIVIDER_X) {
@@ -316,16 +362,22 @@ export function aislePath(from, to) {
         if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
         else { toWestHub(); }
       }
-      push(tx, NORTH_X_Z); x = tx; z = NORTH_X_Z;
+      push(destX, NORTH_X_Z); x = destX; z = NORTH_X_Z;
       return;
     }
-    if (Math.abs(z - SOUTH_ESCAPE_Z) < 0.08 && tx > SOUTH_ESCAPE_X_MAX) {
+    if (Math.abs(z - SOUTH_ESCAPE_Z) < 0.08 && destX > SOUTH_ESCAPE_X_MAX) {
       push(SOUTH_ESCAPE_X_MAX, SOUTH_ESCAPE_Z); x = SOUTH_ESCAPE_X_MAX;
       push(x, SOUTH_SERVICE_Z); z = SOUTH_SERVICE_Z;
-      push(tx, SOUTH_SERVICE_Z); x = tx;
+      push(Math.min(destX, SOUTH_SERVICE_X_MAX), SOUTH_SERVICE_Z); x = Math.min(destX, SOUTH_SERVICE_X_MAX);
       return;
     }
-    push(tx, z); x = tx;
+    // Climb before long X on a table lane (coffee); same-side aisle laterals are fine.
+    if (tableBlocksLongX(z) && Math.abs(x - destX) > 2.0) {
+      if (canDropToZ(z, NORTH_X_Z, x)) { push(x, NORTH_X_Z); z = NORTH_X_Z; }
+      else if (canDropToZ(z, SOUTH_SERVICE_Z, x)) { push(x, SOUTH_SERVICE_Z); z = SOUTH_SERVICE_Z; }
+      else if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
+    }
+    push(destX, z); x = destX;
   };
 
   const moveZ = (tz) => {
@@ -342,34 +394,33 @@ export function aislePath(from, to) {
     else moveZ(leave ?? NORTH_X_Z);
   }
 
-  // Same desk-column across a communal table: Δz only at the west hub.
+  // Same desk-column across a communal table: Δz only at a clear column (never through the slab).
   if (Math.abs(ax - bx) < 0.55 && crossesCommunalTable(az, bz)) {
-    // Prefer east staging when both ends are east of the divider (avoid blocked laterals).
-    if (ax > DIVIDER_X && bx > DIVIDER_X) {
-      if (Math.abs(z - SOUTH_ESCAPE_Z) > 0.2 && canDropToZ(z, SOUTH_ESCAPE_Z, x)) {
-        push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z;
-      } else if (Math.abs(z - SOUTH_ESCAPE_Z) > 0.2) {
-        moveZ(SOUTH_ESCAPE_Z);
+    const onClearRail = Math.abs(z - NORTH_X_Z) < 0.12 || Math.abs(z - SOUTH_ESCAPE_Z) < 0.12
+      || Math.abs(x - WEST_HUB_X) < 0.35;
+    if (onClearRail || ax < DIVIDER_X) {
+      // Already on a clear rail (or west bank): hub Δz, then hop to bx.
+      toWestHub();
+      if (Math.abs(z - bz) > 0.12) { push(WEST_HUB_X, bz); z = bz; x = WEST_HUB_X; }
+      if (Math.abs(x - bx) > 0.08) { push(bx, bz); x = bx; }
+    } else if (ax > DIVIDER_X && bx > DIVIDER_X) {
+      // East bank mid-room: staging → service/escape → dest z (or hub if blocked) → bx.
+      if (Math.abs(x - EAST_STAGING_X) > 0.08) { push(EAST_STAGING_X, z); x = EAST_STAGING_X; }
+      if (canDropToZ(z, SOUTH_SERVICE_Z, x)) { push(x, SOUTH_SERVICE_Z); z = SOUTH_SERVICE_Z; }
+      if (!canDropToZ(z, bz, x)) {
+        push(SOUTH_ESCAPE_X_MAX, z); x = SOUTH_ESCAPE_X_MAX;
+        if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) { push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z; }
       }
-      moveX(EAST_STAGING_X);
-      if (Math.abs(z - SOUTH_SERVICE_Z) > 0.15 && canDropToZ(z, SOUTH_SERVICE_Z, x)) {
-        push(x, SOUTH_SERVICE_Z); z = SOUTH_SERVICE_Z;
-      }
-      if (!canDropToZ(z, bz, x)) moveZ(SOUTH_SERVICE_Z);
       if (canDropToZ(z, bz, x)) { push(x, bz); z = bz; }
-      else { toWestHub(); moveZ(bz); }
-      moveX(bx);
+      else {
+        toWestHub();
+        if (Math.abs(z - bz) > 0.12) { push(WEST_HUB_X, bz); z = bz; x = WEST_HUB_X; }
+      }
+      if (Math.abs(x - bx) > 0.08) { push(bx, bz); x = bx; }
     } else {
       toWestHub();
-      moveZ(bz);
-      if (dividerBlocksZ(z)) {
-        moveZ(SOUTH_ESCAPE_Z);
-        moveX(bx);
-        if (canDropToZ(z, bz, bx)) { push(bx, bz); z = bz; x = bx; }
-        else { push(bx, bz); z = bz; x = bx; }
-      } else {
-        moveX(bx);
-      }
+      if (Math.abs(z - bz) > 0.12) { push(WEST_HUB_X, bz); z = bz; }
+      if (Math.abs(x - bx) > 0.08) { push(bx, bz); x = bx; }
     }
     if (!pts.length) return [{ x: bx, y, z: bz }];
     const last = pts[pts.length - 1];
@@ -391,14 +442,25 @@ export function aislePath(from, to) {
     if (Math.abs(z - bz) > 0.12) { push(bx, bz); z = bz; }
   } else if (deepSouthWest || (bz < DEEP_SOUTH_Z && bx < 2.6)) {
     // Window / fridge / south-west stands (and window at x≈-2).
-    toWestHub();
-    moveZ(SOUTH_ESCAPE_Z);
-    moveX(Math.min(bx, SOUTH_ESCAPE_X_MAX));
+    // Prefer a clear drop to ESCAPE at current/staging x before a full hub loop.
+    if (Math.abs(z - SOUTH_ESCAPE_Z) > 0.12) {
+      if (canDropToZ(z, SOUTH_ESCAPE_Z, x)) {
+        push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z;
+      } else if (x > DIVIDER_X && canDropToZ(z, SOUTH_SERVICE_Z, EAST_STAGING_X)) {
+        push(EAST_STAGING_X, z); x = EAST_STAGING_X;
+        push(x, SOUTH_SERVICE_Z); z = SOUTH_SERVICE_Z;
+        push(SOUTH_ESCAPE_X_MAX, SOUTH_SERVICE_Z); x = SOUTH_ESCAPE_X_MAX;
+        push(x, SOUTH_ESCAPE_Z); z = SOUTH_ESCAPE_Z;
+      } else {
+        toWestHub();
+        moveZ(SOUTH_ESCAPE_Z);
+      }
+    }
     if (bx <= SOUTH_ESCAPE_X_MAX + 0.2) {
       moveX(bx);
       if (Math.abs(z - bz) > 0.12) moveZ(bz);
     } else {
-      // Between escape max and ~2.6: use service lane.
+      moveX(SOUTH_ESCAPE_X_MAX);
       moveZ(SOUTH_SERVICE_Z);
       moveX(bx);
       if (Math.abs(z - bz) > 0.12) moveZ(bz);
@@ -432,43 +494,41 @@ export function aislePath(from, to) {
       moveZ(bz);
     }
   } else {
-    // Cross-divider via NORTH.
+    // Cross-divider via NORTH (decide arrival before walking onto the dest column).
     toWestHub();
     moveZ(NORTH_X_Z);
-    moveX(bx);
-    if (Math.abs(z - bz) > 0.12) {
-      if (canDropToZ(NORTH_X_Z, bz, bx)) {
+    if (Math.abs(z - bz) < 0.12) {
+      moveX(bx);
+    } else if (canDropToZ(NORTH_X_Z, bz, bx)) {
+      moveX(bx);
+      push(bx, bz); z = bz;
+    } else if (isSeatRowZ(bz) && canDropToAisle(bz, bx)) {
+      if (bx < DIVIDER_X) {
+        // Hub → aisle → seat (never Δz at the desk column through a table).
+        push(WEST_HUB_X, AISLE_Z); z = AISLE_Z; x = WEST_HUB_X;
+        push(bx, AISLE_Z); x = bx;
         push(bx, bz); z = bz;
-      } else if (isSeatRowZ(bz) && canDropToAisle(bz, bx)) {
-        if (bx < DIVIDER_X) {
-          moveX(WEST_HUB_X);
-          moveZ(AISLE_Z);
-          moveX(bx);
-          push(bx, bz); z = bz;
-        } else {
-          // East seat from west: NORTH to staging, drop to AISLE, sit.
-          moveX(EAST_STAGING_X);
-          moveZ(AISLE_Z);
-          moveX(bx);
-          push(bx, bz); z = bz;
-        }
-      } else if (Math.abs(bz - AISLE_Z) < 0.2 && bx > DIVIDER_X) {
-        // Pace-like on aisle east — use north pace instead; drop via staging.
-        moveX(EAST_STAGING_X);
-        moveZ(AISLE_Z);
-        moveX(bx);
-      } else if (bx < DIVIDER_X) {
-        moveX(WEST_HUB_X);
-        moveZ(bz);
-        moveX(bx);
       } else {
-        const col = findDropColumn(AISLE_Z, bz, 2.9);
         moveX(EAST_STAGING_X);
-        moveZ(AISLE_Z);
-        moveX(col);
-        moveZ(bz);
-        moveX(bx);
+        if (canDropToZ(z, AISLE_Z, x)) { push(x, AISLE_Z); z = AISLE_Z; }
+        else { push(WEST_HUB_X, z); push(WEST_HUB_X, AISLE_Z); x = WEST_HUB_X; z = AISLE_Z; moveX(EAST_STAGING_X); }
+        push(bx, AISLE_Z); x = bx;
+        push(bx, bz); z = bz;
       }
+    } else if (Math.abs(bz - AISLE_Z) < 0.2 && bx > DIVIDER_X) {
+      moveX(EAST_STAGING_X);
+      if (canDropToZ(z, AISLE_Z, x)) { push(x, AISLE_Z); z = AISLE_Z; }
+      push(bx, AISLE_Z); x = bx; z = AISLE_Z;
+    } else if (bx < DIVIDER_X) {
+      push(WEST_HUB_X, bz); z = bz; x = WEST_HUB_X;
+      push(bx, bz); x = bx;
+    } else {
+      const col = findDropColumn(AISLE_Z, bz, 2.9);
+      moveX(EAST_STAGING_X);
+      moveZ(AISLE_Z);
+      moveX(col);
+      moveZ(bz);
+      moveX(bx);
     }
   }
 

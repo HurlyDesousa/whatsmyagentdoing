@@ -139,12 +139,12 @@ test('return home and elevator paths stay off seat rows + divider (SWA-3273…32
   assert.equal(home[home.length - 1].z, desk01.z);
 
   const desk02 = { x: -5.7, y: 0.48, z: -1.5 };
-  const elev = { x: 7.55, y: 0.48, z: SOUTH_SERVICE_Z };
+  const elev = { x: 6.20, y: 0.48, z: SOUTH_SERVICE_Z };
   const elevPath = aislePath(desk02, elev);
   assert.ok(elevPath.length > 1, 'elevator hop must not be a straight clip through table_1');
   assertSafeLongX(elevPath, desk02, 'elevator');
-  assert.ok(elevPath.every((p) => Math.abs(p.x - 7.55) > 0.2 || p.z <= SOUTH_SERVICE_Z + 0.05),
-    'elevator approach does not drop through armchair/tree at x=7.55');
+  assert.ok(elevPath.every((p) => p.x <= 6.25 + 0.05),
+    'elevator stand stays west of roof panel at x≈6.90');
 
   const desk06 = { x: -2.3, y: 0.48, z: -1.5 };
   const chair = { x: 4.75, y: 0.48, z: 1.03 };
@@ -177,6 +177,26 @@ test('return home and elevator paths stay off seat rows + divider (SWA-3273…32
   assertSafeLongX(aislePath(desk06, fridge), desk06, 'fridge');
   assertSafeLongX(aislePath(desk06, windowSpot), desk06, 'window');
   assertSafeLongX(aislePath(desk01, { x: -2.0, y: 0.48, z: NORTH_X_Z }), desk01, 'pace');
+
+  // SWA-3281: no long X at coffee z through table_2; service lane clears roof panel.
+  const coffeePath = aislePath(coffee, desk01);
+  assertSafeLongX(coffeePath, coffee, 'coffee_home');
+  let prev = coffee;
+  for (const p of coffeePath) {
+    if (Math.abs(p.x - prev.x) > 2 && Math.abs(prev.z - 1.55) < 0.05 && Math.abs(p.z - 1.55) < 0.05) {
+      assert.fail('coffee must not long-X at z=1.55 through table_2');
+    }
+    prev = p;
+  }
+  const elev12 = aislePath(desk12, elev);
+  assertSafeLongX(elev12, desk12, 'desk12_elev');
+  prev = desk12;
+  for (const p of elev12) {
+    if (Math.abs(p.z - SOUTH_SERVICE_Z) < 0.05 && Math.abs(prev.z - SOUTH_SERVICE_Z) < 0.05) {
+      assert.ok(Math.max(prev.x, p.x) <= 6.25 + 0.05, 'service lane stays west of roof panel');
+    }
+    prev = p;
+  }
 });
 
 test('user-busy abort releases ambient without cancelTravel (SWA-3273 reseat race)', () => {
