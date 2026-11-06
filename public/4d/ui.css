@@ -618,37 +618,42 @@ html.bhq-phone body { overscroll-behavior: none; -webkit-tap-highlight-color: tr
 }
 
 /* ---------- top row: the mark, the counts, the usage; scrolls sideways instead of being cut ---------- */
-.bhq-phone #topbar {
-  display: flex; align-items: center; gap: 6px;
+/* #topbar is a <header>; index.html sets header{flex-wrap:wrap}. On phone that dropped
+   .bhq-right (sound/share/Dark) onto the floor chips — SWA-3287 FAIL / SWA-3285. */
+html.bhq-phone #topbar {
+  display: flex; flex-wrap: nowrap; align-items: center; gap: 6px;
   left: 0; right: 0; top: var(--bhq-st);
   /* leave clear air above the floor chips (SWA-3285) */
   padding: 8px calc(12px + var(--bhq-sr)) 4px calc(12px + var(--bhq-sl));
   overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none;
   pointer-events: auto;
-  z-index: 21; /* status row stays above floor chips if anything paints high */
+  /* keep default stacking with #floors (z-index 20): never paint controls over chips */
+  z-index: 20;
 }
-.bhq-phone #topbar::-webkit-scrollbar { display: none; }
-.bhq-phone #topbar > * { flex: none; }
-.bhq-phone .bhq-brand { width: 42px; height: 42px; padding: 0; justify-content: center; border-radius: 21px; }
-.bhq-phone .bhq-brand :is(.bhq-word, .bhq-sep, .bhq-live) { display: none; }
-.bhq-phone .bhq-summary { translate: none; justify-self: auto; height: 42px; padding: 0 4px; gap: 0; }
-.bhq-phone .bhq-schip { position: relative; padding: 0 7px 0 6px; gap: 4px; }
-.bhq-phone .bhq-schip--lead { padding: 0 9px 0 7px; gap: 5px; font-size: 13px; }
-.bhq-phone .bhq-schip--lead b { font-size: 20px; }
+html.bhq-phone #topbar::-webkit-scrollbar { display: none; }
+html.bhq-phone #topbar > * { flex: none; }
+html.bhq-phone .bhq-brand { width: 42px; height: 42px; padding: 0; justify-content: center; border-radius: 21px; }
+html.bhq-phone .bhq-brand :is(.bhq-word, .bhq-sep, .bhq-live) { display: none; }
+html.bhq-phone .bhq-summary { translate: none; justify-self: auto; height: 42px; padding: 0 4px; gap: 0; }
+html.bhq-phone .bhq-schip { position: relative; padding: 0 7px 0 6px; gap: 4px; }
+html.bhq-phone .bhq-schip--lead { padding: 0 9px 0 7px; gap: 5px; font-size: 13px; }
+html.bhq-phone .bhq-schip--lead b { font-size: 20px; }
 /* the colour and the number are the label; the word stays for screen readers (and as a tooltip).
    The first chip keeps its word while the row has room for it (the row is a size container). */
-.bhq-phone #topbar { container: bhq-top / inline-size; }
-.bhq-phone .bhq-schip:not(.bhq-schip--lead) > span:last-child {
+html.bhq-phone #topbar { container: bhq-top / inline-size; }
+html.bhq-phone .bhq-schip:not(.bhq-schip--lead) > span:last-child {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
 @container bhq-top (max-width: 440px) {
   .bhq-schip--lead > span:last-child { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .bhq-schip--lead { padding: 0 8px 0 7px; gap: 5px; }
 }
-.bhq-phone .bhq-right { gap: 6px; min-height: 42px; flex-direction: row-reverse; } /* usage first, DEMO last */
-.bhq-phone .bhq-usage { height: 42px; padding: 0 13px; gap: 0; }
-.bhq-phone .bhq-usage :is(.bhq-usage-label, .bhq-slider, .bhq-sep, .bhq-reset) { display: none; }
-.bhq-phone .bhq-demo { height: 28px; padding: 0 8px; font-size: 10px; letter-spacing: .06em; }
+html.bhq-phone .bhq-right {
+  gap: 6px; min-height: 42px; flex-direction: row-reverse; flex-wrap: nowrap; /* usage first, DEMO last */
+}
+html.bhq-phone .bhq-usage { height: 42px; padding: 0 13px; gap: 0; }
+html.bhq-phone .bhq-usage :is(.bhq-usage-label, .bhq-slider, .bhq-sep, .bhq-reset) { display: none; }
+html.bhq-phone .bhq-demo { height: 28px; padding: 0 8px; font-size: 10px; letter-spacing: .06em; }
 
 /* ---------- floors: a horizontal chip row (SWA-3285: no overlap / clip on ~390px) ---------- */
 html.bhq-phone #floors {
@@ -699,7 +704,8 @@ html.bhq-phone .bhq-floor[data-alert]::after {
 }
 html.bhq-phone .bhq-floor[data-alert="error"]::after { background: #FF453A; }
 
-/* very narrow phones: allow a second chip row instead of crushing labels */
+/* very narrow phones: allow a second chip row instead of crushing labels.
+   Topbar stays a single nowrap row (~54px); keep floors under it (same 68px offset). */
 @media (max-width: 430px) {
   html.bhq-phone .bhq-shaft {
     flex-wrap: wrap;
@@ -711,11 +717,11 @@ html.bhq-phone .bhq-floor[data-alert="error"]::after { background: #FF453A; }
     overflow-x: hidden; /* wrap handles fit; keep vertical chrome tidy */
   }
   html.bhq-phone #floors {
-    top: calc(var(--bhq-st) + 64px);
+    top: calc(var(--bhq-st) + 68px);
     overflow: visible;
   }
   html.bhq-phone {
-    --bhq-top: 176px; /* topbar + two chip rows + air */
+    --bhq-top: 180px; /* single-row topbar + two chip rows + air */
   }
 }
 
