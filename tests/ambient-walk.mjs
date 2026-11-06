@@ -19,6 +19,8 @@ import {
   DIVIDER_X,
   SOUTH_X_Z,
   NORTH_X_Z,
+  GATE_ENDS,
+  leaveSeatRowZ,
 } from '../web/tower/ambient.js';
 
 test('every floor layout exposes exactly 10 distinct interacts', () => {
@@ -90,7 +92,7 @@ test('aisle path never changes z on a desk-column x through table_1 (QA FAIL)', 
   assert.equal(last.z, to.z);
 });
 
-test('return home and elevator paths stay off seat rows + divider (SWA-3273/3276)', () => {
+test('return home and elevator paths stay off seat rows + divider (SWA-3273/3276/3278)', () => {
   const assertSafeLongX = (path, start, label) => {
     let prev = start;
     for (const p of path) {
@@ -101,13 +103,35 @@ test('return home and elevator paths stay off seat rows + divider (SWA-3273/3276
           assert.ok(!crossesDeptDivider(prev.x, p.x),
             `${label}: mid-aisle must not cross divider x=${DIVIDER_X}, got ${prev.x}→${p.x} at z≈${prev.z}`);
         }
-        // Supervisor oak top ≈ x[-2.13,-0.78] z[-4.10,-3.40].
-        const onSupervisorZ = (z) => z > -4.15 && z < -3.35;
-        if (onSupervisorZ(prev.z) || onSupervisorZ(p.z)) {
+        // Supervisor oak top ≈ x[-2.13,-0.78] z[-4.10,-3.40]; chair pad ≈(-1.45,-4.47) r0.26.
+        const onSupervisorBand = (z) => z > -5.0 && z < -3.35;
+        if (onSupervisorBand(prev.z) || onSupervisorBand(p.z)) {
           const crossesDesk = Math.min(prev.x, p.x) < -0.775 && Math.max(prev.x, p.x) > -2.125;
           assert.ok(!crossesDesk,
-            `${label}: no long X through supervisor desk, got ${prev.x},${prev.z} → ${p.x},${p.z}`);
+            `${label}: no long X through supervisor desk/chair, got ${prev.x},${prev.z} → ${p.x},${p.z}`);
         }
+        // South gate must sit south of coffee_bar (z≥-5.53) and clear of bar stools.
+        if (Math.abs(prev.z - SOUTH_X_Z) < 0.05 || Math.abs(p.z - SOUTH_X_Z) < 0.05) {
+          assert.ok(SOUTH_X_Z <= -5.95, `${label}: SOUTH_X_Z must clear coffee_bar south face`);
+        }
+        // North gate must sit north of armchair north face (z=3.20) + blob.
+        if (Math.abs(prev.z - NORTH_X_Z) < 0.05 || Math.abs(p.z - NORTH_X_Z) < 0.05) {
+          assert.ok(NORTH_X_Z >= 3.66, `${label}: NORTH_X_Z must clear armchair_1`);
+        }
+        // Gate long-X must use the far-east column, not mid-aisle x=3.2 (bar/armchair).
+        const onGate = Math.abs(prev.z - SOUTH_X_Z) < 0.05 || Math.abs(prev.z - NORTH_X_Z) < 0.05
+          || Math.abs(p.z - SOUTH_X_Z) < 0.05 || Math.abs(p.z - NORTH_X_Z) < 0.05;
+        if (onGate && Math.min(prev.x, p.x) < 4 && Math.max(prev.x, p.x) > 5) {
+          // Crossing the lounge x-band on a gate is fine; Δz columns are checked below.
+        }
+      }
+      // Δz at x≈3.2 through bar/armchair band is forbidden on gate trips.
+      if (Math.abs(p.z - prev.z) > 1.0 && Math.abs(p.x - 3.2) < 0.15 && Math.abs(prev.x - 3.2) < 0.15) {
+        const zLo = Math.min(prev.z, p.z), zHi = Math.max(prev.z, p.z);
+        const hitsBar = zLo < -3.9 && zHi > -4.4;
+        const hitsChair = zLo < 2.3 && zHi > 3.2;
+        assert.ok(!hitsBar && !hitsChair,
+          `${label}: no Δz at x=3.2 through bar stools/armchair, got ${prev.x},${prev.z} → ${p.x},${p.z}`);
       }
       prev = p;
     }
@@ -128,6 +152,8 @@ test('return home and elevator paths stay off seat rows + divider (SWA-3273/3276
   const elevPath = aislePath(desk02, elev);
   assert.ok(elevPath.length > 1, 'elevator hop must not be a straight clip through table_1');
   assertSafeLongX(elevPath, desk02, 'elevator');
+  assert.ok(elevPath.some((p) => Math.abs(p.x - GATE_ENDS[1]) < 0.05 || Math.abs(p.x - GATE_ENDS[0]) < 0.05),
+    'cross-divider elevator uses gate end column');
 
   const desk06 = { x: -2.3, y: 0.48, z: -1.5 };
   const chair = { x: 4.75, y: 0.48, z: 1.03 };
@@ -138,6 +164,14 @@ test('return home and elevator paths stay off seat rows + divider (SWA-3273/3276
   const desk11 = { x: -5.7, y: 0.48, z: 0.3 };
   assertSafeLongX(aislePath(desk12, elev), desk12, 'desk_12');
   assertSafeLongX(aislePath(desk11, elev), desk11, 'desk_11');
+
+  // SWA-3278: seat-row laterals on desk_04 return and desk_16 outbound.
+  const desk04 = { x: -4.0, y: 0.48, z: -1.5 };
+  assertSafeLongX(aislePath(elev, desk04), elev, 'desk_04_return');
+  const desk16 = { x: -2.3, y: 0.48, z: 2.7 };
+  assertSafeLongX(aislePath(desk16, elev), desk16, 'desk_16');
+  assert.ok(leaveSeatRowZ(2.7) != null && Math.abs(leaveSeatRowZ(2.7) - NORTH_X_Z) < 0.05,
+    'desk_16 pouf row leaves via north gate');
 });
 
 test('user-busy abort releases ambient without cancelTravel (SWA-3273 reseat race)', () => {
