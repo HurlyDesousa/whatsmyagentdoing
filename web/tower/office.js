@@ -151,17 +151,28 @@ function stripMeshesNear(root, centers, radius) {
   });
 }
 
-// Mid communal-table X span for the three cleared columns (pairs at −3.9 / −2.1 / −0.3).
-// Wall-side (−5.7) and lounge-side (1.5) table ends stay.
+// Mid communal-table X span (world) for the three cleared columns (pairs at −3.9 / −2.1 / −0.3).
+// Wall-side (−5.7) and lounge-side (1.5) table ends stay. GLB table groups are translated; cuts use world space.
 const INFRA_MID_X0 = -4.8;
 const INFRA_MID_X1 = 0.6;
+// GLB oak tops: table_1 z −3.4..−2.0, table_2 z 0.8..2.2.
+const INFRA_TABLE_MID_Z = Object.freeze([-2.7, 1.5]);
+const INFRA_TABLE_DEPTH = 1.4;
+
+/** Direction from a seat toward its bank's table top. GLB desk empties often have yaw 0 on both sides. */
+function infraTableward(z, bank) {
+  const midZ = INFRA_TABLE_MID_Z[bank] ?? -2.7;
+  const dz = Math.sign(midZ - z) || (bank === 0 ? 1 : -1);
+  return { dz, yaw: dz > 0 ? 0 : Math.PI };
+}
 
 // SWA-3259: strip middle-bank stools/laptops/table mid-span from the shared template, then offer
 // either a procedural desk+table restore (non-Infra) or a kitchen bay (Infra) via visibility.
 function setupInfraKitchen(open, spots) {
   const deskBackup = { desks: spots.desks.map((s) => (s ? { pos: s.pos.clone(), yaw: s.yaw } : undefined)), screens: spots.screens.slice() };
   const seatCenters = [];
-  const propCenters = []; // seat + laptop on-table points — lids sit ~0.76 m toward the tabletop
+  const propCenters = []; // seat + real lid / tableward points
+  open.updateMatrixWorld(true);
   for (const n of INFRA_MIDDLE_VISUAL_DESKS) {
     if (REMOVED_BANK_SET.has(n)) continue;
     const id = String(n).padStart(2, '0');
@@ -173,25 +184,31 @@ function setupInfraKitchen(open, spots) {
     const x = desk ? desk.position.x : fallbackX;
     const z = desk ? desk.position.z : fallbackZ;
     const y = desk ? desk.position.y : SEAT_Y;
-    const yaw = desk ? desk.rotation.y : (n % 2 === 1 ? 0 : Math.PI);
+    const { dz, yaw } = infraTableward(z, bank);
     const seat = desk ? desk.position.clone() : new THREE.Vector3(x, y, z);
     seatCenters.push(seat);
-    const facing = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
     propCenters.push(seat);
-    propCenters.push(new THREE.Vector3(x + facing.x * 0.75, 0.75, z + facing.z * 0.75));
+    propCenters.push(new THREE.Vector3(x, 0.75, z + dz * 0.75));
+    // Prefer the real lid empty as a strip centre when present.
+    for (const prefix of ['laptop_screen_', 'screen_']) {
+      const scr = open.getObjectByName(prefix + id);
+      if (!scr) continue;
+      propCenters.push(scr.getWorldPosition(new THREE.Vector3()));
+    }
     if (!spots.desks[n - 1]) spots.desks[n - 1] = { pos: new THREE.Vector3(x, y, z), yaw };
+    else spots.desks[n - 1] = { pos: spots.desks[n - 1].pos.clone(), yaw }; // face the table for restore
   }
 
   const poufs = open.getObjectByName('poufs');
   if (poufs) stripMeshesNear(poufs, seatCenters, 0.55);
   const laptops = open.getObjectByName('laptops');
-  if (laptops) stripMeshesNear(laptops, propCenters, 0.55);
+  if (laptops) stripMeshesNear(laptops, propCenters, 0.6);
   const mugs = open.getObjectByName('mugs');
-  if (mugs) stripMeshesNear(mugs, propCenters, 0.55);
-  // Drop mid span of both communal oak tables so Infra kitchen can occupy the bay.
+  if (mugs) stripMeshesNear(mugs, propCenters, 0.6);
+  // Drop mid span in WORLD x — table_1/2 are translated groups; local centroids ≠ world.
   for (const name of ['table_1', 'table_2']) {
     const table = open.getObjectByName(name);
-    if (table) stripMeshTris(table, (x) => x >= INFRA_MID_X0 && x <= INFRA_MID_X1);
+    if (table) stripMeshTrisWorld(table, (wx) => wx >= INFRA_MID_X0 && wx <= INFRA_MID_X1);
   }
   // Screen empties only after mesh strip — mid restore draws its own lids.
   for (const n of INFRA_MIDDLE_VISUAL_DESKS) {
@@ -220,17 +237,17 @@ function buildInfraMidDesks(open, spots) {
   const black = new THREE.MeshStandardMaterial({ name: 'infra_mid_frame', color: 0x1C1C1E, roughness: 0.45, metalness: 0.25 });
   const fabric = new THREE.MeshStandardMaterial({ name: 'infra_mid_seat', color: 0x3A3A3E, roughness: 0.85 });
   const laptopMat = new THREE.MeshStandardMaterial({ name: 'infra_mid_laptop', color: 0xC9CCD0, roughness: 0.35, metalness: 0.7 });
-  // Restore the cut mid table tops on both banks (matches GLB oak height / width).
+  // Restore mid oak tops to match GLB table_1 / table_2 footprints.
   const midLen = INFRA_MID_X1 - INFRA_MID_X0;
   const midCx = (INFRA_MID_X0 + INFRA_MID_X1) / 2;
-  for (const z0 of [-3.4, 0.8]) {
-    const top = new THREE.Mesh(new THREE.BoxGeometry(midLen, 0.05, 1.1), oak);
-    top.position.set(midCx, 0.725, z0);
+  for (const midZ of INFRA_TABLE_MID_Z) {
+    const top = new THREE.Mesh(new THREE.BoxGeometry(midLen, 0.05, INFRA_TABLE_DEPTH), oak);
+    top.position.set(midCx, 0.725, midZ);
     g.add(top);
     for (const lx of [midCx - midLen * 0.35, midCx + midLen * 0.35]) {
       for (const s of [-1, 1]) {
         const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.7, 0.05), black);
-        leg.position.set(lx, 0.35, z0 + s * 0.48);
+        leg.position.set(lx, 0.35, midZ + s * (INFRA_TABLE_DEPTH * 0.35));
         g.add(leg);
       }
     }
@@ -239,19 +256,19 @@ function buildInfraMidDesks(open, spots) {
     if (REMOVED_BANK_SET.has(n)) continue;
     const spot = spots.desks[n - 1];
     if (!spot?.pos) continue;
-    const x = spot.pos.x, z = spot.pos.z, yaw = spot.yaw || 0;
+    const x = spot.pos.x, z = spot.pos.z;
+    const bank = n <= 10 ? 0 : 1;
+    const { dz, yaw } = infraTableward(z, bank);
     const stool = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.29, 18), fabric);
     stool.position.set(x, SEAT_Y / 2, z);
     g.add(stool);
-    const facing = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-    // Laptop sits on the table in front of the seat (toward the communal top), not in the aisle.
-    const lx = x + facing.x * 0.75, lz = z + facing.z * 0.75;
+    const lx = x, lz = z + dz * 0.75;
     const base = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.012, 0.22), laptopMat);
     base.position.set(lx, 0.756, lz);
     base.rotation.y = yaw;
     g.add(base);
     const lid = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.2, 0.008), laptopMat);
-    lid.position.set(lx - facing.x * 0.02, 0.86, lz - facing.z * 0.02);
+    lid.position.set(lx, 0.86, lz - dz * 0.02);
     lid.rotation.y = yaw;
     lid.rotation.x = 0.35;
     g.add(lid);
@@ -396,6 +413,54 @@ function stripMeshesInColumns(root, columns, halfSpan) {
       if (Math.abs(x - col.x) <= halfSpan && z < col.zMax) return true;
     }
     return false;
+  });
+}
+
+/** Like stripMeshTris, but dropCentroid receives world-space centroid (x,y,z). */
+function stripMeshTrisWorld(root, dropWorld) {
+  root.updateWorldMatrix(true, true);
+  const tmp = new THREE.Vector3();
+  root.traverse((o) => {
+    if (!o.isMesh || !o.geometry?.attributes?.position) return;
+    o.updateWorldMatrix(true, false);
+    const geo = o.geometry;
+    const pos = geo.attributes.position;
+    const idx = geo.index;
+    const keep = [];
+    const m = o.matrixWorld;
+    const triDrop = (a, b, c) => {
+      tmp.set(
+        (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3,
+        (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3,
+        (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3,
+      ).applyMatrix4(m);
+      return dropWorld(tmp.x, tmp.y, tmp.z);
+    };
+    if (idx) {
+      for (let i = 0; i < idx.count; i += 3) {
+        const a = idx.getX(i), b = idx.getX(i + 1), c = idx.getX(i + 2);
+        if (!triDrop(a, b, c)) keep.push(a, b, c);
+      }
+      geo.setIndex(keep);
+    } else {
+      for (let i = 0; i < pos.count; i += 3) {
+        if (!triDrop(i, i + 1, i + 2)) keep.push(i, i + 1, i + 2);
+      }
+      if (keep.length !== pos.count) {
+        const next = new Float32Array(keep.length * 3);
+        for (let i = 0; i < keep.length; i++) {
+          const v = keep[i];
+          next[i * 3] = pos.getX(v);
+          next[i * 3 + 1] = pos.getY(v);
+          next[i * 3 + 2] = pos.getZ(v);
+        }
+        geo.setAttribute('position', new THREE.BufferAttribute(next, 3));
+        geo.deleteAttribute('normal');
+        geo.deleteAttribute('uv');
+      }
+    }
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
   });
 }
 
