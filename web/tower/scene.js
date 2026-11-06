@@ -13,6 +13,9 @@ import { Actor } from './actor.js';
 import { generateBlob } from './blobgen.js';
 import { Spring, clamp } from './spring.js';
 import { sofiaHour, fontsPromise } from './walls.js';
+import {
+  buildFloorInteracts, createFloorAmbient, stepFloorAmbient, assertTenInteracts,
+} from './ambient.js';
 
 // Swart Ops embed: same-origin tower assets (office.glb + night lightmaps), not the wallpaper site root.
 const ASSETS = '/4d';
@@ -64,9 +67,21 @@ const WALLPAPER_FRAME_MS = 1000 / 30;
 const WALLPAPER_FRAMING = 0.9;                        // < 1 = closer: the side panels' space is not needed, so the tower fills more
 const TEST = (() => {
   const q = new URLSearchParams(location.search);
-  return { floor: WALLPAPER ? null : q.get('floor'), from: q.get('from'), intro: q.get('intro'), hold: q.has('hold') ? Number(q.get('hold')) : null, cam: q.get('cam'), cursor: q.get('cursor') };
+  return {
+    floor: WALLPAPER ? null : q.get('floor'),
+    from: q.get('from'),
+    intro: q.get('intro'),
+    hold: q.has('hold') ? Number(q.get('hold')) : null,
+    cam: q.get('cam'),
+    cursor: q.get('cursor'),
+    // SWA-3262: ?ambient=1 → ~5–9s gaps so Visual QA can see a trip quickly.
+    ambient: q.get('ambient') === '1' || q.get('ambient') === 'fast',
+  };
 })();
 let frozen = false, pinCursor = false;
+const ambientByFloor = new Map();
+let floorInteracts = null;
+const loungeAssign = new Map(); // botId -> lounge index (SWA-3257 meeting sit persistence)
 
 // The office GLB is the biggest download: start it the moment this module runs (index.html may have preloaded it
 // already; the loader then reuses that response), not after the renderer and the UI are set up.
@@ -124,7 +139,26 @@ export function initScene(el, cbs = {}) {
     building = new Building({ scene, daylight, assets: a, baseUrl: `${ASSETS}/office`, renderer });
     daylight.setBuilding(building);                        // sun stripes on the active floor, ambient tint of the baked surfaces
     a.spots.lounges.forEach((s) => { if (s) s.lounge = true; });
-    window.bothq = Object.assign(window.bothq || {}, { source: a.source });
+    try {
+      floorInteracts = buildFloorInteracts(a.spots, 'sofa');
+      assertTenInteracts(floorInteracts);
+    } catch (err) {
+      console.warn('[ambient] interact catalog:', err.message);
+      floorInteracts = buildFloorInteracts(a.spots, 'sofa');
+    }
+    window.bothq = Object.assign(window.bothq || {}, {
+      source: a.source,
+      ambient: {
+        interacts: () => floorInteracts,
+        state: () => Object.fromEntries([...ambientByFloor.entries()].map(([k, v]) => [k, { ...v }])),
+        force: (floorId) => {
+          const st = ambientByFloor.get(floorId);
+          if (st) st.nextAt = 0;
+        },
+      },
+      sendToMeeting: (botId) => sendBotToMeeting(botId),
+      loungeAssign,
+    });
     resize();
     const go = () => { if (lastState) sync(); };
     Promise.race([fontsPromise, new Promise((r) => setTimeout(r, 1500))]).then(go, go);
@@ -184,8 +218,13 @@ function sync() {
 
   const maxShare = Math.max(0.0001, ...floorBots.map((b) => b.usage_share || 0));
   const lounge = assignLounge(floorBots);
+  applyLoungeOverrides(lounge, floorBots);
+  const layout = building.styles?.get(building.activeId)?.layout || 'sofa';
+  floorInteracts = buildFloorInteracts(assets.spots, layout);
+  const amb = ensureAmbient(building.activeId);
   const flags = new Array(Math.max(20, assets.spots.desks.length)).fill(0);
   const delay = Math.max(0, switchedAt + 0.55 - nowSec);
+  const homeOf = new Map();
   for (const bot of floorBots) {
     let actor = actors.get(bot.id);
     if (!actor) {
@@ -195,9 +234,14 @@ function sync() {
     }
     const deskIdx = (DESK_ORDER[(bot.desk || 1) - 1] || 1) - 1;
     const desk = assets.spots.desks[deskIdx] || assets.spots.desks.find(Boolean);
+    const home = lounge.get(bot.id) || desk;
+    homeOf.set(bot.id, home);
     if ((bot.effective_status || bot.status) === 'working' && !lounge.has(bot.id) && assets.spots.desks[deskIdx]) flags[deskIdx] = 1;
-    actor.update(bot, lounge.get(bot.id) || desk, { maxShare, selectedBot: view.selectedBot });
+    // While ambient owns the walker, keep feeding the home seat (return target) without yanking motion.
+    const spot = home;
+    actor.update(bot, spot, { maxShare, selectedBot: view.selectedBot });
   }
+  stepAmbient(amb, floorBots, homeOf);
   building.setScreens(flags);
   const floor = floors.find((f) => f.id === building.activeId);
   building.setDisplayData({ floorName: floor ? floor.name : '', bots: floorBots, hour: sofiaHour(state.now) });
@@ -238,6 +282,122 @@ function assignLounge(bots) {
   const idle = bots.filter((b) => (b.effective_status || b.status) === 'idle').sort((a, b) => (a.desk || 0) - (b.desk || 0));
   idle.slice(0, seats.length).forEach((b, i) => map.set(b.id, seats[i]));
   return map;
+}
+
+function hydrateLoungeAssign() {
+  try {
+    const feed = globalThis.WallpaperFeed;
+    if (!feed || typeof feed.loadLoungeAssign !== 'function') return;
+    const map = feed.loadLoungeAssign() || {};
+    loungeAssign.clear();
+    for (const [id, idx] of Object.entries(map)) loungeAssign.set(id, idx);
+  } catch { /* optional */ }
+}
+
+// SWA-3257: persisted meeting / lounge seat overrides (any status).
+function applyLoungeOverrides(map, bots) {
+  hydrateLoungeAssign();
+  const seats = (assets.spots.lounges || []).filter(Boolean);
+  if (!seats.length) return;
+  for (const bot of bots) {
+    const idx = loungeAssign.get(bot.id);
+    if (idx == null || !seats[idx]) continue;
+    const s = seats[idx];
+    map.set(bot.id, { pos: s.pos, yaw: s.yaw, lounge: true, meeting: true });
+  }
+}
+
+function ensureAmbient(floorId) {
+  if (!floorId) return null;
+  let st = ambientByFloor.get(floorId);
+  if (!st) {
+    st = createFloorAmbient(floorId, { fast: TEST.ambient });
+    ambientByFloor.set(floorId, st);
+  }
+  st.fast = TEST.ambient;
+  return st;
+}
+
+function stepAmbient(st, floorBots, homeOf) {
+  if (!st || !floorInteracts) return;
+  const now = performance.now();
+  stepFloorAmbient(st, {
+    now,
+    bots: floorBots,
+    interacts: floorInteracts,
+    busyIds: new Set(
+      [...ambientByFloor.values()]
+        .filter((s) => s !== st && s.walkerId && s.phase !== 'idle')
+        .map((s) => s.walkerId),
+    ),
+    homeSpotFor: (bot) => homeOf.get(bot.id),
+    isUserBusy: (id) => actors.get(id)?.isUserBusy(now),
+    isTraveling: (id) => actors.get(id)?.isTraveling(),
+    beginTrip: (id) => actors.get(id)?.beginAmbientTrip(),
+    endTrip: (id) => actors.get(id)?.endAmbientTrip(),
+    releaseTrip: (id) => actors.get(id)?.releaseAmbientTrip(),
+    startTravel: (id, path, yaw) => actors.get(id)?.travelPath(path, yaw),
+    setAct: (id, act, yaw) => actors.get(id)?.setAmbientAct(act, yaw),
+    clearAct: (id) => actors.get(id)?.clearAmbientAct(),
+    actorPos: (id) => {
+      const a = actors.get(id);
+      return a ? { x: a.root.position.x, y: a.root.position.y, z: a.root.position.z } : null;
+    },
+  });
+}
+
+/** SWA-3257: path a blob to a free conference / lounge chair and persist the seat. */
+export function sendBotToMeeting(botId) {
+  if (!assets?.spots?.lounges || !building) return { ok: false, reason: 'loading' };
+  const seats = assets.spots.lounges.filter(Boolean);
+  if (!seats.length) return { ok: false, reason: 'no-meeting' };
+  const layout = building.styles?.get(building.activeId)?.layout;
+  // Meeting corner is the racetrack table; sofa/media/library lounges still accept a sit.
+  const preferMeeting = layout === 'meeting';
+  const taken = new Set([...loungeAssign.entries()].filter(([id]) => id !== botId).map(([, i]) => i));
+  // Also treat currently seated lounge occupants as taken.
+  for (const [id, actor] of actors) {
+    if (id === botId || !actor.spotIsLounge()) continue;
+    const idx = seats.findIndex((s) => s && actor.spot && actor.spot.pos.distanceToSquared(s.pos) < 0.04);
+    if (idx >= 0) taken.add(idx);
+  }
+  let pick = -1;
+  const order = preferMeeting
+    ? [0, 1, 2, 3, 4, ...seats.map((_, i) => i)].filter((i, n, a) => i < seats.length && a.indexOf(i) === n)
+    : seats.map((_, i) => i);
+  for (const i of order) {
+    if (!taken.has(i)) { pick = i; break; }
+  }
+  if (pick < 0) return { ok: false, reason: 'full' };
+  const actor = actors.get(botId);
+  if (actor) {
+    actor.markUserBusy(20_000);
+    actor.endAmbientTrip();
+  }
+  // Cancel ambient if this bot was walking.
+  for (const st of ambientByFloor.values()) {
+    if (st.walkerId === botId) {
+      st.phase = 'idle';
+      st.walkerId = null;
+      st.home = null;
+      st.target = null;
+    }
+  }
+  loungeAssign.set(botId, pick);
+  try {
+    const feed = globalThis.WallpaperFeed;
+    if (feed && typeof feed.assignLounge === 'function') feed.assignLounge(botId, pick);
+  } catch { /* optional persistence */ }
+  if (lastState) sync();
+  return { ok: true, lounge: pick, meeting: preferMeeting };
+}
+
+export function clearLoungeAssign(botId) {
+  loungeAssign.delete(botId);
+  try {
+    const feed = globalThis.WallpaperFeed;
+    if (feed && typeof feed.clearLounge === 'function') feed.clearLounge(botId);
+  } catch { /* optional */ }
 }
 
 // Avatar chain (docs/AVATARS.md): 1. hand-made GLB assets/blobs/<avatar>.glb, 2. generated blob from bot.look
@@ -499,7 +659,26 @@ function onUp(e) {
   if (d.seating && d.seatBot) {
     setPointer(e);
     const desk = nearestDeskLogical();
-    if (desk) callbacks.onAssignSeat?.(d.seatBot, desk);
+    if (desk) {
+      clearLoungeAssign(d.seatBot);
+      const actor = actors.get(d.seatBot);
+      if (actor) {
+        actor.markUserBusy(8_000);
+        // Cancel ambient hop, but leave reseat travel to update() — do not let the
+        // director's user-busy abort cancelTravel over the new path (SWA-3273).
+        actor.cancelTravel();
+        actor.releaseAmbientTrip();
+      }
+      for (const st of ambientByFloor.values()) {
+        if (st.walkerId === d.seatBot) {
+          st.phase = 'idle';
+          st.walkerId = null;
+          st.home = null;
+          st.target = null;
+        }
+      }
+      callbacks.onAssignSeat?.(d.seatBot, desk);
+    }
     callbacks.onSelectBot?.(d.seatBot);
     return;
   }
@@ -734,6 +913,19 @@ function frame(t) {
     a.hostAlpha = a.ctx.inst.alpha;
     a.tick(dt, nowSec);
     if (a.dead) retiring.delete(a);
+  }
+  // Ambient trip machine runs every frame so walk/act/return progress between feed ticks.
+  if (building?.activeId && lastState && assets) {
+    const floorBots = Object.values(lastState.bots || {}).filter((b) => b.floor === building.activeId);
+    const lounge = assignLounge(floorBots);
+    applyLoungeOverrides(lounge, floorBots);
+    const homeOf = new Map();
+    for (const bot of floorBots) {
+      const deskIdx = (DESK_ORDER[(bot.desk || 1) - 1] || 1) - 1;
+      const desk = assets.spots.desks[deskIdx] || assets.spots.desks.find(Boolean);
+      homeOf.set(bot.id, lounge.get(bot.id) || desk);
+    }
+    stepAmbient(ensureAmbient(building.activeId), floorBots, homeOf);
   }
   stepEffects(dt);
 
