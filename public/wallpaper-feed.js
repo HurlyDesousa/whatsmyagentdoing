@@ -84,12 +84,21 @@
   const LOUNGE_MAX = 6;
   // SWA-3221: logical desks mapping to removed window-side visuals 03/05/07/09 via DESK_ORDER.
   const REMOVED_LOGICAL_DESKS = new Set([2, 3, 4, 5]);
-  function isDeskOpen(n) {
-    return Number.isInteger(n) && n >= 1 && n <= PER_FLOOR && !REMOVED_LOGICAL_DESKS.has(n);
+  // SWA-3259: Infra middle columns (visual 04/06/08/13–18) — kitchen replaces those seats on Infra only.
+  const INFRA_REMOVED_LOGICAL_DESKS = new Set([7, 8, 9, 12, 13, 14, 17, 18, 19]);
+  function isInfraFloor(floorId) {
+    const id = String(floorId || '');
+    return id === 'infra' || id.startsWith('infra-');
   }
-  function nextOpenInRange(start, maxInclusive, taken) {
+  function isDeskOpen(n, floorId) {
+    if (!Number.isInteger(n) || n < 1 || n > PER_FLOOR) return false;
+    if (REMOVED_LOGICAL_DESKS.has(n)) return false;
+    if (floorId != null && isInfraFloor(floorId) && INFRA_REMOVED_LOGICAL_DESKS.has(n)) return false;
+    return true;
+  }
+  function nextOpenInRange(start, maxInclusive, taken, floorId) {
     let d = start;
-    while (d <= maxInclusive && (!isDeskOpen(d) || (taken && taken.has(d)))) d += 1;
+    while (d <= maxInclusive && (!isDeskOpen(d, floorId) || (taken && taken.has(d)))) d += 1;
     return d <= maxInclusive ? d : null;
   }
 
@@ -224,10 +233,10 @@
   // number for bots on different floors. Only swap/displace peers on the
   // same floor (peerIds). Without peerIds, write the seat and leave others
   // alone — never delete a cross-floor placement.
-  function assignSeat(botId, desk, peerIds) {
+  function assignSeat(botId, desk, peerIds, floorId) {
     const id = String(botId || '').slice(0, 64);
     const n = Number(desk);
-    if (!id || !isDeskOpen(n)) return null;
+    if (!id || !isDeskOpen(n, floorId)) return null;
     const map = loadSeatAssign();
     const prev = map[id];
     const peers = peerIds == null ? null : new Set(
@@ -239,7 +248,7 @@
         if (other !== id && d === n && peers.has(other)) { displaced = other; break; }
       }
       if (displaced) {
-        if (prev && isDeskOpen(prev)) map[displaced] = prev;
+        if (prev && isDeskOpen(prev, floorId)) map[displaced] = prev;
         else delete map[displaced];
       }
     }
@@ -306,7 +315,8 @@
     }
     for (const id of onFloor) {
       const want = map[id];
-      if (!want || !bots[id] || !isDeskOpen(want)) continue;
+      const floorId = bots[id] && bots[id].floor;
+      if (!want || !bots[id] || !isDeskOpen(want, floorId)) continue;
       const cur = bots[id].desk;
       if (cur === want) continue;
       const other = taken.get(want);
@@ -321,25 +331,31 @@
     }
   }
 
-  // SWA-3221: move anyone still on a cleared window seat to the next free valid desk; scrub seat store.
+  // SWA-3221 / SWA-3259: move anyone still on a cleared seat to the next free valid desk.
+  // Seat-map scrub only drops globally removed desks (2–5); Infra-middle seats stay valid on other floors.
   function relocateRemovedDesks(bots, floorIds) {
     const onFloor = floorIds || [];
+    const floorId = onFloor.length && bots[onFloor[0]] ? bots[onFloor[0]].floor : null;
     const taken = new Set();
     for (const id of onFloor) {
       const d = bots[id] && bots[id].desk;
-      if (isDeskOpen(d)) taken.add(d);
+      if (isDeskOpen(d, floorId)) taken.add(d);
     }
     const map = loadSeatAssign();
     let dirty = false;
     for (const [id, d] of Object.entries(map)) {
-      if (!isDeskOpen(d)) { delete map[id]; dirty = true; }
+      if (!Number.isInteger(d) || d < 1 || d > PER_FLOOR || REMOVED_LOGICAL_DESKS.has(d)) {
+        delete map[id];
+        dirty = true;
+      }
     }
     for (const id of onFloor) {
       const b = bots[id];
-      if (!b || isDeskOpen(b.desk)) continue;
+      const fid = b && b.floor;
+      if (!b || isDeskOpen(b.desk, fid)) continue;
       let free = null;
       for (let d = 1; d <= PER_FLOOR; d++) {
-        if (isDeskOpen(d) && !taken.has(d)) { free = d; break; }
+        if (isDeskOpen(d, fid) && !taken.has(d)) { free = d; break; }
       }
       if (free == null) continue;
       b.desk = free;
@@ -373,13 +389,14 @@
     } catch (_) { /* private mode */ }
   }
 
-  function firstFreeDesk(bots, floorIds) {
+  function firstFreeDesk(bots, floorIds, floorId) {
+    const fid = floorId || (floorIds && floorIds[0] && bots[floorIds[0]] && bots[floorIds[0]].floor) || null;
     const taken = new Set();
     for (const id of floorIds || []) {
       const b = bots[id];
-      if (b && isDeskOpen(b.desk)) taken.add(b.desk);
+      if (b && isDeskOpen(b.desk, fid)) taken.add(b.desk);
     }
-    for (let d = 1; d <= PER_FLOOR; d++) if (isDeskOpen(d) && !taken.has(d)) return d;
+    for (let d = 1; d <= PER_FLOOR; d++) if (isDeskOpen(d, fid) && !taken.has(d)) return d;
     return null;
   }
 
@@ -396,10 +413,10 @@
     if (bot.floor === want) return { ok: false, reason: 'same' };
     const floor = (state.floors || []).find((f) => f.id === want);
     if (!floor) return { ok: false, reason: 'missing' };
-    const taken = new Set((floor.bots || []).map((bid) => state.bots[bid] && state.bots[bid].desk).filter((d) => isDeskOpen(d)));
+    const taken = new Set((floor.bots || []).map((bid) => state.bots[bid] && state.bots[bid].desk).filter((d) => isDeskOpen(d, want)));
     let desk = null;
     for (let d = 1; d <= PER_FLOOR; d++) {
-      if (isDeskOpen(d) && !taken.has(d)) { desk = d; break; }
+      if (isDeskOpen(d, want) && !taken.has(d)) { desk = d; break; }
     }
     if (!desk) return { ok: false, reason: 'full' };
     const fmap = loadFloorAssign();
@@ -408,7 +425,7 @@
     // Peers = bots already on the target floor. Same desk number on another
     // floor must not be wiped (QA FAIL on PR #32 / SWA-3213).
     const peers = (floor.bots || []).filter((bid) => bid && bid !== id);
-    if (!assignSeat(id, desk, peers)) return { ok: false, reason: 'seat' };
+    if (!assignSeat(id, desk, peers, want)) return { ok: false, reason: 'seat' };
     return { ok: true, floorId: want, desk };
   }
 
@@ -435,7 +452,7 @@
       target.ids.push(botId);
       bot.floor = want;
       bot.group = target.name;
-      const desk = firstFreeDesk(bots, target.ids.filter((x) => x !== botId));
+      const desk = firstFreeDesk(bots, target.ids.filter((x) => x !== botId), want);
       if (desk) bot.desk = desk;
     }
   }
@@ -1145,22 +1162,24 @@
         // Dept A → bank A (1–10), Dept B → bank B (11–20); overflow fills the other bank.
         // SWA-3221 skips cleared logical desks 2–5 (removed window-side visuals).
         const takeA = () => {
-          const d = nextOpenInRange(floor.nextA, 10, taken);
+          const d = nextOpenInRange(floor.nextA, 10, taken, floor.id);
           if (d == null) return null;
           floor.nextA = d + 1;
           return d;
         };
         const takeB = () => {
-          const d = nextOpenInRange(floor.nextB, 20, taken);
+          const d = nextOpenInRange(floor.nextB, 20, taken, floor.id);
           if (d == null) return null;
           floor.nextB = d + 1;
           return d;
         };
         if (isDeptA(row.name)) desk = takeA() || takeB();
         else desk = takeB() || takeA();
-        if (desk == null) desk = nextOpenInRange(1, PER_FLOOR, taken) || (floor.ids.length + 1);
+        if (desk == null) desk = nextOpenInRange(1, PER_FLOOR, taken, floor.id) || (floor.ids.length + 1);
       } else {
-        desk = floor.ids.length + 1;
+        desk = nextOpenInRange(floor.ids.length + 1, PER_FLOOR, taken, floor.id)
+          || nextOpenInRange(1, PER_FLOOR, taken, floor.id)
+          || (floor.ids.length + 1);
       }
       if (Number.isInteger(desk)) taken.add(desk);
       floor.ids.push(row.id);
@@ -1269,6 +1288,7 @@
     DEFAULT_FEED_TOPIC, DEFAULT_QUALITY, QUALITIES,
     PAPERCLIP_ORIGIN, PAPERCLIP_PREFIX, PAPERCLIP_CHAT_KEYS, PAPERCLIP_AGENT_IDS,
     SEAT_STORE_KEY, FLOOR_STORE_KEY, LOUNGE_STORE_KEY, PER_FLOOR, LOUNGE_MAX,
+    REMOVED_LOGICAL_DESKS, INFRA_REMOVED_LOGICAL_DESKS, isInfraFloor, isDeskOpen,
     parseFeedLink, parseFeedInput, defaultFeedLink, resolveFeedTarget,
     mapLook, reduceFeed, mergeSessions, officeStatus,
     resolveQuality, towerState,

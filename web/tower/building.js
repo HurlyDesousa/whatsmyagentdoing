@@ -6,7 +6,7 @@
 // never cross-fade (that was hazy and heavy: every material went through the transparent pass).
 import * as THREE from 'three';
 import { Spring, smoothstep } from './spring.js';
-import { FLOOR_STEP, SLAB, SHAFT_POS } from './office.js';
+import { FLOOR_STEP, SLAB, SHAFT_POS, isInfraFloor, applyInfraFloor, applyInfraDeskSpots } from './office.js';
 import { WallDisplays } from './walls.js';
 import { floorStyles, applyFloorStyle, styleObjects, styleNightMaps } from './floorstyle.js';
 
@@ -279,15 +279,29 @@ export class Building {
   // spots that move are new objects, so a seated bot walks over to its new seat (scene.js reads assets.spots.lounges).
   applyStyle(slot) {
     const st = this.styles.get(slot.id);
-    if (!st || !slot.open) return;
-    applyFloorStyle(slot.open.obj, st);
-    slot.open.walls?.setAccent(st.accent);
+    if (!slot.open) return;
+    const infra = isInfraFloor(slot.id);
+    if (st) applyFloorStyle(slot.open.obj, st);
+    applyInfraFloor(slot.open.obj, infra);
+    if (st) slot.open.walls?.setAccent(st.accent);
     if (slot !== this.activeSlot) return;
+    applyInfraDeskSpots(this.assets.spots, infra, this.assets.infraDeskBackup);
     const lounges = this.assets.spots.lounges;
-    this.assets.style.layouts[st.layout].forEach((s, i) => {
-      const cur = lounges[i];
-      if (!cur || cur.pos.distanceToSquared(s.pos) > 1e-6 || cur.yaw !== s.yaw) lounges[i] = { pos: s.pos.clone(), yaw: s.yaw, lounge: true };
-    });
+    if (st && this.assets.style?.layouts?.[st.layout]) {
+      this.assets.style.layouts[st.layout].forEach((s, i) => {
+        const cur = lounges[i];
+        if (!cur || cur.pos.distanceToSquared(s.pos) > 1e-6 || cur.yaw !== s.yaw) lounges[i] = { pos: s.pos.clone(), yaw: s.yaw, lounge: true };
+      });
+    }
+    // SWA-3259: keep the existing lounge (armchairs + TV); kitchen fridge/counter sit spots follow.
+    if (infra && Array.isArray(this.assets.infraKitchenSeats)) {
+      lounges.length = 6;
+      this.assets.infraKitchenSeats.forEach((s, i) => {
+        lounges[6 + i] = { pos: s.pos.clone(), yaw: s.yaw, lounge: true, kind: s.kind || 'kitchen' };
+      });
+    } else if (lounges.length > 6) {
+      lounges.length = 6;
+    }
   }
 
   disposeSlot(s) {

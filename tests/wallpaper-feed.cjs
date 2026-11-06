@@ -476,8 +476,8 @@ test('moveToFloor relocates across floors, persists, and refuses a full floor', 
 
 test('moveToFloor does not wipe another floor’s drag-drop seat at the same desk number', () => {
   // QA FAIL repro (SWA-3213 / PR #32): Chief drag-seated Ops desk 7; Infra has
-  // open desks 1+6 taken so first free open is 7 (2–5 removed); moving Monitor
-  // to Infra must keep Chief at 7.
+  // open desks 1+6 taken; SWA-3259 kitchen closes 7–9 so first free is 10 (2–5 removed);
+  // moving Monitor to Infra must keep Chief at Ops 7.
   const mem = new Map();
   const sandbox = {
     URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
@@ -513,23 +513,24 @@ test('moveToFloor does not wipe another floor’s drag-drop seat at the same des
   assert.equal(before.bots[dock].floor, 'infra');
   assert.equal(before.bots[prox].floor, 'infra');
 
-  W.assignSeat(chief, 7, before.floors.find((f) => f.id === 'ops').bots);
-  W.assignSeat(dock, 1, before.floors.find((f) => f.id === 'infra').bots);
-  W.assignSeat(prox, 6, before.floors.find((f) => f.id === 'infra').bots);
+  W.assignSeat(chief, 7, before.floors.find((f) => f.id === 'ops').bots, 'ops');
+  W.assignSeat(dock, 1, before.floors.find((f) => f.id === 'infra').bots, 'infra');
+  W.assignSeat(prox, 6, before.floors.find((f) => f.id === 'infra').bots, 'infra');
   assert.equal(W.loadSeatAssign()[chief], 7);
 
   const moved = W.moveToFloor(mon, 'infra', sessions, {});
   assert.equal(moved.ok, true);
-  assert.equal(moved.desk, 7); // first free open Infra desk
+  // SWA-3259: Infra middle desks 7–9 are kitchen — first free after 1+6 is 10.
+  assert.equal(moved.desk, 10);
   const seats = W.loadSeatAssign();
-  assert.equal(seats[mon], 7);
+  assert.equal(seats[mon], 10);
   assert.equal(seats[chief], 7, 'Ops drag-drop seat must survive a same-number Infra move');
   assert.equal(seats[dock], 1);
   assert.equal(seats[prox], 6);
 
   const after = W.towerState(sessions, {});
   assert.equal(after.bots[mon].floor, 'infra');
-  assert.equal(after.bots[mon].desk, 7);
+  assert.equal(after.bots[mon].desk, 10);
   assert.equal(after.bots[chief].floor, 'ops');
   assert.equal(after.bots[chief].desk, 7);
 });
@@ -562,4 +563,46 @@ test('lounge assign persists meeting sit and clears on desk assign (SWA-3257)', 
   W.assignLounge(qa, 0);
   W.clearLounge(qa);
   assert.equal(W.loadLoungeAssign()[qa], undefined);
+});
+
+test('SWA-3259 Infra middle desks are closed; other floors keep them', () => {
+  const mem = new Map();
+  const sandbox = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, v),
+      removeItem: (k) => mem.delete(k),
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  require('node:vm').runInNewContext(feedSrc, sandbox, { filename: 'wallpaper-feed.js' });
+  const W = sandbox.WallpaperFeed;
+  assert.equal(W.isDeskOpen(7), true);
+  assert.equal(W.isDeskOpen(7, 'ops'), true);
+  assert.equal(W.isDeskOpen(7, 'infra'), false);
+  assert.equal(W.isDeskOpen(12, 'infra'), false);
+  assert.equal(W.isDeskOpen(1, 'infra'), true);
+  assert.equal(W.isDeskOpen(21, 'infra'), true);
+  assert.equal(W.assignSeat(W.botId('Proxmox Master'), 7, null, 'infra'), null);
+  assert.equal(W.assignSeat(W.botId('Proxmox Master'), 1, null, 'infra'), 1);
+  assert.equal(W.assignSeat(W.botId('Chief Master'), 7, null, 'ops'), 7);
+
+  const sessions = [
+    { key: 'gb:prox', id: 'prox', agent: 'grokbot', project: 'Proxmox Master', status: 'waiting', activity: 'needs you' },
+    { key: 'pc:chief', id: 'chief', agent: 'paperclip', project: 'Chief Master', status: 'thinking', activity: 'x' },
+  ];
+  const prox = W.botId('Proxmox Master');
+  const chief = W.botId('Chief Master');
+  W.saveSeatAssign({ [prox]: 12, [chief]: 7 }); // Infra-removed logical for Proxmox; Ops keeps 7
+  const tower = W.towerState(sessions, {});
+  assert.equal(tower.bots[prox].floor, 'infra');
+  assert.ok(W.isDeskOpen(tower.bots[prox].desk, 'infra'));
+  assert.notEqual(tower.bots[prox].desk, 12);
+  assert.equal(tower.bots[chief].floor, 'ops');
+  assert.equal(tower.bots[chief].desk, 7);
 });
