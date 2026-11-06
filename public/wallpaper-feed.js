@@ -78,8 +78,10 @@
   };
   const SEAT_STORE_KEY = 'wmad.seatAssign';
   const FLOOR_STORE_KEY = 'wmad.floorAssign';
+  const LOUNGE_STORE_KEY = 'wmad.loungeAssign'; // SWA-3257 meeting / lounge chair persistence
   // 20 communal bank stools + 1 department manager desk (SWA-3195).
   const PER_FLOOR = 21;
+  const LOUNGE_MAX = 6;
   // SWA-3221: logical desks mapping to removed window-side visuals 03/05/07/09 via DESK_ORDER.
   const REMOVED_LOGICAL_DESKS = new Set([2, 3, 4, 5]);
   function isDeskOpen(n) {
@@ -243,7 +245,53 @@
     }
     map[id] = n;
     saveSeatAssign(map);
+    clearLounge(id); // desk drag / assign wins over meeting sit
     return n;
+  }
+
+  function loadLoungeAssign() {
+    try {
+      const raw = globalThis.localStorage && localStorage.getItem(LOUNGE_STORE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      const out = {};
+      for (const [id, idx] of Object.entries(parsed)) {
+        const n = Number(idx);
+        if (!id || !Number.isInteger(n) || n < 0 || n >= LOUNGE_MAX) continue;
+        out[String(id).slice(0, 64)] = n;
+      }
+      return out;
+    } catch (_) { return {}; }
+  }
+
+  function saveLoungeAssign(map) {
+    try {
+      if (!globalThis.localStorage) return;
+      localStorage.setItem(LOUNGE_STORE_KEY, JSON.stringify(map || {}));
+    } catch (_) { /* private mode */ }
+  }
+
+  function assignLounge(botId, loungeIdx) {
+    const id = String(botId || '').slice(0, 64);
+    const n = Number(loungeIdx);
+    if (!id || !Number.isInteger(n) || n < 0 || n >= LOUNGE_MAX) return null;
+    const map = loadLoungeAssign();
+    for (const [other, idx] of Object.entries(map)) {
+      if (other !== id && idx === n) delete map[other];
+    }
+    map[id] = n;
+    saveLoungeAssign(map);
+    return n;
+  }
+
+  function clearLounge(botId) {
+    const id = String(botId || '').slice(0, 64);
+    if (!id) return;
+    const map = loadLoungeAssign();
+    if (!(id in map)) return;
+    delete map[id];
+    saveLoungeAssign(map);
   }
 
   function applySeatOverrides(bots, floorIds) {
@@ -1220,13 +1268,14 @@
     RELAY, NTFY, STORE_KEY, REMEMBERED,
     DEFAULT_FEED_TOPIC, DEFAULT_QUALITY, QUALITIES,
     PAPERCLIP_ORIGIN, PAPERCLIP_PREFIX, PAPERCLIP_CHAT_KEYS, PAPERCLIP_AGENT_IDS,
-    SEAT_STORE_KEY, FLOOR_STORE_KEY, PER_FLOOR,
+    SEAT_STORE_KEY, FLOOR_STORE_KEY, LOUNGE_STORE_KEY, PER_FLOOR, LOUNGE_MAX,
     parseFeedLink, parseFeedInput, defaultFeedLink, resolveFeedTarget,
     mapLook, reduceFeed, mergeSessions, officeStatus,
     resolveQuality, towerState,
     paperclipUrlKey, paperclipChatUrl, paperclipAgentId, resolveChatUrl, isPaperclipChatUrl,
     loadSeatAssign, saveSeatAssign, assignSeat, applySeatOverrides,
     loadFloorAssign, saveFloorAssign, moveToFloor, applyFloorOverrides, firstFreeDesk,
+    loadLoungeAssign, saveLoungeAssign, assignLounge, clearLounge,
     connectFeed, hashTag, rememberedFor, botId,
     configPinKey, pinsFromLines, mergePinned,
     get pageLink() { return pageLink; },

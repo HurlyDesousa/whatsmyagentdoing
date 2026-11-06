@@ -1,0 +1,139 @@
+// SWA-3262: sparse ambient walk catalog + aisle path + one-walker pick.
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  INTERACT_ACTIONS,
+  buildFloorInteracts,
+  aislePath,
+  pickAmbientWalker,
+  pickInteract,
+  assertTenInteracts,
+  createFloorAmbient,
+  stepFloorAmbient,
+  AISLE_Z,
+} from '../web/tower/ambient.js';
+
+test('every floor layout exposes exactly 10 distinct interacts', () => {
+  for (const layout of ['sofa', 'media', 'library', 'meeting']) {
+    const interacts = buildFloorInteracts({
+      lounges: [
+        { pos: { x: 5, y: 0.48, z: 0.1 }, yaw: 0 },
+        { pos: { x: 5.9, y: 0.48, z: 0.1 }, yaw: 0 },
+      ],
+      desks: [
+        { pos: { x: -2.1, y: 0.48, z: -3.4 }, yaw: 0 },
+        { pos: { x: -0.3, y: 0.48, z: -3.4 }, yaw: 0 },
+        { pos: { x: 1.5, y: 0.48, z: -3.4 }, yaw: 0 },
+        { pos: { x: -2.1, y: 0.48, z: 0.8 }, yaw: Math.PI },
+        { pos: { x: -0.3, y: 0.48, z: 0.8 }, yaw: Math.PI },
+        { pos: { x: 1.5, y: 0.48, z: 0.8 }, yaw: Math.PI },
+        { pos: { x: -3.9, y: 0.48, z: -3.4 }, yaw: 0 },
+      ],
+    }, layout);
+    assertTenInteracts(interacts);
+    assert.equal(interacts.length, INTERACT_ACTIONS.length);
+    assert.deepEqual(interacts.map((i) => i.act), [...INTERACT_ACTIONS]);
+  }
+});
+
+test('aisle path detours through the corridor for long desk-crossing trips', () => {
+  const from = { x: -4, y: 0.48, z: -3.5 };
+  const to = { x: 6, y: 0.48, z: 1.2 };
+  const path = aislePath(from, to);
+  assert.ok(path.length >= 2);
+  assert.ok(path.some((p) => Math.abs(p.z - AISLE_Z) < 0.01));
+  const last = path[path.length - 1];
+  assert.equal(last.x, to.x);
+  assert.equal(last.z, to.z);
+});
+
+test('short hops stay direct', () => {
+  const path = aislePath({ x: 1, z: 1 }, { x: 1.2, z: 1.1 });
+  assert.equal(path.length, 1);
+});
+
+test('pickAmbientWalker prefers non-working blobs', () => {
+  const bots = [
+    { id: 'w1', status: 'working', effective_status: 'working' },
+    { id: 'w2', status: 'working', effective_status: 'working' },
+    { id: 'r1', status: 'idle', effective_status: 'idle' },
+    { id: 'r2', status: 'error', effective_status: 'error' },
+  ];
+  const counts = { w1: 0, w2: 0, r1: 0, r2: 0 };
+  for (let i = 0; i < 80; i++) {
+    const p = pickAmbientWalker(bots, { busyIds: new Set() });
+    counts[p.id] += 1;
+  }
+  assert.ok(counts.r1 + counts.r2 > counts.w1 + counts.w2, 'resting should win most draws');
+});
+
+test('pickAmbientWalker skips busy ids', () => {
+  const bots = [
+    { id: 'a', status: 'idle', effective_status: 'idle' },
+    { id: 'b', status: 'idle', effective_status: 'idle' },
+  ];
+  for (let i = 0; i < 20; i++) {
+    const p = pickAmbientWalker(bots, { busyIds: new Set(['a']) });
+    assert.equal(p.id, 'b');
+  }
+});
+
+test('floor ambient runs trip → act → return with one walker', () => {
+  const interacts = buildFloorInteracts({ lounges: [], desks: [] }, 'sofa');
+  const st = createFloorAmbient('ops', { fast: true });
+  st.nextAt = 0;
+  const home = { pos: { x: 0, y: 0.48, z: -3.4 }, yaw: 0 };
+  let traveling = false;
+  let act = null;
+  let trips = 0;
+  const ctx = {
+    now: 1000,
+    bots: [{ id: 'blob', status: 'idle', effective_status: 'idle' }],
+    interacts,
+    homeSpotFor: () => home,
+    isUserBusy: () => false,
+    isTraveling: () => traveling,
+    beginTrip: () => { trips += 1; },
+    endTrip: () => {},
+    startTravel: () => { traveling = true; },
+    setAct: (_id, a) => { act = a; traveling = false; },
+    clearAct: () => { act = null; },
+    actorPos: () => ({ x: 1, y: 0.48, z: AISLE_Z }),
+  };
+
+  stepFloorAmbient(st, ctx);
+  assert.equal(st.phase, 'outbound');
+  assert.equal(st.walkerId, 'blob');
+  assert.equal(trips, 1);
+
+  traveling = false;
+  ctx.now = 2000;
+  stepFloorAmbient(st, ctx);
+  assert.equal(st.phase, 'act');
+  assert.ok(INTERACT_ACTIONS.includes(act));
+
+  ctx.now = st.until + 1;
+  stepFloorAmbient(st, ctx);
+  assert.equal(st.phase, 'inbound');
+  traveling = true;
+
+  traveling = false;
+  ctx.now += 100;
+  stepFloorAmbient(st, ctx);
+  assert.equal(st.phase, 'idle');
+  assert.equal(st.walkerId, null);
+});
+
+test('pickInteract rotates away from the last act when possible', () => {
+  const interacts = buildFloorInteracts({ lounges: [], desks: [] }, 'sofa');
+  const seen = new Set();
+  let last = null;
+  for (let i = 0; i < 30; i++) {
+    const pick = pickInteract(interacts, last);
+    assert.ok(pick);
+    if (last) assert.notEqual(pick.act, last);
+    last = pick.act;
+    seen.add(pick.act);
+  }
+  assert.ok(seen.size >= 5);
+});

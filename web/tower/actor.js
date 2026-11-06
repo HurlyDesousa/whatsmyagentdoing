@@ -44,6 +44,10 @@ export class Actor {
     this.dead = false;
     this.hostAlpha = 1;
     this.tagKey = '';
+    this.userBusyUntil = 0;          // SWA-3262: manual send / drag / move-floor lock
+    this.ambientAct = null;          // SWA-3262: short pose while at an interact
+    this._pathQueue = null;          // remaining aisle waypoints while ambient / send traveling
+    this._ambientTrip = false;       // ambient director owns motion; sync must not yank
 
     this.yawS = new Spring(RESTING_TURN, 0.3);
     this.scaleS = new Spring(1, 0.28);
@@ -151,9 +155,17 @@ export class Actor {
     this.selected = view.selectedBot === bot.id;
     this.renderTag();
 
-    if (spot && (!this.spot || this.spot.pos.distanceToSquared(spot.pos) > 1e-4)) {
-      if (!this.spot) this.dropIn(spot); else this.travelTo(spot);
-      this.spot = spot;
+    if (spot && (!this.spot || spotPosDist2(this.spot.pos, spot.pos) > 1e-4)) {
+      if (this._ambientTrip) {
+        // Record the home / destination seat; ambient travelPath owns the hops.
+        this.spot = spot;
+      } else if (!this.spot) {
+        this.dropIn(spot);
+        this.spot = spot;
+      } else {
+        this.travelTo(spot);
+        this.spot = spot;
+      }
     }
     this.ring.position.y = 0.012 - (this.spot ? this.spot.pos.y : 0);
 
@@ -182,7 +194,44 @@ export class Actor {
     this.tagEl.title = '';
   }
 
-  spotIsLounge() { return !!this.spot && this.spot.lounge; }
+  spotIsLounge() { return !!this.spot && (this.spot.lounge || this.spot.meeting); }
+
+  isUserBusy(now = performance.now()) { return now < (this.userBusyUntil || 0); }
+
+  markUserBusy(ms = 12_000) {
+    this.userBusyUntil = Math.max(this.userBusyUntil || 0, performance.now() + ms);
+    this.ambientAct = null;
+  }
+
+  setAmbientAct(act, yaw) {
+    this.ambientAct = act || null;
+    if (yaw != null) this.baseYaw = yaw;
+  }
+
+  clearAmbientAct() { this.ambientAct = null; }
+
+  isTraveling() {
+    return !!(this.anim && this.anim.kind === 'travel') || !!(this._pathQueue && this._pathQueue.length);
+  }
+
+  beginAmbientTrip() { this._ambientTrip = true; this.ambientAct = null; }
+
+  endAmbientTrip() {
+    this._ambientTrip = false;
+    this.ambientAct = null;
+    this._pathQueue = null;
+  }
+
+  /** Multi-waypoint aisle path (SWA-3262). Each point: {x,y,z} or Vector3-like. */
+  travelPath(points, finalYaw) {
+    const pts = (points || []).map((p) => ({
+      x: p.x, y: p.y ?? (this.spot?.pos?.y ?? 0.48), z: p.z,
+    })).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.z));
+    if (!pts.length) return;
+    this._pathQueue = pts.slice(1);
+    this._pathFinalYaw = finalYaw;
+    this.travelTo({ pos: pts[0], yaw: finalYaw ?? this.baseYaw ?? 0 });
+  }
 
   setHovered(on) {
     if (this.hovered === on) return;
@@ -213,11 +262,28 @@ export class Actor {
   }
 
   travelTo(spot) {
+    const to = spot.pos?.clone ? spot.pos.clone() : new THREE.Vector3(spot.pos.x, spot.pos.y, spot.pos.z);
+    const toYaw = spot.yaw ?? this._pathFinalYaw ?? this.baseYaw ?? 0;
     const from = this.root.position.clone();
-    const dist = from.distanceTo(spot.pos);
-    if (REDUCED || dist < 0.05) { this.root.position.copy(spot.pos); this.baseYaw = spot.yaw; return; }
-    const dir = new THREE.Vector3().subVectors(spot.pos, from);
-    this.anim = { kind: 'travel', t: 0, dur: Math.max(0.8, dist / 2.6), from, to: spot.pos.clone(), toYaw: spot.yaw, travelYaw: Math.atan2(dir.x, dir.z) };
+    const dist = from.distanceTo(to);
+    if (REDUCED || dist < 0.05) {
+      this.root.position.copy(to);
+      this.baseYaw = toYaw;
+      this._continuePath(toYaw);
+      return;
+    }
+    const dir = new THREE.Vector3().subVectors(to, from);
+    this.anim = { kind: 'travel', t: 0, dur: Math.max(0.8, dist / 2.6), from, to, toYaw, travelYaw: Math.atan2(dir.x, dir.z) };
+  }
+
+  _continuePath(yaw) {
+    if (!this._pathQueue || !this._pathQueue.length) {
+      this._pathQueue = null;
+      if (yaw != null) this.baseYaw = yaw;
+      return;
+    }
+    const next = this._pathQueue.shift();
+    this.travelTo({ pos: next, yaw: this._pathQueue.length ? Math.atan2(next.x - this.root.position.x, next.z - this.root.position.z) : (this._pathFinalYaw ?? yaw) });
   }
 
   hop(height) {
@@ -269,7 +335,21 @@ export class Actor {
     if (!REDUCED) {
       const breathe = Math.sin(t * 2.1 + this.phase);
       sy = 1 + 0.018 * breathe; sx = 1 - 0.012 * breathe;
-      if (s === 'working') { y = 0.012 * Math.abs(Math.sin(t * 9 + this.phase)); rx = 0.06; }
+      // SWA-3261: working blobs read clearly busy vs resting/done neighbors.
+      if (s === 'working' && !this.ambientAct) {
+        const tap = Math.abs(Math.sin(t * 12.5 + this.phase));
+        const lean = Math.sin(t * 6.2 + this.phase);
+        y = 0.022 * tap;
+        rx = 0.11 + 0.05 * lean;
+        rz = 0.035 * Math.sin(t * 5.1 + this.phase * 1.3);
+        sy = 1 + 0.028 * tap;
+        sx = 1 - 0.018 * tap;
+        this.nextAction -= dt;
+        if (this.nextAction <= 0 && !this.anim) {
+          this.hop(0.14 + 0.06 * Math.random());
+          this.nextAction = 1.05 + Math.random() * 0.85;
+        }
+      }
       if (s === 'stuck') rz = 0.09 * Math.sin(t * 1.3 + this.phase);
       if (s === 'error') {
         const k = (t + this.phase) % 1.6;
@@ -278,6 +358,21 @@ export class Actor {
       if (s === 'waiting_user' && !this.anim) {
         this.nextAction -= dt;
         if (this.nextAction <= 0) { this.hop(0.32); this.nextAction = 1.7 + Math.random() * 0.6; }
+      }
+      // Short interact pose at coffee / plant / screen, etc.
+      if (this.ambientAct && !this.anim) {
+        const a = this.ambientAct;
+        if (a === 'coffee' || a === 'fridge' || a === 'plant' || a === 'tasks' || a === 'screen') {
+          rx = 0.18 + 0.04 * Math.sin(t * 4 + this.phase);
+          y = 0.01 * Math.abs(Math.sin(t * 5 + this.phase));
+        } else if (a === 'window' || a === 'elevator') {
+          sy = 1.04 + 0.02 * Math.sin(t * 2.4 + this.phase);
+          rx = -0.08;
+        } else if (a === 'chat') {
+          rz = 0.12 * Math.sin(t * 3.2 + this.phase);
+        } else if (a === 'couch') {
+          sy = 0.92; y = -0.02;
+        }
       }
     }
 
@@ -302,8 +397,14 @@ export class Actor {
         this.baseYaw = k < 0.92 ? a.travelYaw : a.toYaw;
       }
       if (a.t >= a.dur) {
-        if (a.kind === 'travel') { this.root.position.copy(a.to); this.baseYaw = a.toYaw; }
-        this.anim = null;
+        if (a.kind === 'travel') {
+          this.root.position.copy(a.to);
+          this.baseYaw = a.toYaw;
+          this.anim = null;
+          this._continuePath(a.toYaw);
+        } else {
+          this.anim = null;
+        }
       }
     }
 
@@ -343,8 +444,8 @@ export class Actor {
     } else { this.eyeX.to(0); this.eyeY.to(0); }
     this.eyeX.step(dt); this.eyeY.step(dt);
 
-    // status ring: quiet unless it matters
-    const pulse = s === 'working' ? 0.14 + 0.05 * Math.sin(t * 3 + this.phase)
+    // status ring: working is clearly livelier (SWA-3261); attention states still louder
+    const pulse = s === 'working' ? 0.28 + 0.14 * Math.sin(t * 4.2 + this.phase)
       : s === 'waiting_user' || s === 'error' ? 0.4 + 0.25 * (0.5 + 0.5 * Math.sin(t * 5))
       : s === 'stuck' ? 0.3 + 0.15 * Math.sin(t * 2) : 0;
     const wantRing = this.selected ? 0.8 : this.hovered ? Math.max(0.4, pulse) : pulse;
@@ -396,6 +497,12 @@ export class Actor {
 
 export function jelly(color) {
   return new THREE.MeshPhysicalMaterial({ color, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.18, sheen: 0.3 });
+}
+
+function spotPosDist2(a, b) {
+  if (!a || !b) return Infinity;
+  const dx = a.x - b.x, dy = (a.y || 0) - (b.y || 0), dz = a.z - b.z;
+  return dx * dx + dy * dy + dz * dz;
 }
 
 function reasonText(status, step) {

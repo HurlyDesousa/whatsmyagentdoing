@@ -1,6 +1,6 @@
 // 4D is the wallpaper dashboard: the tower fills the viewport and the glass panels
 // (floors, team, activity, usage) sit on top of it. The feed topic never comes through here.
-import { initScene, renderScene, destroyScene, setSceneVisible, sceneCanvas, focusBot, captureScene, zoom, setTowerTheme } from './tower/scene.js';
+import { initScene, renderScene, destroyScene, setSceneVisible, sceneCanvas, focusBot, captureScene, zoom, setTowerTheme, sendBotToMeeting } from './tower/scene.js';
 import { initUI, renderUI, destroyUI, setStartBusy, setClearErrorBusy } from './tower-ui/ui.js';
 import { initSound, destroySound, sfx } from './tower-ui/sound.js';
 
@@ -149,6 +149,10 @@ export class Office4D {
     menu.addEventListener('contextmenu', (ev) => ev.preventDefault());
     // Hover/open must never change the viewed floor — only explicit Move clicks relocate.
     menu.addEventListener('pointerenter', (ev) => ev.stopPropagation());
+    const actions = document.createElement('div');
+    actions.className = 'tower-bot-floors';
+    actions.setAttribute('role', 'group');
+    actions.setAttribute('aria-label', 'Destinations');
     const head = document.createElement('div');
     head.className = 'tower-bot-subhead';
     head.textContent = 'Move to floor';
@@ -159,8 +163,9 @@ export class Office4D {
     const note = document.createElement('div');
     note.className = 'tower-bot-note';
     note.setAttribute('role', 'status');
-    menu.append(head, floors, note);
+    menu.append(actions, head, floors, note);
     document.body.appendChild(menu);
+    menu._actions = actions;
     menu._floors = floors;
     menu._note = note;
     this._botMenu = menu;
@@ -174,10 +179,41 @@ export class Office4D {
     // Do not change viewFloorId / follow the pick — menu open must not navigate.
     const menu = this.ensureBotMenu();
     menu.dataset.key = botId;
+    const actionsHost = menu._actions;
+    actionsHost.textContent = '';
     const floorsHost = menu._floors;
     floorsHost.textContent = '';
     menu._note.classList.remove('is-on');
     menu._note.textContent = '';
+
+    // SWA-3257: Send to meeting room / conference table (Main floor meeting corner).
+    const onMain = bot.floor === 'main-floor' || String(bot.floor || '').startsWith('main-floor');
+    const meetBtn = document.createElement('button');
+    meetBtn.type = 'button';
+    meetBtn.setAttribute('role', 'menuitem');
+    meetBtn.textContent = 'Send to meeting room';
+    meetBtn.disabled = !onMain;
+    meetBtn.title = onMain ? 'Sit at the conference table' : 'Meeting table is on Main Floor';
+    meetBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (meetBtn.disabled) {
+        menu._note.textContent = 'Meeting table is on Main Floor';
+        menu._note.classList.add('is-on');
+        return;
+      }
+      const result = sendBotToMeeting(botId);
+      if (!result || !result.ok) {
+        menu._note.textContent = result?.reason === 'full' ? 'No free conference chair' : 'Could not seat at meeting table';
+        menu._note.classList.add('is-on');
+        return;
+      }
+      sfx.select(true);
+      this.hideBotMenu();
+      this.update(this.sessions);
+    });
+    actionsHost.appendChild(meetBtn);
+
     const floors = (state.floors || []).slice().sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
     const others = floors.filter((f) => f.id !== bot.floor);
     if (!others.length) {
@@ -208,7 +244,7 @@ export class Office4D {
     menu.hidden = false;
     const pad = 8;
     const w = 200;
-    const h = Math.min(320, 40 + others.length * 34 + 24);
+    const h = Math.min(360, 72 + others.length * 34 + 24);
     let x = clientX, y = clientY;
     const vw = window.innerWidth || 1024, vh = window.innerHeight || 768;
     if (x + w > vw - pad) x = Math.max(pad, vw - w - pad);
@@ -245,6 +281,9 @@ export class Office4D {
       }
       return;
     }
+    try {
+      if (typeof feed.clearLounge === 'function') feed.clearLounge(botId);
+    } catch { /* optional */ }
     sfx.select(true);
     this.viewFloorId = view;
     this._followPick = false;

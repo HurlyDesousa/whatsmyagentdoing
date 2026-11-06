@@ -533,3 +533,33 @@ test('moveToFloor does not wipe another floor’s drag-drop seat at the same des
   assert.equal(after.bots[chief].floor, 'ops');
   assert.equal(after.bots[chief].desk, 7);
 });
+
+test('lounge assign persists meeting sit and clears on desk assign (SWA-3257)', () => {
+  const mem = new Map();
+  const sandbox = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, v),
+      removeItem: (k) => mem.delete(k),
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  require('node:vm').runInNewContext(feedSrc, sandbox, { filename: 'wallpaper-feed.js' });
+  const W = sandbox.WallpaperFeed;
+  const qa = W.botId('QA Engineer');
+  assert.equal(W.assignLounge(qa, 2), 2);
+  assert.equal(W.loadLoungeAssign()[qa], 2);
+  W.assignLounge(W.botId('Dispatcher'), 2);
+  assert.equal(W.loadLoungeAssign()[qa], undefined, 'same chair displaces prior occupant');
+  assert.equal(W.loadLoungeAssign()[W.botId('Dispatcher')], 2);
+  W.assignSeat(W.botId('Dispatcher'), 11, [W.botId('Dispatcher')]);
+  assert.equal(W.loadLoungeAssign()[W.botId('Dispatcher')], undefined, 'desk assign clears lounge');
+  W.assignLounge(qa, 0);
+  W.clearLounge(qa);
+  assert.equal(W.loadLoungeAssign()[qa], undefined);
+});
