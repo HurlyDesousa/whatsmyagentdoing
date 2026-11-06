@@ -114,7 +114,7 @@ export class Office4D {
     const floorId = (bot && bot.floor) || this.viewFloorId;
     const floor = ((this._state && this._state.floors) || []).find((f) => f.id === floorId);
     const peers = floor && Array.isArray(floor.bots) ? floor.bots : [];
-    if (!feed.assignSeat(botId, desk, peers)) return;
+    if (!feed.assignSeat(botId, desk, peers, floorId)) return;
     sfx.select(true);
     this.update(this.sessions);
   }
