@@ -17,11 +17,14 @@ export const INTERACT_ACTIONS = Object.freeze([
 // Default gap between ambient trips on a floor (ms). SWA-3107 spirit: sparse, minutes not seconds.
 export const AMBIENT_GAP_MS = Object.freeze([120_000, 300_000]); // 2–5 min
 export const ACT_DWELL_MS = Object.freeze([3_500, 7_000]);
-// Mid-gap between communal table banks (TABLE_Z -3.4 / 0.8). Never walk Δz at a desk-column x —
-// that clips table tops and the paired stool on the same PAIR_X (QA FAIL on PR #38).
-export const AISLE_Z = -1.3;
-// Outside TABLE_X±TABLE_LEN/2 (−6.5…2.3): safe columns for changing z around the desks.
+// Live GLB aisle stools/poufs sit near z≈-1.5; front-bank stools near z≈-0.25.
+// Corridor between them (never z=-1.3 — that clipped the return leg through desk_02/06/10).
+export const AISLE_Z = -0.85;
+// Outside live table_1 x≈[-6.8, 2.2]: safe columns for changing z around the desks.
 export const AISLE_ENDS = Object.freeze([-7.0, 3.2]);
+// Live office.glb table_1 ≈ z[-3.4,-2.0]; table_2 ≈ z[0.25,1.35] (placeholder TABLE_Z ± half-width).
+export const TABLE1_Z = Object.freeze([-3.5, -1.95]);
+export const TABLE2_Z = Object.freeze([0.15, 1.45]);
 
 const SEAT_Y = 0.48;
 
@@ -103,51 +106,68 @@ function pickAisleEnd(x0, x1) {
   return Math.abs(mid - AISLE_ENDS[0]) <= Math.abs(mid - AISLE_ENDS[1]) ? AISLE_ENDS[0] : AISLE_ENDS[1];
 }
 
-/** True when a straight Δz at fixed x would cross a communal table slab. */
+function rangesOverlap(a0, a1, b0, b1) {
+  return Math.min(a0, a1) < Math.max(b0, b1) && Math.max(a0, a1) > Math.min(b0, b1);
+}
+
+/** True when a straight Δz would cross a communal table slab (live GLB bounds). */
 export function crossesCommunalTable(z0, z1) {
-  const lo = Math.min(z0, z1), hi = Math.max(z0, z1);
-  // table_1 slab ~ z∈[-3.95,-2.85]; table_2 ~ z∈[0.25,1.35]
-  if (lo < -2.85 && hi > -3.95) return true;
-  if (lo < 1.35 && hi > 0.25) return true;
-  return false;
+  return rangesOverlap(z0, z1, TABLE1_Z[0], TABLE1_Z[1])
+    || rangesOverlap(z0, z1, TABLE2_Z[0], TABLE2_Z[1]);
+}
+
+/** Can move between z0 and AISLE_Z at a fixed desk-column x without hitting a table. */
+export function canDropToAisle(z) {
+  return !crossesCommunalTable(z, AISLE_Z);
 }
 
 /**
- * Aisle-aware waypoints so travel does not clip communal desks/tables.
- * Long Δz moves go via a table-end column, then the mid-bank aisle, then in —
- * never straight through a PAIR_X column (desk_05→desk_06 / table_1).
+ * Aisle-aware waypoints so travel does not clip communal desks/tables/stools.
+ * - Never Δz at a PAIR_X through a table top.
+ * - Never long lateral along the z≈-1.5 stool row (walk neighbors' seats).
+ * - All long X travel happens on AISLE_Z, clear of aisle poufs/stools.
  */
 export function aislePath(from, to) {
   const ax = from.x, az = from.z, bx = to.x, bz = to.z;
   const y = to.y ?? from.y ?? SEAT_Y;
   const dist = Math.hypot(bx - ax, bz - az);
-  if (dist < 1.2) return [{ x: bx, y, z: bz }];
+  if (dist < 1.0) return [{ x: bx, y, z: bz }];
 
-  // Same side of both tables and no slab cross: direct is fine (short lounge hops).
-  if (!crossesCommunalTable(az, bz) && Math.abs(az - bz) < 1.4) {
+  // Short hop on the same open side of both tables (e.g. lounge-only).
+  if (!crossesCommunalTable(az, bz) && Math.abs(az - bz) < 0.9 && Math.abs(ax - bx) < 2.5) {
     return [{ x: bx, y, z: bz }];
   }
 
-  const end = pickAisleEnd(ax, bx);
+  const endFrom = pickAisleEnd(ax, bx);
+  const endTo = pickAisleEnd(bx, ax);
   const pts = [];
   const push = (x, z) => {
     const last = pts[pts.length - 1];
     if (last && Math.hypot(last.x - x, last.z - z) < 0.08) return;
-    if (Math.hypot(ax - x, az - z) < 0.08 && !pts.length) return;
+    if (!pts.length && Math.hypot(ax - x, az - z) < 0.08) return;
     pts.push({ x, y, z });
   };
 
-  // 1) Lateral along the current stool/lounge row to a clear end column (outside the oak tables).
-  if (Math.abs(ax - end) > 0.35) push(end, az);
-  // 2) Change z at the end column into the mid-bank aisle.
-  if (Math.abs(az - AISLE_Z) > 0.35) push(end, AISLE_Z);
-  // 3) If the target is far in x, stay on aisle until the end nearer the target (optional second end).
-  const endTo = pickAisleEnd(bx, bx);
-  if (endTo !== end && Math.abs(bx - end) > 2.5) push(endTo, AISLE_Z);
-  const gate = pts.length ? pts[pts.length - 1].x : end;
-  // 4) Leave aisle at the gate x to the target's z, then seat.
-  if (Math.abs(bz - AISLE_Z) > 0.35) push(gate, bz);
-  push(bx, bz);
+  // 1) Reach the clear mid-bank corridor — never lateral along the stool row first.
+  if (Math.abs(az - AISLE_Z) > 0.2) {
+    if (canDropToAisle(az)) {
+      push(ax, AISLE_Z);
+    } else {
+      push(endFrom, az);
+      push(endFrom, AISLE_Z);
+    }
+  }
+
+  // 2) All long X travel on AISLE_Z.
+  const enterAtOwnX = canDropToAisle(bz);
+  if (enterAtOwnX) {
+    push(bx, AISLE_Z);
+    if (Math.abs(bz - AISLE_Z) > 0.2) push(bx, bz);
+  } else {
+    push(endTo, AISLE_Z);
+    push(endTo, bz);
+    push(bx, bz);
+  }
 
   if (!pts.length) return [{ x: bx, y, z: bz }];
   return pts;
@@ -174,8 +194,11 @@ export function pickAmbientWalker(bots, { busyIds = new Set(), preferWorking = f
     return s !== 'working';
   });
   const working = list.filter((b) => (b.effective_status || b.status) === 'working');
-  const pool = (!preferWorking && resting.length && Math.random() > 0.2) ? resting
-    : (resting.length ? resting : working);
+  // ~20% chance to pick working when both pools exist (QA: old ternary never left resting).
+  let pool;
+  if (preferWorking && working.length) pool = working;
+  else if (resting.length && working.length) pool = Math.random() > 0.2 ? resting : working;
+  else pool = resting.length ? resting : working;
   if (!pool.length) return null;
   // Stable-ish shuffle: score by hash + random so the same bot is not always first.
   let best = null, bestScore = -1;
@@ -281,10 +304,11 @@ export function stepFloorAmbient(st, ctx) {
     return st;
   }
 
-  // User command steals the walker — abort; seat sync reseats them.
+  // User command steals the walker. Release ambient ownership only — do NOT cancelTravel;
+  // drag/meeting already started a reseat hop (SWA-3273 FAIL: endTrip erased it → floater).
   if (ctx.isUserBusy?.(st.walkerId)) {
     ctx.clearAct?.(st.walkerId);
-    ctx.endTrip?.(st.walkerId);
+    ctx.releaseTrip?.(st.walkerId);
     st.phase = 'idle';
     st.walkerId = null;
     st.target = null;

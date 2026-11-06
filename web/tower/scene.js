@@ -335,6 +335,7 @@ function stepAmbient(st, floorBots, homeOf) {
     isTraveling: (id) => actors.get(id)?.isTraveling(),
     beginTrip: (id) => actors.get(id)?.beginAmbientTrip(),
     endTrip: (id) => actors.get(id)?.endAmbientTrip(),
+    releaseTrip: (id) => actors.get(id)?.releaseAmbientTrip(),
     startTravel: (id, path, yaw) => actors.get(id)?.travelPath(path, yaw),
     setAct: (id, act, yaw) => actors.get(id)?.setAmbientAct(act, yaw),
     clearAct: (id) => actors.get(id)?.clearAmbientAct(),
@@ -661,7 +662,21 @@ function onUp(e) {
     if (desk) {
       clearLoungeAssign(d.seatBot);
       const actor = actors.get(d.seatBot);
-      if (actor) { actor.markUserBusy(8_000); actor.endAmbientTrip(); }
+      if (actor) {
+        actor.markUserBusy(8_000);
+        // Cancel ambient hop, but leave reseat travel to update() — do not let the
+        // director's user-busy abort cancelTravel over the new path (SWA-3273).
+        actor.cancelTravel();
+        actor.releaseAmbientTrip();
+      }
+      for (const st of ambientByFloor.values()) {
+        if (st.walkerId === d.seatBot) {
+          st.phase = 'idle';
+          st.walkerId = null;
+          st.home = null;
+          st.target = null;
+        }
+      }
       callbacks.onAssignSeat?.(d.seatBot, desk);
     }
     callbacks.onSelectBot?.(d.seatBot);

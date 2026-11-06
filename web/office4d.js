@@ -284,6 +284,11 @@ export class Office4D {
     try {
       if (typeof feed.clearLounge === 'function') feed.clearLounge(botId);
     } catch { /* optional */ }
+    // SWA-3273 minor: mark busy so the old floor's ambient director drops this id.
+    try {
+      const actor = globalThis.bothq?.scene?.actors?.get?.(botId);
+      if (actor && typeof actor.markUserBusy === 'function') actor.markUserBusy(8_000);
+    } catch { /* optional */ }
     sfx.select(true);
     this.viewFloorId = view;
     this._followPick = false;

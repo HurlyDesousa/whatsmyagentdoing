@@ -236,6 +236,12 @@ export class Actor {
 
   beginAmbientTrip() { this._ambientTrip = true; this.ambientAct = null; }
 
+  /** Drop ambient ownership without killing an in-flight user reseat (SWA-3273). */
+  releaseAmbientTrip() {
+    this._ambientTrip = false;
+    this.ambientAct = null;
+  }
+
   endAmbientTrip() {
     this._ambientTrip = false;
     this.ambientAct = null;
