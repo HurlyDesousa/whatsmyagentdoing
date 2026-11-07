@@ -800,6 +800,11 @@ html.bhq-phone .bhq-floor[data-alert="error"]::after { background: #FF453A; }
 .bhq-phone .bhq-sheet .bhq-glow::before, .bhq-phone .bhq-sheet .bhq-glow::after { display: none; }
 .bhq-phone .bhq-sheet .bhq-dcard[data-dock="waiting"]:not(.has-rows) { display: none; } /* waiting on me: only when someone is */
 .bhq-phone .bhq-sheet .bhq-dcard { flex: none; }
+/* Sheet cards size to content (flex:none). Open bodies used grid 1fr, which
+   collapses to 0px without a definite parent height — Pipeline/Finished lists
+   looked empty on phone (SWA-3263 / SWA-3313). Auto sizes to rows; sheet scrolls. */
+.bhq-phone .bhq-sheet .bhq-dcard.is-open .bhq-dbody { grid-template-rows: auto; }
+.bhq-phone .bhq-sheet .bhq-dcard.is-open .bhq-dbody-in { overflow: visible; }
 .bhq-phone .bhq-sheet .bhq-tcard { padding: 6px; flex: none; }
 .bhq-phone .bhq-sheet .bhq-members { overflow: visible; }
 .bhq-phone .bhq-sheet .bhq-member { min-height: 56px; }
