@@ -724,6 +724,8 @@ function dockCard(id, title, opts) {
 }
 
 const DOCK_HEAD = 44, DOCK_OPEN_MIN = 140, DOCK_OPEN_EMPTY = 92, DOCK_GAP = 8;
+const PIPE_PEEK = 4; // collapsed Pipeline shows this many task cards, then "Show more"
+const PIPE_ROW_H = 78; // approx. title-first card height for desktop dock budgeting
 
 // card.open is what the person asked for; card.shown is what fits. A card that does not fit stays folded until there is room.
 function paintDockCard(card, shown) {
@@ -748,6 +750,17 @@ function setDockOpen(card, on, save = true) {
   fitDock(d.avail == null ? Infinity : d.avail);
 }
 
+/** How much vertical room an open dock card needs (Pipeline budgets for visible task cards). */
+function dockOpenNeed(card) {
+  if (!card.rows) return DOCK_OPEN_EMPTY;
+  if (card.id === 'pipeline') {
+    const shown = Math.max(1, card.pipeShown || Math.min(card.rows, PIPE_PEEK));
+    const more = card.rows > PIPE_PEEK ? 36 : 0;
+    return Math.min(DOCK_HEAD + 12 + shown * PIPE_ROW_H + more, 440);
+  }
+  return DOCK_OPEN_MIN;
+}
+
 // If the open cards do not all fit between the floors and the feed, the least recently opened ones stay folded.
 function fitDock(avail) {
   const d = U.dock;
@@ -755,7 +768,7 @@ function fitDock(avail) {
   const cards = [d.check, d.waiting, d.pipeline, d.finished, d.routines];
   const live = cards.filter((c) => !c.root.hidden);
   const on = new Set(live.filter((c) => c.open));
-  const need = () => live.reduce((n, c) => n + (on.has(c) ? (c.rows ? DOCK_OPEN_MIN : DOCK_OPEN_EMPTY) : DOCK_HEAD), 0) + DOCK_GAP * Math.max(0, live.length - 1);
+  const need = () => live.reduce((n, c) => n + (on.has(c) ? dockOpenNeed(c) : DOCK_HEAD), 0) + DOCK_GAP * Math.max(0, live.length - 1);
   while (on.size && need() > avail) {
     const victim = d.lru.find((c) => on.has(c)) || [...on][0]; // lru is oldest first
     on.delete(victim);
@@ -788,7 +801,17 @@ function buildDock(floors, feed) {
 
   const plist = h('ul', { class: 'bhq-plist', role: 'list' });
   const pempty = h('p', { class: 'bhq-note', text: 'Nothing in the pipeline.', hidden: true });
-  pipeline.inner.append(plist, pempty);
+  const pmore = h('button', {
+    class: 'bhq-pmore', type: 'button', hidden: true, 'aria-expanded': 'false', text: 'Show more',
+  });
+  pmore.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const d = U.dock;
+    d.pipeExpanded = !d.pipeExpanded;
+    if (d.pipeState) renderPipeline(d.pipeState);
+    fitDock(d.avail == null ? Infinity : d.avail);
+  });
+  pipeline.inner.append(plist, pempty, pmore);
 
   const tl = h('ol', { class: 'bhq-tl', role: 'list' });
   const fempty = h('p', { class: 'bhq-note', text: 'Nothing finished in the last 24 hours.', hidden: true });
@@ -807,11 +830,12 @@ function buildDock(floors, feed) {
   document.body.append(root);
 
   U.dock = {
-    root, check, waiting, pipeline, finished, routines, wlist, wempty, plist, pempty, tl, fempty, rl, rempty, cl, cnote,
+    root, check, waiting, pipeline, finished, routines, wlist, wempty, plist, pempty, pmore, tl, fempty, rl, rempty, cl, cnote,
     lru: [], wrows: new Map(), prows: new Map(), crows: new Map(), checkT: null, finSig: null, finRefs: [],
-    pipeSig: null, routSig: null, routRefs: [], copied: new Map(), blurred: false,
+    pipeSig: null, pipeExpanded: false, pipeShown: 0, pipeState: null, routSig: null, routRefs: [], copied: new Map(), blurred: false,
     floors, feed,
   };
+  pipeline.pipeShown = 0;
 
   // open / folded: what the person left last time (the waiting card is open by default)
   let saved = null;
@@ -1731,13 +1755,14 @@ function renderWaiting(state) {
   setHidden(d.wempty, ids.length > 0);
 }
 
-/* Pipeline: every active Paperclip board issue (todo / in_progress / in_review / blocked). */
+/* Pipeline: every active Paperclip board issue (todo / in_progress / in_review / blocked).
+ * Title-first task cards (not ticket/SHA log lines): human title → status badge → owner · id. */
 
 const PIPE_UI = {
   in_progress: { s: 'working', label: 'In progress' },
-  in_review: { s: 'waiting_user', label: 'In review' },
+  in_review: { s: 'waiting_user', label: 'Review' },
   blocked: { s: 'stuck', label: 'Blocked' },
-  todo: { s: 'idle', label: 'Todo' },
+  todo: { s: 'idle', label: 'Waiting' },
 };
 
 function botForAssignee(state, item) {
@@ -1759,15 +1784,16 @@ function botForAssignee(state, item) {
 
 function makePipeRow(id) {
   const av = makeAva({ orb: false });
-  const ident = h('b', { class: 'bhq-pid' });
-  const st = h('span', { class: 'bhq-pst' });
   const title = h('div', { class: 'bhq-ptitle' });
-  const who = h('div', { class: 'bhq-pwho' });
+  const st = h('span', { class: 'bhq-pst' });
+  const who = h('span', { class: 'bhq-pwho' });
+  const ident = h('span', { class: 'bhq-pid' });
+  const meta = h('div', { class: 'bhq-pmeta' }, who, h('span', { class: 'bhq-pdot', 'aria-hidden': 'true', text: '·' }), ident);
   const li = h('li', { class: 'bhq-prow', 'data-id': id, role: 'button', tabindex: '0' },
     av.root,
     h('div', { class: 'bhq-pmain' },
-      h('div', { class: 'bhq-ptop' }, ident, st),
-      title, who));
+      h('div', { class: 'bhq-ptop' }, title, st),
+      meta));
   const open = () => {
     const url = li.getAttribute('data-url');
     if (url) openChat(id, url);
@@ -1779,8 +1805,24 @@ function makePipeRow(id) {
   return { li, av, ident, st, title, who };
 }
 
+function paintPipeRow(r, state, item) {
+  const ui = PIPE_UI[item.status] || PIPE_UI.todo;
+  const bot = botForAssignee(state, item);
+  const title = item.title || item.identifier;
+  setAttr(r.li, 'data-s', ui.s);
+  setAttr(r.li, 'data-url', item.url || null);
+  setAttr(r.li, 'title', item.identifier + (title && title !== item.identifier ? ' — ' + title : ''));
+  setAttr(r.li, 'aria-label', (title || item.identifier) + ', ' + ui.label + ', ' + (item.assigneeName || 'Unassigned'));
+  setAvatar(r.av, bot, ui.s);
+  setText(r.title, title);
+  setText(r.st, ui.label);
+  setText(r.who, item.assigneeName || 'Unassigned');
+  setText(r.ident, item.identifier);
+}
+
 function renderPipeline(state) {
   const d = U.dock;
+  d.pipeState = state;
   const items = Array.isArray(state.pipeline) ? state.pipeline.filter((p) => p && p.identifier) : [];
   setText(d.pipeline.count, items.length);
   d.pipeline.rows = items.length;
@@ -1788,36 +1830,38 @@ function renderPipeline(state) {
   setAttr(d.pipeline.count, 'data-s', items.length ? 'working' : null);
   setHidden(d.pempty, items.length > 0);
 
-  const sig = items.map((p) => [p.identifier, p.status, p.title, p.assigneeName || '', p.url || ''].join('|')).join('\n');
+  if (items.length <= PIPE_PEEK) d.pipeExpanded = false;
+  const expanded = !!d.pipeExpanded;
+  const visible = expanded || items.length <= PIPE_PEEK ? items : items.slice(0, PIPE_PEEK);
+  d.pipeShown = visible.length;
+  d.pipeline.pipeShown = visible.length;
+
+  const moreLeft = items.length - visible.length;
+  setHidden(d.pmore, items.length <= PIPE_PEEK);
+  setAttr(d.pmore, 'aria-expanded', expanded ? 'true' : 'false');
+  setText(d.pmore, expanded
+    ? 'Show less'
+    : ('Show ' + moreLeft + ' more'));
+
+  const sig = [expanded ? '1' : '0', items.map((p) => [p.identifier, p.status, p.title, p.assigneeName || '', p.url || ''].join('|')).join('\n')].join('\n');
   if (sig === d.pipeSig) {
     // Still refresh relative avatars / status tints if bots moved.
     for (const [id, r] of d.prows) {
       const item = items.find((p) => (p.id || p.identifier) === id);
       if (!item) continue;
-      const ui = PIPE_UI[item.status] || PIPE_UI.todo;
-      setAttr(r.li, 'data-s', ui.s);
-      setAvatar(r.av, botForAssignee(state, item), ui.s);
+      paintPipeRow(r, state, item);
     }
     return;
   }
   d.pipeSig = sig;
 
   const seen = new Set();
-  const els = items.map((item) => {
+  const els = visible.map((item) => {
     const id = item.id || item.identifier;
     seen.add(id);
     let r = d.prows.get(id);
     if (!r) { r = makePipeRow(id); d.prows.set(id, r); }
-    const ui = PIPE_UI[item.status] || PIPE_UI.todo;
-    const bot = botForAssignee(state, item);
-    setAttr(r.li, 'data-s', ui.s);
-    setAttr(r.li, 'data-url', item.url || null);
-    setAttr(r.li, 'title', 'Open ' + item.identifier);
-    setAvatar(r.av, bot, ui.s);
-    setText(r.ident, item.identifier);
-    setText(r.st, ui.label);
-    setText(r.title, item.title || item.identifier);
-    setText(r.who, item.assigneeName || 'Unassigned');
+    paintPipeRow(r, state, item);
     return r.li;
   });
   for (const [id, r] of d.prows) if (!seen.has(id)) { r.li.remove(); d.prows.delete(id); }
