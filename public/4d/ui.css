@@ -483,7 +483,8 @@
 .bhq-wtext b { color: var(--hi); font-weight: 900; }
 
 /* pipeline: title-first task cards (not ticket/SHA log lines) between Waiting on me and Finished */
-.bhq-dcard[data-dock="pipeline"].is-open.has-rows { min-height: 220px; }
+/* Match other open dock cards — body scrolls when the floors→feed gap is tight (SWA-3317). */
+.bhq-dcard[data-dock="pipeline"].is-open.has-rows { min-height: 140px; }
 .bhq-plist { display: flex; flex-direction: column; gap: 8px; }
 .bhq-prow {
   display: flex; align-items: flex-start; gap: 12px; padding: 12px 12px 12px 10px; border-radius: 16px;

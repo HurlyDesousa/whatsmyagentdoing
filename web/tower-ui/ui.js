@@ -725,7 +725,9 @@ function dockCard(id, title, opts) {
 
 const DOCK_HEAD = 44, DOCK_OPEN_MIN = 140, DOCK_OPEN_EMPTY = 92, DOCK_GAP = 8;
 const PIPE_PEEK = 4; // collapsed Pipeline shows this many task cards, then "Show more"
-const PIPE_ROW_H = 78; // approx. title-first card height for desktop dock budgeting
+const PIPE_ROW_H = 78; // approx. title-first card height (comfort budgeting only)
+// Compact dock claim: ~2 rows + optional Show more — mid-height desktops keep Pipeline open; body scrolls (SWA-3317).
+const PIPE_DOCK_COMPACT = DOCK_HEAD + 12 + 2 * PIPE_ROW_H + 36; // ~248
 
 // card.open is what the person asked for; card.shown is what fits. A card that does not fit stays folded until there is room.
 function paintDockCard(card, shown) {
@@ -750,18 +752,19 @@ function setDockOpen(card, on, save = true) {
   fitDock(d.avail == null ? Infinity : d.avail);
 }
 
-/** How much vertical room an open dock card needs (Pipeline budgets for visible task cards). */
+/** How much vertical room an open dock card claims in fitDock (Pipeline stays compact; list scrolls). */
 function dockOpenNeed(card) {
   if (!card.rows) return DOCK_OPEN_EMPTY;
   if (card.id === 'pipeline') {
-    const shown = Math.max(1, card.pipeShown || Math.min(card.rows, PIPE_PEEK));
     const more = card.rows > PIPE_PEEK ? 36 : 0;
-    return Math.min(DOCK_HEAD + 12 + shown * PIPE_ROW_H + more, 440);
+    const rows = Math.min(2, Math.max(1, card.pipeShown || Math.min(card.rows, PIPE_PEEK)));
+    return Math.min(DOCK_HEAD + 12 + rows * PIPE_ROW_H + more, PIPE_DOCK_COMPACT);
   }
   return DOCK_OPEN_MIN;
 }
 
-// If the open cards do not all fit between the floors and the feed, the least recently opened ones stay folded.
+// If the open cards do not all fit between the floors and the feed, fold older ones first.
+// Never fold the card the person just opened — shrink others / let its body scroll instead (SWA-3317).
 function fitDock(avail) {
   const d = U.dock;
   d.avail = avail;
@@ -769,8 +772,10 @@ function fitDock(avail) {
   const live = cards.filter((c) => !c.root.hidden);
   const on = new Set(live.filter((c) => c.open));
   const need = () => live.reduce((n, c) => n + (on.has(c) ? dockOpenNeed(c) : DOCK_HEAD), 0) + DOCK_GAP * Math.max(0, live.length - 1);
+  const pinned = [...d.lru].reverse().find((c) => on.has(c)) || null;
   while (on.size && need() > avail) {
-    const victim = d.lru.find((c) => on.has(c)) || [...on][0]; // lru is oldest first
+    const victim = d.lru.find((c) => on.has(c) && c !== pinned);
+    if (!victim) break; // keep pinned open even in a tight gap
     on.delete(victim);
   }
   for (const c of cards) paintDockCard(c, on.has(c));
