@@ -669,7 +669,14 @@ if (PIP) document.body.classList.add('pip');
     store.set(k, k === 'quality' ? WallpaperFeed.resolveQuality(q.get(k)) : q.get(k));
   }
   if (q.has('floor') && validPreference('floor', q.get('floor'))) store.set('floor', +q.get('floor'));
-  if (location.search) history.replaceState(null, '', location.pathname + (PIP ? '?pip=1' : '') + location.hash);
+  // SWA-3310: keep ambient for scene.js (TEST.ambient); strip other legacy URL prefs.
+  if (location.search) {
+    const keep = [];
+    if (PIP) keep.push('pip=1');
+    const ambient = q.get('ambient');
+    if (ambient === '1' || ambient === 'fast') keep.push('ambient=' + encodeURIComponent(ambient));
+    history.replaceState(null, '', location.pathname + (keep.length ? '?' + keep.join('&') : '') + location.hash);
+  }
 }
 
 const state = {
