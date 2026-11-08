@@ -33,8 +33,14 @@ export const EAST_STAGING_X = 3.20;
 export const TABLE1_Z = Object.freeze([-3.5, -1.95]);
 export const TABLE2_Z = Object.freeze([0.8, 2.2]);
 export const TABLE_X = Object.freeze([-6.85, 2.25]);
-// Frosted dept divider at x=-3.15; panels cover ~z[-2.375, 1.08]. Mid-aisle long X clips it.
+// Legacy left/right cut (SWA-3195). Ambient still uses it as a soft east/west rail so
+// existing aislePath detours stay stable; the *visual* Websites|Marketing frost wall is
+// the aisle Z-cut (SWA-3378) — see DEPT_DIVIDER_* / crossesAisleDeptDivider.
 export const DIVIDER_X = -3.15;
+// SWA-3378: frosted Websites|Marketing wall along +X just south of Marketing stools (z=0.3).
+export const DEPT_DIVIDER_Z = -0.15;
+export const DEPT_DIVIDER_X0 = -5.25;
+export const DEPT_DIVIDER_X1 = 0.95;
 // Cross-divider long-X corridor: NORTH only (no walkable south long-X past coffee_bar/glass).
 export const NORTH_X_Z = 3.90;
 /** @deprecated No walkable south long-X lane; kept so older tests/imports resolve. */
@@ -180,14 +186,21 @@ export function outsideTableX(x) {
   return x < TABLE_X[0] || x > TABLE_X[1];
 }
 
-/** True when an X segment would walk through the frosted dept divider. */
+/** True when an X segment would walk through the legacy left/right dept rail. */
 export function crossesDeptDivider(x0, x1) {
   return Math.min(x0, x1) < DIVIDER_X && Math.max(x0, x1) > DIVIDER_X;
 }
 
+/** True when a Z segment would walk through the SWA-3378 Websites|Marketing frost wall. */
+export function crossesAisleDeptDivider(z0, z1, x = null) {
+  if (!(Math.min(z0, z1) < DEPT_DIVIDER_Z && Math.max(z0, z1) > DEPT_DIVIDER_Z)) return false;
+  if (x == null) return true;
+  return x > DEPT_DIVIDER_X0 - 0.15 && x < DEPT_DIVIDER_X1 + 0.15;
+}
+
 /**
- * Divider frost panels cover ~z[-2.38, 1.08]. Long X on these z values clips the glass.
- * NORTH_X_Z and SOUTH_ESCAPE_Z are clear rails; AISLE_Z is not.
+ * Legacy left/right frost span (kept for long-X rails). AISLE_Z stays clear of the new
+ * Z-wall (DEPT_DIVIDER_Z=-0.15); NORTH_X_Z / SOUTH_ESCAPE_Z / SOUTH_SERVICE_Z are clear.
  */
 export function dividerBlocksZ(z) {
   return z > -2.84 && z < 1.54;
@@ -278,6 +291,8 @@ export function canDropToZ(z, targetZ, x = null) {
   // Pad table x by blob radius so edge columns (x≈2.3) are not treated as free.
   const inTableX = x + BLOB_R > TABLE_X[0] && x - BLOB_R < TABLE_X[1];
   if (inTableX && crossesCommunalTable(z, targetZ) && !seatAisleHop) return false;
+  // SWA-3378: do not walk through the aisle frost wall on desk-bank columns.
+  if (crossesAisleDeptDivider(z, targetZ, x)) return false;
   if (hitsFurniture(x, z, targetZ)) return false;
   return true;
 }
