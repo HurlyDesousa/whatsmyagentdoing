@@ -9,7 +9,7 @@ import { Spring, smoothstep } from './spring.js';
 import {
   FLOOR_STEP, SLAB, SHAFT_POS,
   isInfraFloor, applyInfraFloor, applyInfraDeskSpots,
-  isWatchFloor, applyWatchFloor,
+  isWatchFloor, applyWatchFloor, applyDeptZones,
 } from './office.js';
 import { WallDisplays } from './walls.js';
 import { floorStyles, applyFloorStyle, styleObjects, styleNightMaps } from './floorstyle.js';
@@ -289,6 +289,7 @@ export class Building {
     if (st) applyFloorStyle(slot.open.obj, st);
     applyInfraFloor(slot.open.obj, infra);
     applyWatchFloor(slot.open.obj, watch); // after Infra so Watch clears mid desks for recreation
+    applyDeptZones(slot.open.obj, slot.id); // SWA-3378: Main dept labels + Ops Trading Desk
     if (st) slot.open.walls?.setAccent(st.accent);
     if (slot !== this.activeSlot) return;
     // Mid bay cleared on Infra (kitchen) or Watch (recreation); restore elsewhere.

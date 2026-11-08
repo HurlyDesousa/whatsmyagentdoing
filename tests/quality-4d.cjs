@@ -118,6 +118,58 @@ test('Main floor keeps Dept A vs B banks when mixed crew lands there', () => {
   }
 });
 
+test('SWA-3378: Main Floor labels/marker/divider use office.glb coords (not placeholder)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../web/tower/office.js'), 'utf8');
+  assert.match(src, /DEPT_DIVIDER_Z\s*=\s*-0\.15/);
+  assert.match(src, /DEPT_DIVIDER_X0\s*=\s*-5\.25/);
+  assert.match(src, /DEPT_DIVIDER_X1\s*=\s*0\.95/);
+  // Mid marker on table_2 (z=1.5), spanning bank B columns — not placeholder z=0.8.
+  assert.match(src, /const z = 1\.5;\s*\n\s*const x0 = -5\.4, x1 = 0\.9;/);
+  assert.match(src, /websites\.position\.set\(-2\.3,\s*1\.85,\s*-2\.7\)/);
+  assert.match(src, /marketing\.position\.set\(-2\.3,\s*1\.85,\s*0\.3\)/);
+  assert.match(src, /research\.position\.set\(-2\.3,\s*1\.85,\s*2\.7\)/);
+  assert.match(src, /label\.position\.set\(-5\.7,\s*1\.9,\s*-2\.7\)/);
+  // Must not keep the old left/right X-wall anchors as the Main Floor cut.
+  assert.doesNotMatch(src, /const x0 = -3\.15, z0 = 1\.49/);
+  assert.doesNotMatch(src, /marketing\.position\.set\(-0\.6,\s*1\.85,\s*-0\.35\)/);
+});
+
+test('SWA-3378: Websites bank stays code/QA/dispatch; Trade/Backtest pin Ops adjacent desks', () => {
+  assert.deepEqual(WF.DEPT_WEBSITES, WF.DEPT_A);
+  assert.equal(WF.PAPERCLIP_AGENT_IDS['trade-master'], '1447b83f-cc88-4862-8274-e79ebe053a8c');
+  assert.equal(WF.PAPERCLIP_AGENT_IDS['backtest-master'], 'f3a5c557-a261-4841-a474-259e706a4d5f');
+  assert.equal(WF.PREFERRED_OPS_DESKS['trade-master'], 1);
+  assert.equal(WF.PREFERRED_OPS_DESKS['backtest-master'], 6);
+  const tradeRem = WF.REMEMBERED.find((r) => r.name === 'Trade Master');
+  const backRem = WF.REMEMBERED.find((r) => r.name === 'Backtest Master');
+  assert.equal(tradeRem.group, 'Ops');
+  assert.equal(backRem.group, 'Ops');
+
+  const tower = WF.towerState([
+    { key: 'grokbot:chief', id: 'chief', project: 'Chief Master', status: 'idle' },
+    { key: 'grokbot:doc', id: 'doc', project: 'Doc Master', status: 'idle' },
+    { key: 'grokbot:trade', id: 'trade', project: 'Trade Master', status: 'idle', pc: '1447b83f-cc88-4862-8274-e79ebe053a8c' },
+    { key: 'grokbot:backtest', id: 'backtest', project: 'Backtest Master', status: 'idle', pc: 'f3a5c557-a261-4841-a474-259e706a4d5f' },
+    { key: 'paperclip:disp', id: 'disp', project: 'Dispatcher', status: 'thinking', activity: 'routing' },
+    { key: 'paperclip:qa', id: 'qa', project: 'QA Engineer', status: 'idle' },
+  ]);
+  const trade = tower.bots[WF.botId('Trade Master')];
+  const back = tower.bots[WF.botId('Backtest Master')];
+  assert.equal(trade.floor, 'ops');
+  assert.equal(back.floor, 'ops');
+  assert.equal(trade.desk, 1);
+  assert.equal(back.desk, 6);
+  assert.equal(trade.paperclip_agent_id, '1447b83f-cc88-4862-8274-e79ebe053a8c');
+  assert.equal(back.paperclip_agent_id, 'f3a5c557-a261-4841-a474-259e706a4d5f');
+  assert.equal(trade.look.color, '#0F9D8A');
+  assert.equal(back.look.color, '#3D7EA6');
+  assert.equal(tower.bots[WF.botId('Dispatcher')].floor, 'main-floor');
+  assert.ok(tower.bots[WF.botId('Dispatcher')].desk <= 10);
+  assert.ok(tower.bots[WF.botId('QA Engineer')].desk <= 10);
+});
+
 test('4D is the sole view: no mode pill; legacy mid/high URLs land on the tower', { timeout: 90000 }, async () => {
   const { createServer } = require('../src/server');
   const { DemoWatcher } = require('../src/demo');

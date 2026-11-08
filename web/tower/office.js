@@ -39,6 +39,16 @@ export function isWatchFloor(floorId) {
   return id === 'watch' || id.startsWith('watch-');
 }
 
+export function isOpsFloor(floorId) {
+  const id = String(floorId || '');
+  return id === 'ops' || id.startsWith('ops-');
+}
+
+export function isMainFloor(floorId) {
+  const id = String(floorId || '');
+  return id === 'main-floor' || id.startsWith('main-floor-');
+}
+
 export async function loadOfficeAssets(baseUrl) {
   let glb = null;
   try {
@@ -90,6 +100,14 @@ function finish(templates, spots, nightMaps, source) {
     addDeptDivider(templates.floor_open);
   } catch (err) {
     console.warn('[office] dept divider skipped:', err.message);
+  }
+  try {
+    // SWA-3378: Marketing|Research mid-bank marker + canvas nameplates + Ops Trading Desk zone.
+    addMarketingResearchMarker(templates.floor_open);
+    addDeptNameplates(templates.floor_open);
+    addTradingDeskZone(templates.floor_open);
+  } catch (err) {
+    console.warn('[office] dept zones skipped:', err.message);
   }
   try {
     clearRemovedWorkstations(templates.floor_open, spots);
@@ -456,6 +474,27 @@ export function applyWatchFloor(obj, isWatch) {
   if (legacy) legacy.visible = false;
 }
 
+/**
+ * SWA-3378: Main Floor dept nameplates + mid marker; Ops Trading Desk zone.
+ * Call after Infra/Watch toggles so floor-specific labels win.
+ */
+export function applyDeptZones(obj, floorId) {
+  if (!obj) return;
+  const main = isMainFloor(floorId);
+  const ops = isOpsFloor(floorId);
+  const infra = isInfraFloor(floorId);
+  const watch = isWatchFloor(floorId);
+  const plates = obj.getObjectByName('dept_nameplates');
+  const mid = obj.getObjectByName('dept_mid_marker');
+  const trading = obj.getObjectByName('trading_desk_zone');
+  const divider = obj.getObjectByName('dept_divider');
+  if (plates) plates.visible = main;
+  if (mid) mid.visible = main;
+  if (trading) trading.visible = ops;
+  // Frost divider stays on Main (+ Ops when not kitchen/recreation); never on Infra/Watch.
+  if (divider && (infra || watch)) divider.visible = false;
+}
+
 /** Null or restore shared desk spots for the Infra middle columns. */
 export function applyInfraDeskSpots(spots, isInfra, backup) {
   if (!spots?.desks) return;
@@ -621,12 +660,15 @@ function stripMeshTris(root, dropCentroid) {
   });
 }
 
-// SWA-3195 / SWA-3212: frosted dept divider matches Hurly’s red up-right slash (~image slope -0.57).
-// Tower camera looks along (1,1,1); that screen slash is a front→back (−z) cut through both
-// GLB banks (desk_12 @ z=2.7 → desk_01 @ z=-3.9), not an xz aisle diagonal. Place the cut
-// between stool columns so panels clear seats (~0.85 m). Ends stay open for walking.
-// SWA-3212: shorten the run ~25% vs f8f0b9a (z 2.20→−3.50 / span 5.70) and keep the same
-// midpoint so both desk departments stay separated without shifting the wall to one end.
+// SWA-3378: frosted Websites | Marketing boundary on the live office.glb aisle.
+// Bank A (Websites, logical 1–10) stools at z=-3.9 / -1.5; Marketing (11–15) at z=0.3;
+// Research (16–20) at z=2.7; table_2 at z=1.5. Prior SWA-3195/3212 cut was a left/right
+// X-wall at x=-3.15 through both banks — that did not separate Websites from Marketing.
+// Reorient along +X in the aisle just south of Marketing so bank A stays behind the frost.
+// End gaps keep west hub / east lounge walks open (ambient still prefers those rails).
+export const DEPT_DIVIDER_Z = -0.15;
+export const DEPT_DIVIDER_X0 = -5.25;
+export const DEPT_DIVIDER_X1 = 0.95;
 function addDeptDivider(open) {
   if (!open || open.getObjectByName('dept_divider')) return;
   const g = new THREE.Group();
@@ -642,27 +684,23 @@ function addDeptDivider(open) {
     depthWrite: false,
   });
   const frame = new THREE.MeshStandardMaterial({ name: 'dept_divider_frame', color: 0x1C1C1E, roughness: 0.45, metalness: 0.3 });
-  // GLB tables at z=-2.700 / 1.500; stool columns at x=-5.7,-4.0,-2.3,-0.6,1.1.
-  // Mid-gap x=-3.15 (between -4.0 and -2.3); short of front/back stools for walk gaps.
-  // Was z0=2.20 / z1=-3.50 (span 5.70); now ~75% length, centered on z=-0.65.
-  const x0 = -3.15, z0 = 1.49;   // front of bank B (toward desk_12 / lounge)
-  const x1 = -3.15, z1 = -2.79;  // back of bank A (toward desk_01 / glass)
-  const dx = x1 - x0, dz = z1 - z0;
-  const span = Math.hypot(dx, dz);
-  const yaw = Math.atan2(-dz, dx); // local +X follows the cut (here −z → yaw = π/2)
-  const y = 0.72;                 // low / partial (~desk-monitor height)
+  const x0 = DEPT_DIVIDER_X0, x1 = DEPT_DIVIDER_X1;
+  const z = DEPT_DIVIDER_Z;
+  const dx = x1 - x0;
+  const span = Math.abs(dx);
+  const yaw = 0; // local +X along the aisle; panel faces ±Z (Websites ↔ Marketing)
+  const y = 0.72;
   const h = 1.28;
   const thick = 0.04;
-  // Three frosted panels along the cut; end gaps (~0.41m) scale with the shorter run.
-  const panelW = 1.15;
-  const endGap = 0.41;
+  const panelW = 1.55;
+  const endGap = 0.55;
   const usable = span - endGap * 2;
   const step = usable / 3;
   const first = endGap + step / 2;
   for (let i = 0; i < 3; i++) {
     const t = (first + i * step) / span;
     const panel = new THREE.Group();
-    panel.position.set(x0 + dx * t, y, z0 + dz * t);
+    panel.position.set(x0 + dx * t, y, z);
     panel.rotation.y = yaw;
     panel.add(new THREE.Mesh(new THREE.BoxGeometry(panelW, h, thick), frost));
     const hw = panelW / 2, hh = h / 2;
@@ -678,13 +716,121 @@ function addDeptDivider(open) {
     }
     g.add(panel);
   }
-  // oak kick ledge under the panels, same cut
   const oak = new THREE.MeshStandardMaterial({ name: 'dept_divider_oak', color: 0xC9A57C, roughness: 0.6 });
   const ledgeLen = usable + 0.15;
   const ledge = new THREE.Mesh(new THREE.BoxGeometry(ledgeLen, 0.05, 0.12), oak);
-  ledge.position.set((x0 + x1) / 2, 0.06, (z0 + z1) / 2);
+  ledge.position.set((x0 + x1) / 2, 0.06, z);
   ledge.rotation.y = yaw;
   g.add(ledge);
+  open.add(g);
+}
+
+// SWA-3378: lighter mid-bank marker between Marketing (GLB z=0.3) and Research (z=2.7).
+// Runs along table_2 centerline (z=1.5) across the bank B stool columns.
+function addMarketingResearchMarker(open) {
+  if (!open || open.getObjectByName('dept_mid_marker')) return;
+  const g = new THREE.Group();
+  g.name = 'dept_mid_marker';
+  const glass = new THREE.MeshStandardMaterial({
+    name: 'dept_mid_glass',
+    color: 0xEEF3F7,
+    roughness: 0.45,
+    metalness: 0.02,
+    transparent: true,
+    opacity: 0.28,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const rail = new THREE.MeshStandardMaterial({ name: 'dept_mid_rail', color: 0xA8B0B8, roughness: 0.55, metalness: 0.15 });
+  // office.glb table_2 at z=1.5; stool columns x=-5.7,-4.0,-2.3,-0.6,1.1.
+  const z = 1.5;
+  const x0 = -5.4, x1 = 0.9;
+  const span = x1 - x0;
+  const y = 0.55;
+  const h = 0.72;
+  const thick = 0.025;
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(span * 0.92, h, thick), glass);
+  panel.position.set((x0 + x1) / 2, y, z);
+  g.add(panel);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(span * 0.94, 0.02, thick + 0.015), rail);
+  top.position.set((x0 + x1) / 2, y + h / 2 + 0.01, z);
+  g.add(top);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(span * 0.94, 0.03, 0.08), new THREE.MeshStandardMaterial({
+    name: 'dept_mid_oak', color: 0xD2B896, roughness: 0.65,
+  }));
+  base.position.set((x0 + x1) / 2, 0.05, z);
+  g.add(base);
+  open.add(g);
+}
+
+function deptLabelSprite(text, name) {
+  const tex = canvasTex(512, 128, (ctx, w, h) => {
+    ctx.clearRect(0, 0, w, h);
+    const r = 28;
+    ctx.fillStyle = 'rgba(28, 28, 30, 0.52)';
+    ctx.beginPath();
+    ctx.moveTo(r, 16);
+    ctx.arcTo(w - 16, 16, w - 16, h - 16, r);
+    ctx.arcTo(w - 16, h - 16, 16, h - 16, r);
+    ctx.arcTo(16, h - 16, 16, 16, r);
+    ctx.arcTo(16, 16, w - 16, 16, r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#F7F6F3';
+    ctx.font = '600 54px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, w / 2, h / 2 + 2);
+  });
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, name: name + '_mat' });
+  const spr = new THREE.Sprite(mat);
+  spr.name = name;
+  spr.scale.set(2.6, 0.65, 1);
+  return spr;
+}
+
+// SWA-3378: Main Floor department nameplates (Websites / Marketing / Research).
+// Anchored to office.glb empties: table_1 z=-2.7; Marketing stools z=0.3; Research z=2.7.
+function addDeptNameplates(open) {
+  if (!open || open.getObjectByName('dept_nameplates')) return;
+  const g = new THREE.Group();
+  g.name = 'dept_nameplates';
+  const websites = deptLabelSprite('Websites', 'dept_label_websites');
+  websites.position.set(-2.3, 1.85, -2.7);
+  g.add(websites);
+  const marketing = deptLabelSprite('Marketing', 'dept_label_marketing');
+  marketing.position.set(-2.3, 1.85, 0.3);
+  g.add(marketing);
+  const research = deptLabelSprite('Research', 'dept_label_research');
+  research.position.set(-2.3, 1.85, 2.7);
+  g.add(research);
+  open.add(g);
+}
+
+// SWA-3378: Ops-only Trading Desk zone label near wall column desks 01 / 02
+// (logical 1 / 6 → Trade / Backtest). GLB: desk_01 z=-3.9, desk_02 z=-1.5 at x=-5.7.
+function addTradingDeskZone(open) {
+  if (!open || open.getObjectByName('trading_desk_zone')) return;
+  const g = new THREE.Group();
+  g.name = 'trading_desk_zone';
+  g.visible = false; // shown only on Ops via applyDeptZones
+  const label = deptLabelSprite('Trading Desk', 'trading_desk_label');
+  label.position.set(-5.7, 1.9, -2.7);
+  g.add(label);
+  // Subtle floor strip spanning the wall-side Ops pair.
+  const strip = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 0.02, 2.6),
+    new THREE.MeshStandardMaterial({
+      name: 'trading_desk_strip',
+      color: 0x2F6B5A,
+      roughness: 0.55,
+      metalness: 0.08,
+      transparent: true,
+      opacity: 0.55,
+    }),
+  );
+  strip.position.set(-5.7, 0.03, -2.7);
+  g.add(strip);
   open.add(g);
 }
 
