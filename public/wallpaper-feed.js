@@ -55,6 +55,11 @@
     grok: 'grok',
     'smoke scout': 'smoke-scout',
     'cursor cloud': 'cursor-cloud',
+    // SWA-3378: Ops Trading Desk bots (representation only; may be absent from live roster).
+    'trade master': 'trade-master',
+    trade: 'trade-master',
+    'backtest master': 'backtest-master',
+    backtest: 'backtest-master',
   };
   // urlKey → Paperclip agent UUID (for Start / resume).
   const PAPERCLIP_AGENT_IDS = {
@@ -75,6 +80,9 @@
     grok: '2b483eac-3320-4c85-9f05-c88db157c63c',
     'smoke-scout': '9948dfec-b8f5-4e98-8cdb-7404c83821d1',
     'cursor-cloud': '1103a0e7-abc7-42fd-a5c9-66cfb37ce344',
+    // SWA-3378: existing Grok bots — office map only; live bind if/when board returns these IDs.
+    'trade-master': '1447b83f-cc88-4862-8274-e79ebe053a8c',
+    'backtest-master': 'f3a5c557-a261-4841-a474-259e706a4d5f',
   };
   const SEAT_STORE_KEY = 'wmad.seatAssign';
   const FLOOR_STORE_KEY = 'wmad.floorAssign';
@@ -121,8 +129,8 @@
   const OFFICE_SHAPES = new Set(['triangle', 'drop', 'cloud', 'oval', 'bean', 'wedge', 'squircle', 'tablet']);
   const ACCESSORIES = new Set(['none', 'glasses', 'stem', 'antenna', 'bow']);
 
-  // Hurly's six, used only when a feed is connected and that bot has no look
-  // line yet. Not a topic, and not applied when the feed is off.
+  // Hurly's remembered looks / floors. Used when a feed is connected and that
+  // bot has no look line yet. Not a topic, and not applied when the feed is off.
   const REMEMBERED = [
     { name: 'Chief Master', shape: 'triangle', color: '#8F59F9', accessory: 'none', group: 'Ops' },
     { name: 'Monitor Master', shape: 'rounded_square', color: '#FD690F', accessory: 'none', group: 'Watch' },
@@ -130,7 +138,16 @@
     { name: 'Dockhand Master', shape: 'triangle', color: '#F93498', accessory: 'none', group: 'Infra' },
     { name: 'TrueNAS Master', shape: 'rounded_square', color: '#A06B39', accessory: 'none', group: 'Infra' },
     { name: 'Doc Master', shape: 'drop', color: '#EB2B3E', accessory: 'none', group: 'Ops' },
+    // SWA-3378: Ops Trading Desk (representation only).
+    { name: 'Trade Master', shape: 'pill', color: '#0F9D8A', accessory: 'none', group: 'Ops' },
+    { name: 'Backtest Master', shape: 'rounded_square', color: '#3D7EA6', accessory: 'none', group: 'Ops' },
   ];
+  // SWA-3378: prefer adjacent open Ops desks for Trading Desk bots.
+  // Logical desk 2 is globally removed (SWA-3221), so the open adjacent pair is 1 + 6.
+  const PREFERRED_OPS_DESKS = {
+    'trade-master': 1,
+    'backtest-master': 6,
+  };
 
   function canon(v) {
     return String(v || '').toLowerCase().replace(/proximox/g, 'proxmox').replace(/\s+/g, ' ').trim();
@@ -344,6 +361,33 @@
       const want = map[id];
       const floorId = bots[id] && bots[id].floor;
       if (!want || !bots[id] || !isDeskOpen(want, floorId)) continue;
+      const cur = bots[id].desk;
+      if (cur === want) continue;
+      const other = taken.get(want);
+      if (other && other !== id) {
+        bots[other].desk = cur;
+        taken.set(cur, other);
+      } else {
+        taken.delete(cur);
+      }
+      bots[id].desk = want;
+      taken.set(want, id);
+    }
+  }
+
+  // Soft default seats for Ops Trading Desk bots. Skips ids already in the seat map
+  // so drag-drop / remembered assigns still win. Displaces whoever holds the target.
+  function applyPreferredOpsDesks(bots, floorIds) {
+    const onFloor = (floorIds || []).filter((id) => bots[id] && (bots[id].floor === 'ops' || String(bots[id].floor || '').startsWith('ops-')));
+    if (!onFloor.length) return;
+    const saved = loadSeatAssign();
+    const taken = new Map();
+    for (const id of onFloor) taken.set(bots[id].desk, id);
+    for (const id of onFloor) {
+      if (saved[id]) continue;
+      const want = PREFERRED_OPS_DESKS[id];
+      const floorId = bots[id].floor;
+      if (!want || !isDeskOpen(want, floorId)) continue;
       const cur = bots[id].desk;
       if (cur === want) continue;
       const other = taken.get(want);
@@ -1078,11 +1122,13 @@
   };
   const FLOOR_RANK = { ops: 0, infra: 1, watch: 2, 'main-floor': 3 };
   const COUNT_KEYS = ['working', 'idle', 'waiting_user', 'error', 'stuck', 'done'];
-  // SWA-3171: floors come from wallpaper group again (Ops/Infra/Watch + Main floor).
-  // Dept A vs B desk banks apply only when a bot lands on Main floor.
+  // SWA-3171 / SWA-3378: floors come from wallpaper group (Ops/Infra/Watch + Main floor).
+  // Main Floor Websites zone (desks 1–10). Marketing 11–15 / Research 16–20 stay empty of
+  // dedicated agents — no FE/BE/UI seats invented. Bank seating only when on Main floor.
   const DEPT_A = [
     'dispatcher', 'code master 1', 'code master 2', 'qa engineer', 'qa engineer 2',
   ];
+  const DEPT_WEBSITES = DEPT_A;
 
   function zeroCounts() {
     return { working: 0, idle: 0, waiting_user: 0, error: 0, stuck: 0, done: 0 };
@@ -1250,6 +1296,7 @@
         const st = bots[id] && COUNT_KEYS.includes(bots[id].status) ? bots[id].status : 'idle';
         floor.counts[st] += 1;
       }
+      applyPreferredOpsDesks(bots, floor.ids);
       applySeatOverrides(bots, floor.ids);
       relocateRemovedDesks(bots, floor.ids);
     }
@@ -1329,7 +1376,7 @@
   }
 
   root.WallpaperFeed = {
-    RELAY, NTFY, STORE_KEY, REMEMBERED,
+    RELAY, NTFY, STORE_KEY, REMEMBERED, PREFERRED_OPS_DESKS, DEPT_A, DEPT_WEBSITES,
     DEFAULT_FEED_TOPIC, DEFAULT_QUALITY, QUALITIES,
     PAPERCLIP_ORIGIN, PAPERCLIP_PREFIX, PAPERCLIP_CHAT_KEYS, PAPERCLIP_AGENT_IDS,
     SEAT_STORE_KEY, FLOOR_STORE_KEY, LOUNGE_STORE_KEY, PER_FLOOR, LOUNGE_MAX,

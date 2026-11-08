@@ -42,6 +42,9 @@ const CREW = [
   { key: 'dockhand', role: 'Docker hosts', name: 'Dockhand Master', agent: 'grokbot', pc: 'e679f570-38bb-4de0-b754-89425d98d398', status: 'idle', task: 'Docker hosts' },
   { key: 'truenas', role: 'Storage', name: 'TrueNAS Master', agent: 'grokbot', pc: '9082e6f0-9eae-472e-b0ef-81a423e4cfff', status: 'idle', task: 'TrueNAS storage' },
   { key: 'doc', role: 'Docs', name: 'Doc Master', agent: 'grokbot', status: 'offline', task: 'Docs (off the floor)' },
+  // SWA-3378: Ops Trading Desk — existing Grok bots (representation only; do not invent accounts).
+  { key: 'trade', role: 'Trading', name: 'Trade Master', agent: 'grokbot', pc: '1447b83f-cc88-4862-8274-e79ebe053a8c', status: 'idle', task: 'Ops Trading Desk' },
+  { key: 'backtest', role: 'Backtesting', name: 'Backtest Master', agent: 'grokbot', pc: 'f3a5c557-a261-4841-a474-259e706a4d5f', status: 'idle', task: 'Ops Trading Desk · backtests' },
   // Paperclip agents
   { key: 'cm2', role: 'Code', name: 'Code Master 2', agent: 'paperclip', pc: 'eb8ecca2-c2cd-4fc9-ac22-0c63b25d2e4b', status: 'running', task: 'Charting batch SWA-2971', activity: 'Bash: npm run build' },
   { key: 'qa', role: 'QA', name: 'QA Engineer', agent: 'paperclip', pc: '47312222-173f-478e-bdb3-c36938e012dd', status: 'idle', task: 'QA' },

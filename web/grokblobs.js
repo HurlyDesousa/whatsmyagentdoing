@@ -13,6 +13,9 @@ export const CREW_LOOKS = {
   dockhand: { shape: 'wedge', color: 0xff4fa3 },     // Dockhand — magenta wedge
   truenas: { shape: 'tablet', color: 0x9b6436 },     // TrueNAS — brown tablet
   doc: { shape: 'drop', color: 0xf0384a },           // Doc Master — red teardrop
+  // SWA-3378: Ops Trading Desk
+  trade: { shape: 'tablet', color: 0x0f9d8a },       // Trade Master — teal tablet
+  backtest: { shape: 'squircle', color: 0x3d7ea6 },  // Backtest Master — steel squircle
   // Paperclip agents: the rest of the palette, fixed so they never shuffle.
   cm2: { shape: 'triangle', color: 0x3b82f6 },
   cm1: { shape: 'oval', color: 0x6366f1 },
@@ -25,12 +28,16 @@ export const CREW_LOOKS = {
 };
 const NAME_KEYS = [
   [/chief/i, 'chief'], [/proxmox/i, 'proxmox'], [/monitor/i, 'monitor'], [/dock/i, 'dockhand'],
-  [/truenas/i, 'truenas'], [/doc master|^doc\b/i, 'doc'], [/code master 2/i, 'cm2'], [/code master 1/i, 'cm1'],
+  [/truenas/i, 'truenas'], [/doc master|^doc\b/i, 'doc'], [/backtest/i, 'backtest'], [/trade master|^trade\b/i, 'trade'],
+  [/code master 2/i, 'cm2'], [/code master 1/i, 'cm1'],
   [/claude/i, 'claude'], [/\bqa\b/i, 'qa'], [/dispatch/i, 'dispatcher'], [/gpu/i, 'gpu'], [/amazon/i, 'amazon'],
   [/account/i, 'accountant'],
 ];
 export const SHAPES = ['triangle', 'drop', 'cloud', 'oval', 'bean', 'wedge', 'squircle', 'tablet'];
-const RESERVED = new Set(['wedge:8b5cf6', 'squircle:ff7417', 'cloud:22c06a', 'wedge:ff4fa3', 'tablet:9b6436', 'drop:f0384a']);
+const RESERVED = new Set([
+  'wedge:8b5cf6', 'squircle:ff7417', 'cloud:22c06a', 'wedge:ff4fa3', 'tablet:9b6436', 'drop:f0384a',
+  'tablet:0f9d8a', 'squircle:3d7ea6',
+]);
 const EXTRA_COLORS = [0x8b5cf6, 0xf0384a, 0x22c06a, 0xff7417, 0x9b6436, 0xff4fa3, 0x3b82f6, 0x14b8a6, 0xf2c21b, 0x6366f1, 0x84cc16, 0x0ea5e9];
 
 function strHash(str) {
