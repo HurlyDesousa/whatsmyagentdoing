@@ -703,6 +703,8 @@ html.bhq-phone .bhq-schip:not(.bhq-schip--lead) > span:last-child {
 html.bhq-phone .bhq-right {
   gap: 6px; min-height: 42px; flex-direction: row-reverse; flex-wrap: nowrap; /* usage first, DEMO last */
 }
+/* Keep Show/Hide names beside theme without colliding with floor chips (SWA-3377). */
+html.bhq-phone .bhq-names { flex: none; }
 html.bhq-phone .bhq-usage { height: 42px; padding: 0 13px; gap: 0; }
 html.bhq-phone .bhq-usage :is(.bhq-usage-label, .bhq-slider, .bhq-sep, .bhq-reset) { display: none; }
 html.bhq-phone .bhq-demo { height: 28px; padding: 0 8px; font-size: 10px; letter-spacing: .06em; }

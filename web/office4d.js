@@ -45,6 +45,7 @@ export class Office4D {
     this.focusKey = null;
     this.pickedId = null;
     this.viewFloorId = typeof opts.towerFloor === 'string' ? opts.towerFloor : null;
+    this.showNames = false;
     this._lastSel = null;
     this._readyFired = false;
     this.ready = new Promise((ok) => { this.markReady = ok; });
@@ -87,6 +88,7 @@ export class Office4D {
         a.download = 'office.png';
         a.click();
       },
+      onToggleNames: () => this.setShowNames(!this.showNames),
     });
     mountTheme(() => { if (this.opts.onTheme) this.opts.onTheme(); });
     initSound({ slot: document.querySelector('#topbar .bhq-right') });
@@ -103,6 +105,13 @@ export class Office4D {
     if (next !== this.pickedId) sfx.select(!!next);
     this.pickedId = next;
     this._followPick = !!next;
+    this.update(this.sessions);
+  }
+
+  setShowNames(on) {
+    const next = !!on;
+    if (next === this.showNames) return;
+    this.showNames = next;
     this.update(this.sessions);
   }
 
@@ -325,9 +334,10 @@ export class Office4D {
       const bot = byId[id];
       if (bot && bot.floor === want && bot.effective_status === 'working') this.deskOf.set(key, (bot.desk || 1) - 1);
     }
-    const view = { currentFloor: want, selectedBot: sel };
+    const view = { currentFloor: want, selectedBot: sel, showNames: !!this.showNames };
     renderScene(state, view);
     try { renderUI(state, view); } catch (e) { console.error(e); }
+    document.documentElement.classList.toggle('bhq-show-names', !!this.showNames);
     this._soundStatus(state);
     if (sel && sel !== this._lastSel) {
       this._lastSel = sel;
@@ -391,6 +401,7 @@ export class Office4D {
     if (this._onDocPointer) document.removeEventListener('pointerdown', this._onDocPointer, true);
     this.hideBotMenu();
     if (this._botMenu) { this._botMenu.remove(); this._botMenu = null; }
+    document.documentElement.classList.remove('bhq-show-names');
     try { destroySound(); } catch (e) { console.error(e); }
     try { destroyUI(); } catch (e) { console.error(e); }
     try { destroyScene(); } catch (e) { console.error(e); }

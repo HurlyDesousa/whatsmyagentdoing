@@ -50,6 +50,11 @@
   color: #1D1D1F; font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap; letter-spacing: -.003em;
 }
 .hqt-text { overflow: hidden; text-overflow: ellipsis; }
+
+/* SWA-3377: topbar "Show names" — persistent floor-wide name pills, unclipped */
+html.bhq-show-names .hq-labels { overflow: visible; }
+.hqt[data-mode="names"] .hqt-pill { max-width: none; }
+.hqt[data-mode="names"] .hqt-text { overflow: visible; text-overflow: clip; }
 .hqt-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c, #A1A1A6); }
 .hqt-stem { width: 1px; height: 14px; background: rgba(0, 0, 0, .18); }
 

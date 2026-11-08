@@ -97,7 +97,7 @@ function freshState(handlers) {
   return {
     h: handlers || {},
     top: null, fl: null, panel: null, feed: null, zoom: null, dock: null, owned: [],
-    last: { state: null, opts: { currentFloor: null, selectedBot: null } },
+    last: { state: null, opts: { currentFloor: null, selectedBot: null, showNames: false } },
     skew: 0, nowStr: null,
     floors: new Map(), activeFloorId: null,
     cells: new Map(),
@@ -517,12 +517,18 @@ function buildTopbar(root) {
   const reset = h('span', { class: 'bhq-reset' });
   const usage = h('div', { class: 'bhq-usage bhq-surface', hidden: true }, usageLabel, meter, pct, h('span', { class: 'bhq-sep', 'aria-hidden': 'true' }), reset);
   const demo = h('span', { class: 'bhq-demo bhq-surface', text: 'DEMO', hidden: true, title: 'Demo data, not real bots' });
+  const names = h('button', {
+    class: 'bhq-names bhq-surface', type: 'button',
+    'aria-pressed': 'false', 'aria-label': 'Show names of all bots on this floor',
+    title: 'Show names', text: 'Show names',
+  });
+  names.addEventListener('click', () => { if (U.h.onToggleNames) U.h.onToggleNames(); });
   const share = h('button', { class: 'bhq-share bhq-surface', type: 'button', 'aria-label': 'Share an image of your office', title: 'Share' }, svg(ICON.share));
   share.addEventListener('click', () => { if (U.h.onShare) U.h.onShare(share); });
-  const right = h('div', { class: 'bhq-right' }, share, demo, usage);
+  const right = h('div', { class: 'bhq-right' }, names, share, demo, usage);
 
   root.append(brand, summary, right);
-  U.top = { root, clock, chips, summary, usage, usageLabel, meter, fill, pct, reset, demo };
+  U.top = { root, clock, chips, summary, usage, usageLabel, meter, fill, pct, reset, demo, names };
 }
 
 /* ------------------------------------------------------------------ build: floors */
@@ -1154,7 +1160,11 @@ export function setSheetOpen(open) { sheetGo(!!open, 0, true); }
 export function renderUI(state, opts) {
   if (!U || !state) return;
   opts = opts || {};
-  const o = { currentFloor: opts.currentFloor || null, selectedBot: opts.selectedBot || null };
+  const o = {
+    currentFloor: opts.currentFloor || null,
+    selectedBot: opts.selectedBot || null,
+    showNames: !!opts.showNames,
+  };
   U.last = { state, opts: o };
   syncClock(state);
   if (!U.ready) { // let the first paint land without a fade, then mark the page ready (styles.css may use it)
@@ -1162,7 +1172,7 @@ export function renderUI(state, opts) {
     requestAnimationFrame(() => requestAnimationFrame(() => document.documentElement.classList.add('bhq-ready')));
   }
 
-  safe('topbar', () => U.top && renderTopbar(state));
+  safe('topbar', () => U.top && renderTopbar(state, o));
   safe('floors', () => U.fl && renderFloors(state, o));
   safe('panel', () => U.panel && renderPanel(state, o));
   safe('feed', () => U.feed && renderFeed(state));
@@ -1182,9 +1192,18 @@ function safe(where, fn) {
 
 /* ---- top bar */
 
-function renderTopbar(state) {
+function renderTopbar(state, o) {
   const t = U.top;
   setText(t.clock, hhmm(Date.now()));
+
+  if (t.names) {
+    const on = !!(o && o.showNames);
+    setText(t.names, on ? 'Hide names' : 'Show names');
+    setAttr(t.names, 'aria-pressed', on ? 'true' : 'false');
+    setAttr(t.names, 'aria-label', on ? 'Hide names of all bots on this floor' : 'Show names of all bots on this floor');
+    setAttr(t.names, 'title', on ? 'Hide names' : 'Show names');
+    setCls(t.names, 'is-on', on);
+  }
 
   const c = counts(state);
   for (const p of SUMMARY) {
