@@ -245,7 +245,7 @@ function sync() {
     if ((bot.effective_status || bot.status) === 'working' && !lounge.has(bot.id) && assets.spots.desks[deskIdx]) flags[deskIdx] = 1;
     // While ambient owns the walker, keep feeding the home seat (return target) without yanking motion.
     const spot = home;
-    actor.update(bot, spot, { maxShare, selectedBot: view.selectedBot });
+    actor.update(bot, spot, { maxShare, selectedBot: view.selectedBot, showNames: !!view.showNames });
   }
   stepAmbient(amb, floorBots, homeOf);
   building.setScreens(flags);

@@ -155,6 +155,7 @@ export class Actor {
     this.tagEl.dataset.status = status;
     this.tagEl.style.setProperty('--c', color);
     this.selected = view.selectedBot === bot.id;
+    this.showNames = !!view.showNames;
     this.renderTag();
 
     if (spot && this._reseatPending) {
@@ -189,16 +190,17 @@ export class Actor {
     }
   }
 
-  // Quiet by default: selected (dark pill, name), needs-the-user (compact pill, short reason), hovered (pill, name).
+  // Quiet by default: selected (dark pill, name), needs-the-user (compact pill, short reason),
+  // hovered (pill, name). Topbar "Show names" adds persistent name pills for everyone else on the floor.
   renderTag() {
     const s = this.status, bot = this.bot;
     if (!bot) return;
     const attn = s === 'waiting_user' || s === 'error' || s === 'stuck';
-    const mode = this.selected ? 'sel' : attn ? 'attn' : this.hovered ? 'hover' : 'off';
+    const mode = this.selected ? 'sel' : attn ? 'attn' : this.hovered ? 'hover' : this.showNames ? 'names' : 'off';
     let text = bot.name || '';
     if (mode === 'attn') {
       const reason = reasonText(s, bot.step);
-      text = this.hovered ? `${bot.name} · ${reason}` : reason;
+      text = (this.hovered || this.showNames) ? `${bot.name} · ${reason}` : reason;
     }
     const key = `${mode}|${s}|${text}`;
     if (key === this.tagKey) return;
