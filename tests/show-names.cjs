@@ -3,9 +3,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { chromium } = require('playwright');
-const { createServer } = require('../src/server');
-const { DemoWatcher } = require('../src/demo');
+
+let chromium = null;
+try {
+  ({ chromium } = require('playwright'));
+} catch {
+  chromium = null;
+}
 
 const root = path.join(__dirname, '..');
 
@@ -38,6 +42,7 @@ test('show-names wiring is present in sources and the 4D bundle', () => {
 });
 
 async function launchBrowser() {
+  if (!chromium) return { error: new Error('playwright module not installed') };
   try {
     return await chromium.launch({ headless: true, channel: 'chrome' });
   } catch {
@@ -78,6 +83,8 @@ test('topbar Show/Hide names toggles persistent labels on the current floor', { 
     t.skip('Chromium/Chrome not runnable in this environment: ' + (browserOrErr.error?.message || 'no browser'));
     return;
   }
+  const { createServer } = require('../src/server');
+  const { DemoWatcher } = require('../src/demo');
   const browser = browserOrErr;
   const watcher = new DemoWatcher().start();
   const server = createServer(watcher, { demo: true, privacy: false });
