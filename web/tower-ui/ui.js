@@ -3,7 +3,7 @@
  *   top-left   brand + live clock         top-center  status counters        top-right  DEMO + usage meter
  *   left       floors "elevator"          right       floor team / bot card
  *   left, under the floors   dock: Status check (while one runs) / Waiting on me / Pipeline / Finished / Routines
- *   bottom-left activity feed (last 4)    bottom-right (left of the card)  zoom - / +
+ *   bottom-right activity feed (last 4), under the bot/team panel    zoom - / + (left of that column)
  *
  *   initUI({ onSelectBot, onSelectFloor, onZoom, onOpenChat, onStartAgent, onClearErrorAgent })
  *   renderUI(state, { currentFloor, selectedBot })   // idempotent, cheap, safe to call every second
@@ -857,13 +857,12 @@ function buildDock(floors, feed) {
   waiting.eye.addEventListener('click', () => setWaitBlur(!U.dock.blurred));
   setWaitBlur(lsGet(LS_BLUR) === '1', false);
 
-  // keep the dock between the floors card and the feed, whatever their heights
+  // keep the dock under the floors card down the left column (feed lives on the right now)
   U.onResize = () => layoutDock();
   addEventListener('resize', U.onResize);
   if (typeof ResizeObserver === 'function') {
     U.ro2 = new ResizeObserver(() => layoutDock());
     if (floors) U.ro2.observe(floors);
-    if (feed) U.ro2.observe(feed);
   }
   layoutDock();
 }
@@ -877,7 +876,8 @@ function layoutDock() {
   const gutter = 24;
   // offsetTop/offsetHeight ignore the cards' entrance transform
   const top = shown(d.floors) ? d.floors.offsetTop + d.floors.offsetHeight + 10 : 96;
-  const bottom = shown(d.feed) ? d.feed.offsetTop - 10 : innerHeight - gutter;
+  // Activity feed is on the right under #panel; left dock can use the full column height.
+  const bottom = innerHeight - gutter;
   const avail = Math.max(0, bottom - top);
   setPx(d.root, 'top', top);
   setPx(d.root, 'maxHeight', avail);

@@ -416,7 +416,7 @@
 .bhq-zoom .bhq-sep { height: 14px; }
 
 /* ====================================================================== dock: waiting on me / finished / routines
-   Three slim cards under the floors; each folds to its header. ui.js sets top and max-height (below the floors, above the feed). */
+   Three slim cards under the floors; each folds to its header. ui.js sets top and max-height (below the floors, down the left column). */
 
 .bhq-dock {
   position: fixed; z-index: 20; left: var(--gutter, 24px); top: 380px;
