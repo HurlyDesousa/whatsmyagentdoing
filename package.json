@@ -42,7 +42,7 @@
     "build": "esbuild web/office3d.js --bundle --format=esm --minify --target=es2020 --outfile=public/office3d.js --legal-comments=eof && esbuild web/office4d.js --bundle --format=esm --minify --target=es2020 --outfile=public/office4d.js --legal-comments=eof",
     "start": "node bin/cli.js",
     "test:ui": "node tests/ui.cjs",
-    "test:blobs": "node --test tests/blob-ux.cjs tests/wallpaper-cues.cjs tests/wallpaper-feed.cjs tests/quality-4d.cjs tests/ambient-walk.mjs tests/show-names.cjs",
+    "test:blobs": "node --test tests/blob-ux.cjs tests/wallpaper-cues.cjs tests/wallpaper-feed.cjs tests/quality-4d.cjs tests/ambient-walk.mjs tests/show-names.cjs tests/phone-dock-body.cjs tests/mobile-readiness.cjs",
     "test:watcher": "node --test tests/watcher.cjs tests/omp.cjs",
     "test:server": "node --test tests/server.cjs tests/sse.cjs tests/paperclip-resume.cjs"
   }

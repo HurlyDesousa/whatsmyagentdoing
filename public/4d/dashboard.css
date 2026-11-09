@@ -79,10 +79,16 @@ body:not(.tower-site) :is(#topbar, #floors, #panel, #feed, .bhq-zoom, .bhq-dock,
   width: min(var(--panel-w, 352px), calc(100vw - 2 * var(--gutter, 24px)));
 }
 @media (max-width: 1100px) {
+  /* Desktop/tablet without phone sheet: hide fixed right Activity to free the scene.
+     Phone sheet re-shows #feed via .bhq-phone .bhq-sheet #feed (SWA-3408 + SWA-3409). */
   #feed { display: none; }
   #panel {
     max-height: calc(100vh - var(--below-top, 96px) - var(--gutter, 24px));
   }
+}
+/* Phone: panel is a bottom/side sheet — do not reserve desktop --feed-stack headroom. */
+html.bhq-phone #panel {
+  max-height: none;
 }
 
 html[data-theme="dark"] body.tower-site {
