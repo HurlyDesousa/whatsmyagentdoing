@@ -857,8 +857,9 @@ function render() {
       usage: wallpaperFeed && wallpaperFeed.usage,
       routines: wallpaperFeed && wallpaperFeed.routines,
       feedLive: !!wallpaperFeed,
-      // Active Paperclip issues from the Hurly crew SSE snapshot (Pipeline card).
+      // Active Paperclip issues from the Hurly crew SSE snapshot (Pipeline / Waiting on me).
       pipeline: Array.isArray(state.data && state.data.pipeline) ? state.data.pipeline : [],
+      waiting_issues: Array.isArray(state.data && state.data.waiting_issues) ? state.data.waiting_issues : [],
     };
   }
   if (office && state.loaded) {

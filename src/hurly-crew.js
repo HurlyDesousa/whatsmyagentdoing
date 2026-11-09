@@ -137,10 +137,13 @@ function issueLabel(iss) {
   return clip(`${id} ${title}`.trim(), 120);
 }
 
-// Active board statuses that belong in the office Pipeline card (not Finished).
-const PIPELINE_STATUSES = new Set(['todo', 'in_progress', 'in_review', 'blocked']);
+// Active board statuses for the Pipeline dock (blocked issues live under Waiting on me — SWA-3404).
+const PIPELINE_STATUSES = new Set(['todo', 'in_progress', 'in_review']);
+// Still poll blocked so Waiting-on-me + live agent bubbles stay current; display grouping only.
 const PIPELINE_STATUS_Q = 'todo,in_progress,in_review,blocked';
+const WAITING_ISSUE_STATUSES = new Set(['blocked']);
 const PIPELINE_MAX = 80;
+const WAITING_ISSUES_MAX = 80;
 
 function issueUrl(iss) {
   if (!iss || typeof iss !== 'object') return null;
@@ -159,15 +162,15 @@ function statusRank(st) {
   return 9;
 }
 
-/** Compact rows for the sidebar Pipeline card — everything currently in flight. */
-function buildPipeline(issues, agents) {
+/** Compact board-issue rows for dock cards (Pipeline / Waiting on me). */
+function buildIssueRows(issues, agents, allowedStatuses, max) {
   const agentList = unwrapList(agents).filter((a) => a && a.id);
   const byId = new Map(agentList.map((a) => [a.id, a]));
   const rows = [];
   for (const iss of unwrapList(issues)) {
     if (!iss || typeof iss !== 'object') continue;
     const st = String(iss.status || '').toLowerCase();
-    if (!PIPELINE_STATUSES.has(st)) continue;
+    if (!allowedStatuses.has(st)) continue;
     const identifier = String(iss.identifier || iss.key || iss.issueIdentifier || '').trim();
     if (!identifier) continue;
     const aid = assigneeId(iss);
@@ -187,7 +190,17 @@ function buildPipeline(issues, agents) {
   rows.sort((a, b) => statusRank(a.status) - statusRank(b.status)
     || String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
     || String(a.identifier).localeCompare(String(b.identifier)));
-  return rows.slice(0, PIPELINE_MAX);
+  return rows.slice(0, max);
+}
+
+/** Compact rows for the sidebar Pipeline card — in-flight, excluding blocked. */
+function buildPipeline(issues, agents) {
+  return buildIssueRows(issues, agents, PIPELINE_STATUSES, PIPELINE_MAX);
+}
+
+/** Blocked board issues for Waiting on me (display grouping only — SWA-3404). */
+function buildWaitingIssues(issues, agents) {
+  return buildIssueRows(issues, agents, WAITING_ISSUE_STATUSES, WAITING_ISSUES_MAX);
 }
 
 function liveActivity(run) {
@@ -281,12 +294,16 @@ class HurlyCrew extends EventEmitter {
     this.overrides = {};
     this.overridesMtime = 0;
     this._pipeline = [];
+    this._waitingIssues = [];
     const now = Date.now();
     this.list = CREW.map((c, i) => this.entry(c, i, now));
   }
 
-  /** Active Paperclip issues for the office Pipeline dock card. */
+  /** Active Paperclip issues for the office Pipeline dock card (excludes blocked). */
   pipeline() { return this._pipeline.slice(); }
+
+  /** Blocked Paperclip issues for the Waiting on me dock card. */
+  waitingIssues() { return this._waitingIssues.slice(); }
 
   entry(c, i, now = Date.now()) {
     return {
@@ -401,6 +418,7 @@ class HurlyCrew extends EventEmitter {
     const issueList = unwrapList(issues);
     const runList = unwrapList(runs);
     this._pipeline = buildPipeline(issueList, agentList);
+    this._waitingIssues = buildWaitingIssues(issueList, agentList);
     for (const s of this.list) {
       if (!s.pc || !byId.has(s.pc)) {
         // Linked-then-gone: idle with last heartbeat. Never-linked after a
@@ -505,5 +523,5 @@ class HurlyCrew extends EventEmitter {
 
 module.exports = {
   HurlyCrew, CREW, unwrapList, liveActivity, pickIssue, pickRun, normName, nameAliases, resolveAgent,
-  buildPipeline, PIPELINE_STATUSES, PIPELINE_STATUS_Q, issueUrl,
+  buildPipeline, buildWaitingIssues, PIPELINE_STATUSES, PIPELINE_STATUS_Q, WAITING_ISSUE_STATUSES, issueUrl,
 };

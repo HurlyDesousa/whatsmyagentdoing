@@ -120,9 +120,11 @@ function snapshot(watcher, opts) {
   const sessions = raw.map((s) => view(s, now, opts));
   sessions.sort((a, b) => (b.lastEventAt || 0) - (a.lastEventAt || 0));
   const out = { now, lang: opts.demo || opts.hurly ? null : promptLanguage(raw), sessions };
-  // Hurly crew exposes active Paperclip issues for the Pipeline dock card.
+  // Hurly crew exposes active Paperclip issues for the Pipeline / Waiting-on-me dock cards.
   if (typeof watcher.pipeline === 'function') out.pipeline = watcher.pipeline();
   else if (Array.isArray(watcher.pipeline)) out.pipeline = watcher.pipeline.slice();
+  if (typeof watcher.waitingIssues === 'function') out.waiting_issues = watcher.waitingIssues();
+  else if (Array.isArray(watcher.waitingIssues)) out.waiting_issues = watcher.waitingIssues.slice();
   return out;
 }
 

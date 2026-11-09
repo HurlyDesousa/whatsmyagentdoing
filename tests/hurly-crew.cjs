@@ -196,6 +196,7 @@ test('an agent that leaves the roster goes idle instead of back to seed', () => 
 test('pipeline lists active board issues with assignee and issue URL', () => {
   const w = crew();
   assert.deepEqual(w.pipeline(), []);
+  assert.deepEqual(w.waitingIssues(), []);
   const cm1 = 'a08c0cb1-355a-4cd6-ade3-91fe773d05ea';
   const qa = '47312222-173f-478e-bdb3-c36938e012dd';
   w.ingestLive({
@@ -208,6 +209,7 @@ test('pipeline lists active board issues with assignee and issue URL', () => {
       { id: 'b', identifier: 'SWA-3258', title: 'Watch recreation', status: 'in_review', assigneeAgentId: qa, updatedAt: '2026-11-06T10:00:00.000Z' },
       { id: 'c', identifier: 'SWA-9', title: 'Done already', status: 'done', assigneeAgentId: cm1 },
       { id: 'd', identifier: 'SWA-10', title: 'Queued', status: 'todo', assigneeAgentId: cm1, updatedAt: '2026-11-06T09:00:00.000Z' },
+      { id: 'e', identifier: 'SWA-3363', title: 'Fleet maintenance', status: 'blocked', assigneeAgentId: qa, updatedAt: '2026-11-06T12:00:00.000Z' },
     ],
     runs: [],
   });
@@ -221,7 +223,16 @@ test('pipeline lists active board issues with assignee and issue URL', () => {
   assert.equal(pipe[1].status, 'in_review');
   assert.equal(pipe[2].identifier, 'SWA-10');
   assert.equal(pipe[2].status, 'todo');
+  assert.ok(!pipe.some((p) => p.status === 'blocked'));
+  const waiting = w.waitingIssues();
+  assert.equal(waiting.length, 1);
+  assert.equal(waiting[0].identifier, 'SWA-3363');
+  assert.equal(waiting[0].status, 'blocked');
+  assert.equal(waiting[0].assigneeName, 'QA Engineer');
+  assert.match(waiting[0].url, /\/SWA\/issues\/SWA-3363$/);
   const snap = snapshot(w, { hurly: true });
   assert.equal(snap.pipeline.length, 3);
   assert.equal(snap.pipeline[0].identifier, 'SWA-3263');
+  assert.equal(snap.waiting_issues.length, 1);
+  assert.equal(snap.waiting_issues[0].identifier, 'SWA-3363');
 });
