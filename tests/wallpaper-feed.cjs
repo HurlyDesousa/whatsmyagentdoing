@@ -289,6 +289,49 @@ test('towerState passes Pipeline board issues through extras', () => {
   assert.equal(Array.isArray(tower.waiting_issues) ? tower.waiting_issues.length : 0, 0);
 });
 
+test('towerState preserves QA phase / role / priority on Pipeline rows', () => {
+  const sessions = [{
+    key: 'paperclip:qa', id: 'qa', agent: 'paperclip', project: 'QA Engineer',
+    status: 'thinking', title: 'reviewing',
+    pc: '47312222-173f-478e-bdb3-c36938e012dd',
+  }];
+  const tower = WF.towerState(sessions, {
+    pipeline: [
+      {
+        id: 'qa-wait', identifier: 'SWA-3412', title: 'QA: SWA-3409', status: 'todo',
+        assigneeAgentId: '47312222-173f-478e-bdb3-c36938e012dd', assigneeName: 'QA Engineer',
+        assigneeRole: 'qa', qaPhase: 'waiting', priority: 'high',
+        url: 'https://paperclip.s-w.art/SWA/issues/SWA-3412',
+      },
+      {
+        id: 'qa-active', identifier: 'SWA-3410', title: 'QA: SWA-3408', status: 'in_progress',
+        assigneeAgentId: '47312222-173f-478e-bdb3-c36938e012dd', assigneeName: 'QA Engineer',
+        assigneeRole: 'qa', qaPhase: 'active', priority: 'medium',
+        url: 'https://paperclip.s-w.art/SWA/issues/SWA-3410',
+      },
+      {
+        id: 'code', identifier: 'SWA-3424', title: 'Pipeline nested QA', status: 'in_progress',
+        assigneeName: 'Code Master 1', assigneeRole: 'engineer',
+        url: 'https://paperclip.s-w.art/SWA/issues/SWA-3424',
+      },
+    ],
+  });
+  assert.equal(tower.pipeline.length, 3);
+  assert.equal(tower.pipeline[0].qaPhase, 'waiting');
+  assert.equal(tower.pipeline[0].assigneeRole, 'qa');
+  assert.equal(tower.pipeline[0].priority, 'high');
+  assert.equal(tower.pipeline[1].qaPhase, 'active');
+  assert.equal(tower.pipeline[2].qaPhase, null);
+  // Role-only fallback when qaPhase omitted (older poller).
+  const fallback = WF.towerState(sessions, {
+    pipeline: [{
+      id: 'legacy', identifier: 'SWA-1', title: 'legacy QA row', status: 'in_progress',
+      assigneeRole: 'qa', assigneeName: 'QA Engineer',
+    }],
+  });
+  assert.equal(fallback.pipeline[0].qaPhase, 'active');
+});
+
 test('towerState moves blocked issues into waiting_issues (not Pipeline)', () => {
   const sessions = [{
     key: 'paperclip:qa', id: 'qa', agent: 'paperclip', project: 'QA Engineer',

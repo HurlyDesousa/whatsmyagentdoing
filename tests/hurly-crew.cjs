@@ -201,8 +201,8 @@ test('pipeline lists active board issues with assignee and issue URL', () => {
   const qa = '47312222-173f-478e-bdb3-c36938e012dd';
   w.ingestLive({
     agents: [
-      agent(cm1, 'Code Master 1', 'running'),
-      agent(qa, 'QA Engineer', 'idle'),
+      agent(cm1, 'Code Master 1', 'running', { role: 'engineer' }),
+      agent(qa, 'QA Engineer', 'idle', { role: 'qa' }),
     ],
     issues: [
       { id: 'a', identifier: 'SWA-3263', title: 'Pipeline sidebar', status: 'in_progress', assigneeAgentId: cm1, updatedAt: '2026-11-06T11:00:00.000Z' },
@@ -221,6 +221,8 @@ test('pipeline lists active board issues with assignee and issue URL', () => {
   assert.match(pipe[0].url, /\/SWA\/issues\/SWA-3263$/);
   assert.equal(pipe[1].identifier, 'SWA-3258');
   assert.equal(pipe[1].status, 'in_review');
+  assert.equal(pipe[1].qaPhase, 'waiting');
+  assert.equal(pipe[1].assigneeRole, 'qa');
   assert.equal(pipe[2].identifier, 'SWA-10');
   assert.equal(pipe[2].status, 'todo');
   assert.ok(!pipe.some((p) => p.status === 'blocked'));
@@ -229,10 +231,68 @@ test('pipeline lists active board issues with assignee and issue URL', () => {
   assert.equal(waiting[0].identifier, 'SWA-3363');
   assert.equal(waiting[0].status, 'blocked');
   assert.equal(waiting[0].assigneeName, 'QA Engineer');
+  assert.equal(waiting[0].qaPhase, null); // blocked → Waiting on me, not QA sub-queue
   assert.match(waiting[0].url, /\/SWA\/issues\/SWA-3363$/);
   const snap = snapshot(w, { hurly: true });
   assert.equal(snap.pipeline.length, 3);
   assert.equal(snap.pipeline[0].identifier, 'SWA-3263');
   assert.equal(snap.waiting_issues.length, 1);
   assert.equal(snap.waiting_issues[0].identifier, 'SWA-3363');
+});
+
+test('pipeline QA phases: waiting vs active from role; linked parent; no title matching', () => {
+  const w = crew();
+  const cm1 = 'a08c0cb1-355a-4cd6-ade3-91fe773d05ea';
+  const qa = '47312222-173f-478e-bdb3-c36938e012dd';
+  const parentId = 'parent-3409';
+  w.ingestLive({
+    agents: [
+      agent(cm1, 'Code Master 1', 'running', { role: 'engineer' }),
+      agent(qa, 'QA Engineer', 'running', { role: 'qa' }),
+    ],
+    issues: [
+      {
+        id: parentId, identifier: 'SWA-3409', title: 'mobile readiness', status: 'in_review',
+        assigneeAgentId: cm1, priority: 'high', updatedAt: '2026-11-09T10:00:00.000Z',
+      },
+      {
+        id: 'qa-child', identifier: 'SWA-3412', title: 'QA: SWA-3409 mobile readiness (PR #49)',
+        status: 'todo', assigneeAgentId: qa, parentId, priority: 'high', updatedAt: '2026-11-09T10:05:00.000Z',
+      },
+      {
+        id: 'qa-active', identifier: 'SWA-3410', title: 'QA: SWA-3408 Activity tile',
+        status: 'in_progress', assigneeAgentId: qa, priority: 'medium', updatedAt: '2026-11-09T11:00:00.000Z',
+      },
+      {
+        id: 'fake-title', identifier: 'SWA-9999', title: 'Please do QA on the deploy',
+        status: 'todo', assigneeAgentId: cm1, updatedAt: '2026-11-09T09:00:00.000Z',
+      },
+      {
+        id: 'blocked-qa', identifier: 'SWA-3363', title: 'Fleet maintenance',
+        status: 'blocked', assigneeAgentId: qa, priority: 'high',
+        unblockDescriptor: { action: 'Need board decision on access hold' },
+        updatedAt: '2026-11-09T08:00:00.000Z',
+      },
+    ],
+    runs: [],
+  });
+  const pipe = w.pipeline();
+  const byId = Object.fromEntries(pipe.map((p) => [p.identifier, p]));
+  assert.equal(byId['SWA-3412'].qaPhase, 'waiting');
+  assert.equal(byId['SWA-3412'].assigneeRole, 'qa');
+  assert.equal(byId['SWA-3410'].qaPhase, 'active');
+  assert.equal(byId['SWA-3409'].qaPhase, 'waiting'); // linked parent of open QA child
+  assert.equal(byId['SWA-3409'].qaLinked, true);
+  assert.equal(byId['SWA-3409'].priority, 'high');
+  assert.equal(byId['SWA-9999'].qaPhase, null); // title-only must not classify
+  assert.ok(!pipe.some((p) => p.identifier === 'SWA-3363'));
+  const waiting = w.waitingIssues();
+  assert.equal(waiting.length, 1);
+  assert.equal(waiting[0].identifier, 'SWA-3363');
+  assert.equal(waiting[0].qaPhase, null);
+  assert.equal(waiting[0].blockerText, 'Need board decision on access hold');
+  assert.equal(waiting[0].priority, 'high');
+  // No duplicate ids across pipeline + waiting.
+  const ids = [...pipe, ...waiting].map((p) => p.id);
+  assert.equal(ids.length, new Set(ids).size);
 });
