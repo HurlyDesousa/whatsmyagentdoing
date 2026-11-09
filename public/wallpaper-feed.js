@@ -1321,8 +1321,8 @@
       schedule: r.schedule || '',
       next_run: r.next_run || null,
     })).filter((r) => r.routine);
-    // Active Paperclip board issues from the Hurly crew poller (Pipeline card).
-    const pipeline = (Array.isArray(extra.pipeline) ? extra.pipeline : []).map((p) => {
+    // Active Paperclip board issues from the Hurly crew poller (Pipeline / Waiting on me).
+    const mapIssue = (p) => {
       if (!p || typeof p !== 'object') return null;
       const identifier = String(p.identifier || '').trim();
       if (!identifier) return null;
@@ -1337,7 +1337,16 @@
         updatedAt: p.updatedAt || null,
         url: p.url || paperclipIssueUrl(identifier),
       };
-    }).filter(Boolean);
+    };
+    const rawPipeline = (Array.isArray(extra.pipeline) ? extra.pipeline : []).map(mapIssue).filter(Boolean);
+    // Display grouping (SWA-3404): blocked → Waiting on me; never duplicate into Pipeline.
+    const fromWaiting = (Array.isArray(extra.waiting_issues) ? extra.waiting_issues : []).map(mapIssue).filter(Boolean);
+    const blockedFromPipe = rawPipeline.filter((p) => p.status === 'blocked');
+    const waiting_issues = fromWaiting.length
+      ? fromWaiting
+      : blockedFromPipe;
+    const waitingIds = new Set(waiting_issues.map((p) => p.id || p.identifier));
+    const pipeline = rawPipeline.filter((p) => p.status !== 'blocked' && !waitingIds.has(p.id || p.identifier));
     return {
       version: 1,
       now: nowIso,
@@ -1364,6 +1373,7 @@
       })),
       routines,
       pipeline,
+      waiting_issues,
     };
   }
 

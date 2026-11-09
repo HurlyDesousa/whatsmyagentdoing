@@ -11,6 +11,7 @@
  * State fields read: bots, floors, feed, usage, demo, now, summary, plus (bots-only mode, may be missing):
  *   bots[id].chat_url, bots[id].paperclip_agent_id, state.finished [{ t, bot, name, step }], state.routines [{ bot, name, routine, schedule, next_run }],
  *   state.pipeline [{ id, identifier, title, status, assigneeName, assigneeAgentId, url, updatedAt }],
+ *   state.waiting_issues [{ …same shape… }]  // blocked board issues (Waiting on me; excluded from Pipeline),
  *   bots[id].last_seen (its own last status line), bots[id].unreported { from, to } (usage rose, no status line),
  *   state.check { t, bots: [{ id, name, at }] } (a status check: who has answered).
  *
@@ -795,6 +796,7 @@ function setWaitBlur(on, save = true) {
   setAttr(d.waiting.eye, 'aria-label', d.blurred ? 'Show this panel' : 'Hide this panel for the camera');
   setAttr(d.waiting.eye, 'title', d.blurred ? 'Show' : 'Hide for the camera');
   d.wlist.inert = d.blurred;
+  if (d.wilist) d.wilist.inert = d.blurred;
   if (save) lsSet(LS_BLUR, d.blurred ? '1' : '0');
 }
 
@@ -806,9 +808,10 @@ function buildDock(floors, feed) {
   const finished = dockCard('finished', 'Finished');
   const routines = dockCard('routines', 'Routines');
 
+  const wilist = h('ul', { class: 'bhq-plist bhq-wilist', role: 'list' });
   const wlist = h('div', { class: 'bhq-wlist' });
   const wempty = h('p', { class: 'bhq-note', text: 'Nothing is waiting on you.', hidden: true });
-  waiting.inner.append(wlist, wempty);
+  waiting.inner.append(wilist, wlist, wempty);
 
   const plist = h('ul', { class: 'bhq-plist', role: 'list' });
   const pempty = h('p', { class: 'bhq-note', text: 'Nothing in the pipeline.', hidden: true });
@@ -841,9 +844,9 @@ function buildDock(floors, feed) {
   document.body.append(root);
 
   U.dock = {
-    root, check, waiting, pipeline, finished, routines, wlist, wempty, plist, pempty, pmore, tl, fempty, rl, rempty, cl, cnote,
-    lru: [], wrows: new Map(), prows: new Map(), crows: new Map(), checkT: null, finSig: null, finRefs: [],
-    pipeSig: null, pipeExpanded: false, pipeShown: 0, pipeState: null, routSig: null, routRefs: [], copied: new Map(), blurred: false,
+    root, check, waiting, pipeline, finished, routines, wilist, wlist, wempty, plist, pempty, pmore, tl, fempty, rl, rempty, cl, cnote,
+    lru: [], wrows: new Map(), wprows: new Map(), prows: new Map(), crows: new Map(), checkT: null, finSig: null, finRefs: [],
+    pipeSig: null, pipeExpanded: false, pipeShown: 0, pipeState: null, waitIssueSig: null, routSig: null, routRefs: [], copied: new Map(), blurred: false,
     floors, feed,
   };
   pipeline.pipeShown = 0;
@@ -1702,7 +1705,27 @@ function renderCheck(state) {
       : 'Started ' + hhmm(started) + '. Each bot ticks off when its own status line arrives.');
 }
 
-/* Waiting on me: every bot that is waiting for the user or in error, newest first. */
+/* Waiting on me: blocked board issues + bots waiting for the user / in error.
+ * Blocked cards are display-grouped here (not Pipeline) — SWA-3404. */
+
+/** Blocked issues for Waiting on me; never overlap Pipeline. */
+function waitingIssueItems(state) {
+  const explicit = Array.isArray(state && state.waiting_issues) ? state.waiting_issues : [];
+  const fromField = explicit.filter((p) => p && p.identifier);
+  if (fromField.length) return fromField;
+  // Backward-compatible: older snapshots still put blocked rows in pipeline.
+  const pipe = Array.isArray(state && state.pipeline) ? state.pipeline : [];
+  return pipe.filter((p) => p && p.identifier && String(p.status || '').toLowerCase() === 'blocked');
+}
+
+function pipelineItems(state) {
+  const pipe = Array.isArray(state && state.pipeline) ? state.pipeline : [];
+  const waiting = waitingIssueItems(state);
+  const waitIds = new Set(waiting.map((p) => p.id || p.identifier));
+  return pipe.filter((p) => p && p.identifier
+    && String(p.status || '').toLowerCase() !== 'blocked'
+    && !waitIds.has(p.id || p.identifier));
+}
 
 function makeWaitRow(id) {
   const av = makeAva();
@@ -1740,16 +1763,41 @@ function makeWaitRow(id) {
 function renderWaiting(state) {
   const d = U.dock;
   const bots = state.bots || {};
+  const issues = waitingIssueItems(state);
   const ids = Object.keys(bots)
     .filter((id) => { const s = effStatus(bots[id]); return s === 'waiting_user' || s === 'error'; })
     .sort((a, b) => (parseTs(bots[b].last_event) || 0) - (parseTs(bots[a].last_event) || 0)
       || String(bots[a].name).localeCompare(String(bots[b].name)));
 
+  const total = issues.length + ids.length;
   const errors = ids.filter((id) => effStatus(bots[id]) === 'error').length;
-  setText(d.waiting.count, ids.length);
-  d.waiting.rows = ids.length;
-  setCls(d.waiting.root, 'has-rows', ids.length > 0);
-  setAttr(d.waiting.count, 'data-s', errors ? 'error' : ids.length ? 'waiting_user' : null);
+  setText(d.waiting.count, total);
+  d.waiting.rows = total;
+  setCls(d.waiting.root, 'has-rows', total > 0);
+  setAttr(d.waiting.count, 'data-s', errors ? 'error' : total ? 'waiting_user' : null);
+
+  // Blocked board issues (same title-first cards as Pipeline used to show for Blocked).
+  const issueSig = issues.map((p) => [p.identifier, p.status, p.title, p.assigneeName || '', p.url || ''].join('|')).join('\n');
+  if (issueSig !== d.waitIssueSig) {
+    d.waitIssueSig = issueSig;
+    const seenIssues = new Set();
+    const issueEls = issues.map((item) => {
+      const id = item.id || item.identifier;
+      seenIssues.add(id);
+      let r = d.wprows.get(id);
+      if (!r) { r = makePipeRow(id); d.wprows.set(id, r); }
+      paintPipeRow(r, state, item);
+      return r.li;
+    });
+    for (const [id, r] of d.wprows) if (!seenIssues.has(id)) { r.li.remove(); d.wprows.delete(id); }
+    reconcile(d.wilist, issueEls, 0);
+  } else {
+    for (const [id, r] of d.wprows) {
+      const item = issues.find((p) => (p.id || p.identifier) === id);
+      if (item) paintPipeRow(r, state, item);
+    }
+  }
+  setHidden(d.wilist, issues.length === 0);
 
   const seen = new Set(ids);
   for (const [id, r] of d.wrows) {
@@ -1776,10 +1824,11 @@ function renderWaiting(state) {
     return r.row;
   });
   reconcile(d.wlist, els, 0);
-  setHidden(d.wempty, ids.length > 0);
+  setHidden(d.wempty, total > 0);
 }
 
-/* Pipeline: every active Paperclip board issue (todo / in_progress / in_review / blocked).
+/* Pipeline: active Paperclip board issues (todo / in_progress / in_review).
+ * Blocked issues are grouped under Waiting on me (SWA-3404).
  * Title-first task cards (not ticket/SHA log lines): human title → status badge → owner · id. */
 
 const PIPE_UI = {
@@ -1847,7 +1896,7 @@ function paintPipeRow(r, state, item) {
 function renderPipeline(state) {
   const d = U.dock;
   d.pipeState = state;
-  const items = Array.isArray(state.pipeline) ? state.pipeline.filter((p) => p && p.identifier) : [];
+  const items = pipelineItems(state);
   setText(d.pipeline.count, items.length);
   d.pipeline.rows = items.length;
   setCls(d.pipeline.root, 'has-rows', items.length > 0);
