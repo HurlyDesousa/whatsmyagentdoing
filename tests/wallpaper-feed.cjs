@@ -286,6 +286,45 @@ test('towerState passes Pipeline board issues through extras', () => {
   assert.equal(tower.pipeline[0].assigneeName, 'Code Master 1');
   assert.equal(tower.pipeline[0].url, 'https://paperclip.s-w.art/SWA/issues/SWA-3263');
   assert.equal(WF.towerState(sessions, {}).pipeline.length, 0);
+  assert.equal(Array.isArray(tower.waiting_issues) ? tower.waiting_issues.length : 0, 0);
+});
+
+test('towerState moves blocked issues into waiting_issues (not Pipeline)', () => {
+  const sessions = [{
+    key: 'paperclip:qa', id: 'qa', agent: 'paperclip', project: 'QA Engineer',
+    status: 'idle', title: 'idle',
+  }];
+  const blocked = {
+    id: 'blocked-1',
+    identifier: 'SWA-3363',
+    title: 'Fleet maintenance',
+    status: 'blocked',
+    assigneeAgentId: '47312222-173f-478e-bdb3-c36938e012dd',
+    assigneeName: 'QA Engineer',
+    updatedAt: '2026-11-08T12:00:00.000Z',
+    url: 'https://paperclip.s-w.art/SWA/issues/SWA-3363',
+  };
+  const active = {
+    id: 'active-1',
+    identifier: 'SWA-3263',
+    title: 'office sidebar Pipeline',
+    status: 'in_progress',
+    assigneeName: 'Code Master 1',
+    url: 'https://paperclip.s-w.art/SWA/issues/SWA-3263',
+  };
+  // Legacy extras: blocked still nested inside pipeline → split client-side.
+  const legacy = WF.towerState(sessions, { pipeline: [active, blocked] });
+  assert.equal(legacy.pipeline.length, 1);
+  assert.equal(legacy.pipeline[0].identifier, 'SWA-3263');
+  assert.equal(legacy.waiting_issues.length, 1);
+  assert.equal(legacy.waiting_issues[0].identifier, 'SWA-3363');
+  assert.equal(legacy.waiting_issues[0].status, 'blocked');
+  // New extras: server already split waiting_issues.
+  const split = WF.towerState(sessions, { pipeline: [active], waiting_issues: [blocked] });
+  assert.equal(split.pipeline.length, 1);
+  assert.equal(split.waiting_issues.length, 1);
+  assert.equal(split.waiting_issues[0].identifier, 'SWA-3363');
+  assert.ok(!split.pipeline.some((p) => p.status === 'blocked'));
 });
 
 test('config lines stay after the relay window drops them', async () => {
