@@ -10,8 +10,9 @@
  *
  * State fields read: bots, floors, feed, usage, demo, now, summary, plus (bots-only mode, may be missing):
  *   bots[id].chat_url, bots[id].paperclip_agent_id, state.finished [{ t, bot, name, step }], state.routines [{ bot, name, routine, schedule, next_run }],
- *   state.pipeline [{ id, identifier, title, status, assigneeName, assigneeAgentId, url, updatedAt }],
+ *   state.pipeline [{ id, identifier, title, status, priority, assigneeName, assigneeAgentId, assigneeRole, qaPhase, qaLinked, blockerText, url, updatedAt }],
  *   state.waiting_issues [{ …same shape… }]  // blocked board issues (Waiting on me; excluded from Pipeline),
+ *   // Pipeline nests a QA sub-queue (waiting | active) from qaPhase / assigneeRole=qa / linked QA parents — SWA-3424.
  *   bots[id].last_seen (its own last status line), bots[id].unreported { from, to } (usage rose, no status line),
  *   state.check { t, bots: [{ id, name, at }] } (a status check: who has answered).
  *
@@ -814,6 +815,21 @@ function buildDock(floors, feed) {
   const wempty = h('p', { class: 'bhq-note', text: 'Nothing is waiting on you.', hidden: true });
   waiting.inner.append(wilist, wlist, wempty);
 
+  // Nested QA sub-queue inside Pipeline (SWA-3424): Waiting QA + In QA, then the rest.
+  const pqa = h('div', { class: 'bhq-pqa', hidden: true, 'aria-label': 'QA sub-queue' });
+  const pqaHead = h('div', { class: 'bhq-pqa-head' },
+    h('span', { class: 'bhq-pqa-title', text: 'QA' }),
+    h('span', { class: 'bhq-pqa-count bhq-num', text: '0' }));
+  const pqaWait = h('div', { class: 'bhq-pqa-group', 'data-qa': 'waiting', hidden: true });
+  const pqaWaitLabel = h('div', { class: 'bhq-pqa-label', text: 'Waiting QA' });
+  const pqaWaitList = h('ul', { class: 'bhq-plist bhq-pqa-list', role: 'list' });
+  pqaWait.append(pqaWaitLabel, pqaWaitList);
+  const pqaActive = h('div', { class: 'bhq-pqa-group', 'data-qa': 'active', hidden: true });
+  const pqaActiveLabel = h('div', { class: 'bhq-pqa-label', text: 'In QA' });
+  const pqaActiveList = h('ul', { class: 'bhq-plist bhq-pqa-list', role: 'list' });
+  pqaActive.append(pqaActiveLabel, pqaActiveList);
+  pqa.append(pqaHead, pqaWait, pqaActive);
+
   const plist = h('ul', { class: 'bhq-plist', role: 'list' });
   const pempty = h('p', { class: 'bhq-note', text: 'Nothing in the pipeline.', hidden: true });
   const pmore = h('button', {
@@ -826,7 +842,7 @@ function buildDock(floors, feed) {
     if (d.pipeState) renderPipeline(d.pipeState);
     fitDock(d.avail == null ? Infinity : d.avail);
   });
-  pipeline.inner.append(plist, pempty, pmore);
+  pipeline.inner.append(pqa, plist, pempty, pmore);
 
   const tl = h('ol', { class: 'bhq-tl', role: 'list' });
   const fempty = h('p', { class: 'bhq-note', text: 'Nothing finished in the last 24 hours.', hidden: true });
@@ -845,8 +861,10 @@ function buildDock(floors, feed) {
   document.body.append(root);
 
   U.dock = {
-    root, check, waiting, pipeline, finished, routines, wilist, wlist, wempty, plist, pempty, pmore, tl, fempty, rl, rempty, cl, cnote,
-    lru: [], wrows: new Map(), wprows: new Map(), prows: new Map(), crows: new Map(), checkT: null, finSig: null, finRefs: [],
+    root, check, waiting, pipeline, finished, routines, wilist, wlist, wempty, plist, pempty, pmore,
+    pqa, pqaHead, pqaWait, pqaActive, pqaWaitList, pqaActiveList,
+    tl, fempty, rl, rempty, cl, cnote,
+    lru: [], wrows: new Map(), wprows: new Map(), prows: new Map(), qrows: new Map(), crows: new Map(), checkT: null, finSig: null, finRefs: [],
     pipeSig: null, pipeExpanded: false, pipeShown: 0, pipeState: null, waitIssueSig: null, routSig: null, routRefs: [], copied: new Map(), blurred: false,
     floors, feed,
   };
@@ -1730,6 +1748,36 @@ function pipelineItems(state) {
     && !waitIds.has(p.id || p.identifier));
 }
 
+/** Resolve QA sub-queue phase from server qaPhase or assigneeRole fallback. */
+function resolveQaPhase(item) {
+  if (!item) return null;
+  if (item.qaPhase === 'waiting' || item.qaPhase === 'active') return item.qaPhase;
+  const st = String(item.status || '').toLowerCase();
+  if (st === 'blocked') return null;
+  const role = String(item.assigneeRole || '').toLowerCase();
+  if (role === 'qa') return st === 'in_progress' ? 'active' : 'waiting';
+  if (item.qaLinked) return 'waiting';
+  return null;
+}
+
+/** Split Pipeline into nested QA groups + remainder (no duplicates). */
+function splitPipelineQa(items) {
+  const waiting = [];
+  const active = [];
+  const rest = [];
+  const seen = new Set();
+  for (const item of items || []) {
+    const id = item && (item.id || item.identifier);
+    if (!item || !id || seen.has(id)) continue;
+    seen.add(id);
+    const phase = resolveQaPhase(item);
+    if (phase === 'active') active.push(item);
+    else if (phase === 'waiting') waiting.push(item);
+    else rest.push(item);
+  }
+  return { waiting, active, rest, qaCount: waiting.length + active.length };
+}
+
 function makeWaitRow(id) {
   const av = makeAva();
   const name = h('button', { class: 'bhq-wname', type: 'button' });
@@ -1863,13 +1911,21 @@ function makePipeRow(id) {
   const title = h('div', { class: 'bhq-ptitle' });
   const st = h('span', { class: 'bhq-pst' });
   const who = h('span', { class: 'bhq-pwho' });
+  const pri = h('span', { class: 'bhq-ppri', hidden: true });
   const ident = h('span', { class: 'bhq-pid' });
-  const meta = h('div', { class: 'bhq-pmeta' }, who, h('span', { class: 'bhq-pdot', 'aria-hidden': 'true', text: '·' }), ident);
+  const meta = h('div', { class: 'bhq-pmeta' },
+    who,
+    h('span', { class: 'bhq-pdot', 'aria-hidden': 'true', text: '·' }),
+    pri,
+    h('span', { class: 'bhq-pdot bhq-pdot--pri', 'aria-hidden': 'true', text: '·' }),
+    ident);
+  const block = h('div', { class: 'bhq-pblock', hidden: true });
   const li = h('li', { class: 'bhq-prow', 'data-id': id, role: 'button', tabindex: '0' },
     av.root,
     h('div', { class: 'bhq-pmain' },
       h('div', { class: 'bhq-ptop' }, title, st),
-      meta));
+      meta,
+      block));
   const open = () => {
     const url = li.getAttribute('data-url');
     if (url) openChat(id, url);
@@ -1878,14 +1934,18 @@ function makePipeRow(id) {
   li.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
   });
-  return { li, av, ident, st, title, who };
+  return { li, av, ident, st, title, who, pri, block };
 }
 
 function paintPipeRow(r, state, item) {
-  const ui = PIPE_UI[item.status] || PIPE_UI.todo;
+  const phase = resolveQaPhase(item);
+  let ui = PIPE_UI[item.status] || PIPE_UI.todo;
+  if (phase === 'waiting') ui = { s: 'waiting_user', label: 'Waiting QA' };
+  else if (phase === 'active') ui = { s: 'working', label: 'In QA' };
   const bot = botForAssignee(state, item);
   const title = item.title || item.identifier;
   setAttr(r.li, 'data-s', ui.s);
+  setAttr(r.li, 'data-qa', phase || null);
   setAttr(r.li, 'data-url', item.url || null);
   setAttr(r.li, 'title', item.identifier + (title && title !== item.identifier ? ' — ' + title : ''));
   setAttr(r.li, 'aria-label', (title || item.identifier) + ', ' + ui.label + ', ' + (item.assigneeName || 'Unassigned'));
@@ -1893,55 +1953,91 @@ function paintPipeRow(r, state, item) {
   setText(r.title, title);
   setText(r.st, ui.label);
   setText(r.who, item.assigneeName || 'Unassigned');
+  const priority = item.priority ? String(item.priority) : '';
+  setHidden(r.pri, !priority);
+  setText(r.pri, priority);
+  const priDot = r.pri.nextElementSibling;
+  if (priDot && priDot.classList.contains('bhq-pdot--pri')) setHidden(priDot, !priority);
   setText(r.ident, item.identifier);
+  const blocker = item.blockerText ? String(item.blockerText) : '';
+  setHidden(r.block, !blocker);
+  setText(r.block, blocker);
+}
+
+function paintPipeList(map, listEl, items, state, seen) {
+  const els = (items || []).map((item) => {
+    const id = item.id || item.identifier;
+    seen.add(id);
+    let r = map.get(id);
+    if (!r) { r = makePipeRow(id); map.set(id, r); }
+    paintPipeRow(r, state, item);
+    return r.li;
+  });
+  reconcile(listEl, els, 0);
+  return els.length;
 }
 
 function renderPipeline(state) {
   const d = U.dock;
   d.pipeState = state;
   const items = pipelineItems(state);
+  const { waiting: qaWait, active: qaActive, rest, qaCount } = splitPipelineQa(items);
   setText(d.pipeline.count, items.length);
   d.pipeline.rows = items.length;
   setCls(d.pipeline.root, 'has-rows', items.length > 0);
   setAttr(d.pipeline.count, 'data-s', items.length ? 'working' : null);
   setHidden(d.pempty, items.length > 0);
 
-  if (items.length <= PIPE_PEEK) d.pipeExpanded = false;
-  const expanded = !!d.pipeExpanded;
-  const visible = expanded || items.length <= PIPE_PEEK ? items : items.slice(0, PIPE_PEEK);
-  d.pipeShown = visible.length;
-  d.pipeline.pipeShown = visible.length;
+  // Nested QA group: always fully listed when present (small); peek applies to non-QA rest.
+  setHidden(d.pqa, qaCount === 0);
+  if (d.pqaHead) {
+    const countEl = d.pqaHead.querySelector('.bhq-pqa-count');
+    if (countEl) setText(countEl, qaCount);
+  }
+  setHidden(d.pqaWait, qaWait.length === 0);
+  setHidden(d.pqaActive, qaActive.length === 0);
 
-  const moreLeft = items.length - visible.length;
-  setHidden(d.pmore, items.length <= PIPE_PEEK);
+  if (rest.length <= PIPE_PEEK) d.pipeExpanded = false;
+  const expanded = !!d.pipeExpanded;
+  const visibleRest = expanded || rest.length <= PIPE_PEEK ? rest : rest.slice(0, PIPE_PEEK);
+  d.pipeShown = qaCount + visibleRest.length;
+  d.pipeline.pipeShown = d.pipeShown;
+
+  const moreLeft = rest.length - visibleRest.length;
+  setHidden(d.pmore, rest.length <= PIPE_PEEK);
   setAttr(d.pmore, 'aria-expanded', expanded ? 'true' : 'false');
   setText(d.pmore, expanded
     ? 'Show less'
     : ('Show ' + moreLeft + ' more'));
 
-  const sig = [expanded ? '1' : '0', items.map((p) => [p.identifier, p.status, p.title, p.assigneeName || '', p.url || ''].join('|')).join('\n')].join('\n');
+  const rowSig = (p) => [p.identifier, p.status, p.qaPhase || resolveQaPhase(p) || '', p.title, p.assigneeName || '', p.priority || '', p.blockerText || '', p.url || ''].join('|');
+  const sig = [
+    expanded ? '1' : '0',
+    'qaW:' + qaWait.map(rowSig).join('\n'),
+    'qaA:' + qaActive.map(rowSig).join('\n'),
+    'rest:' + visibleRest.map(rowSig).join('\n'),
+  ].join('\n');
   if (sig === d.pipeSig) {
-    // Still refresh relative avatars / status tints if bots moved.
+    for (const [id, r] of d.qrows) {
+      const item = items.find((p) => (p.id || p.identifier) === id);
+      if (item) paintPipeRow(r, state, item);
+    }
     for (const [id, r] of d.prows) {
       const item = items.find((p) => (p.id || p.identifier) === id);
-      if (!item) continue;
-      paintPipeRow(r, state, item);
+      if (item) paintPipeRow(r, state, item);
     }
     return;
   }
   d.pipeSig = sig;
 
-  const seen = new Set();
-  const els = visible.map((item) => {
-    const id = item.id || item.identifier;
-    seen.add(id);
-    let r = d.prows.get(id);
-    if (!r) { r = makePipeRow(id); d.prows.set(id, r); }
-    paintPipeRow(r, state, item);
-    return r.li;
-  });
-  for (const [id, r] of d.prows) if (!seen.has(id)) { r.li.remove(); d.prows.delete(id); }
-  reconcile(d.plist, els, 0);
+  const seenQa = new Set();
+  paintPipeList(d.qrows, d.pqaWaitList, qaWait, state, seenQa);
+  paintPipeList(d.qrows, d.pqaActiveList, qaActive, state, seenQa);
+  for (const [id, r] of d.qrows) if (!seenQa.has(id)) { r.li.remove(); d.qrows.delete(id); }
+
+  const seenRest = new Set();
+  paintPipeList(d.prows, d.plist, visibleRest, state, seenRest);
+  for (const [id, r] of d.prows) if (!seenRest.has(id)) { r.li.remove(); d.prows.delete(id); }
 }
 
 /** Brief busy state on the selected bot's Start CTA while resume is in flight. */

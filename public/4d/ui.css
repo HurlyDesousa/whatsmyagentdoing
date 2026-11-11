@@ -486,6 +486,50 @@
 /* Match other open dock cards — body scrolls when the floors→feed gap is tight (SWA-3317). */
 .bhq-dcard[data-dock="pipeline"].is-open.has-rows { min-height: 140px; }
 .bhq-plist { display: flex; flex-direction: column; gap: 8px; }
+
+/* Nested QA sub-queue inside Pipeline (SWA-3424) — Waiting QA vs In QA */
+.bhq-pqa {
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 0 0 10px; padding: 8px 8px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06);
+}
+.bhq-pqa[hidden] { display: none !important; }
+.bhq-pqa-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 0 4px 2px;
+}
+.bhq-pqa-title {
+  color: var(--hi); font: 800 12px/1.2 var(--bhq-round); letter-spacing: .04em; text-transform: uppercase;
+}
+.bhq-pqa-count {
+  min-width: 1.4em; text-align: center; padding: 1px 7px; border-radius: 999px;
+  background: rgba(255, 178, 58, .18); color: #FFD28E;
+  font: 800 11px/1.3 var(--bhq-round);
+}
+.bhq-pqa-group { display: flex; flex-direction: column; gap: 6px; }
+.bhq-pqa-group[hidden] { display: none !important; }
+.bhq-pqa-label {
+  padding: 0 4px;
+  color: var(--mid); font: 700 11px/1.2 var(--bhq-round); letter-spacing: .02em;
+}
+.bhq-pqa-group[data-qa="waiting"] .bhq-pqa-label { color: #FFD28E; }
+.bhq-pqa-group[data-qa="active"] .bhq-pqa-label { color: #C2E784; }
+.bhq-pqa-list { gap: 6px; }
+.bhq-prow[data-qa="waiting"] { box-shadow: inset 3px 0 0 rgba(255, 178, 58, .75); }
+.bhq-prow[data-qa="active"] { box-shadow: inset 3px 0 0 rgba(52, 199, 89, .75); }
+.bhq-ppri {
+  flex: none; max-width: 28%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--mid); font: 600 11px/1.25 var(--bhq-round); text-transform: capitalize;
+}
+.bhq-ppri[hidden], .bhq-pdot--pri[hidden] { display: none !important; }
+.bhq-pblock {
+  color: var(--dim); font: 500 11px/1.3 var(--bhq-round);
+  overflow-wrap: anywhere; word-break: break-word;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.bhq-pblock[hidden] { display: none !important; }
 .bhq-prow {
   display: flex; align-items: flex-start; gap: 12px; padding: 12px 12px 12px 10px; border-radius: 16px;
   background: rgba(255, 255, 255, .05); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07);

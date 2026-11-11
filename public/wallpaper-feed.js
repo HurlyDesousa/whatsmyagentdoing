@@ -1327,13 +1327,24 @@
       const identifier = String(p.identifier || '').trim();
       if (!identifier) return null;
       const st = String(p.status || '').toLowerCase();
+      const role = p.assigneeRole ? String(p.assigneeRole).toLowerCase() : null;
+      let qaPhase = p.qaPhase === 'waiting' || p.qaPhase === 'active' ? p.qaPhase : null;
+      // Client fallback when an older poller omitted qaPhase but sent role.
+      if (!qaPhase && role === 'qa' && st !== 'blocked') {
+        qaPhase = st === 'in_progress' ? 'active' : 'waiting';
+      }
       return {
         id: p.id || identifier,
         identifier,
         title: String(p.title || identifier).slice(0, 120),
         status: st,
+        priority: p.priority ? String(p.priority) : null,
         assigneeAgentId: p.assigneeAgentId || null,
         assigneeName: p.assigneeName ? String(p.assigneeName).slice(0, 64) : null,
+        assigneeRole: role,
+        qaPhase,
+        qaLinked: !!p.qaLinked,
+        blockerText: p.blockerText ? String(p.blockerText).slice(0, 120) : null,
         updatedAt: p.updatedAt || null,
         url: p.url || paperclipIssueUrl(identifier),
       };

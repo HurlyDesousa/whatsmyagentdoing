@@ -162,10 +162,81 @@ function statusRank(st) {
   return 9;
 }
 
+/** Paperclip agent role === 'qa' (roster), not issue-title matching. */
+function isQaAgent(agent) {
+  if (!agent || typeof agent !== 'object') return false;
+  return String(agent.role || '').toLowerCase() === 'qa';
+}
+
+function qaAgentIdSet(agents) {
+  const ids = new Set();
+  for (const a of unwrapList(agents)) {
+    if (a && a.id && isQaAgent(a)) ids.add(a.id);
+  }
+  return ids;
+}
+
+/** Parents with an open child assigned to a QA-role agent (linked QA relationship). */
+function linkedQaParentIds(issues, qaIds) {
+  const parents = new Set();
+  if (!qaIds || !qaIds.size) return parents;
+  for (const iss of unwrapList(issues)) {
+    if (!iss || typeof iss !== 'object' || !iss.parentId) continue;
+    const aid = assigneeId(iss);
+    if (!aid || !qaIds.has(aid)) continue;
+    const st = String(iss.status || '').toLowerCase();
+    if (!PIPELINE_STATUSES.has(st) && st !== 'blocked') continue;
+    parents.add(iss.parentId);
+  }
+  return parents;
+}
+
+/** Blocker summary for display only — never mutates source issue fields. */
+function blockerText(iss) {
+  if (!iss || typeof iss !== 'object') return null;
+  const ud = iss.unblockDescriptor;
+  if (ud && typeof ud === 'object') {
+    const action = clip(ud.action || ud.summary || ud.reason, 90);
+    if (action) return action;
+  }
+  const bbs = Array.isArray(iss.blockedBy) ? iss.blockedBy : [];
+  if (bbs.length) {
+    const parts = bbs.map((b) => {
+      if (!b || typeof b !== 'object') return null;
+      const id = b.identifier || '';
+      const title = b.title || '';
+      return clip(`${id} ${title}`.trim(), 48);
+    }).filter(Boolean);
+    if (parts.length) return clip(parts.join(' · '), 90);
+  }
+  return null;
+}
+
+/**
+ * QA sub-queue phase inside Pipeline (SWA-3424).
+ * - assignee role=qa + in_progress → active ("In QA")
+ * - assignee role=qa + todo/in_review → waiting ("Waiting QA")
+ * - linked parent of open QA child → waiting
+ * Blocked status is not classified here (Waiting on me wins — SWA-3404).
+ */
+function qaPhaseFor(iss, agent, qaIds, linkedParents) {
+  if (!iss || typeof iss !== 'object') return null;
+  const st = String(iss.status || '').toLowerCase();
+  if (st === 'blocked') return null;
+  const aid = assigneeId(iss);
+  const assigneeIsQa = !!(aid && qaIds && qaIds.has(aid)) || isQaAgent(agent);
+  const linked = !!(linkedParents && (linkedParents.has(iss.id) || (iss.identifier && linkedParents.has(iss.identifier))));
+  if (!assigneeIsQa && !linked) return null;
+  if (assigneeIsQa && st === 'in_progress') return 'active';
+  return 'waiting';
+}
+
 /** Compact board-issue rows for dock cards (Pipeline / Waiting on me). */
 function buildIssueRows(issues, agents, allowedStatuses, max) {
   const agentList = unwrapList(agents).filter((a) => a && a.id);
   const byId = new Map(agentList.map((a) => [a.id, a]));
+  const qaIds = qaAgentIdSet(agentList);
+  const linkedParents = linkedQaParentIds(issues, qaIds);
   const rows = [];
   for (const iss of unwrapList(issues)) {
     if (!iss || typeof iss !== 'object') continue;
@@ -176,13 +247,20 @@ function buildIssueRows(issues, agents, allowedStatuses, max) {
     const aid = assigneeId(iss);
     const agent = aid && byId.get(aid);
     const assigneeName = (agent && (agent.name || agent.title)) || null;
+    const assigneeRole = agent && agent.role ? String(agent.role).toLowerCase() : null;
+    const phase = qaPhaseFor(iss, agent, qaIds, linkedParents);
     rows.push({
       id: iss.id || identifier,
       identifier,
       title: clip(iss.title || iss.name || '', 90) || identifier,
       status: st,
+      priority: iss.priority ? String(iss.priority) : null,
       assigneeAgentId: aid || null,
       assigneeName: assigneeName ? clip(assigneeName, 48) : null,
+      assigneeRole,
+      qaPhase: phase,
+      qaLinked: !!(phase && !(assigneeRole === 'qa')),
+      blockerText: blockerText(iss),
       updatedAt: iss.updatedAt || iss.startedAt || null,
       url: issueUrl(iss),
     });
@@ -524,4 +602,5 @@ class HurlyCrew extends EventEmitter {
 module.exports = {
   HurlyCrew, CREW, unwrapList, liveActivity, pickIssue, pickRun, normName, nameAliases, resolveAgent,
   buildPipeline, buildWaitingIssues, PIPELINE_STATUSES, PIPELINE_STATUS_Q, WAITING_ISSUE_STATUSES, issueUrl,
+  isQaAgent, qaAgentIdSet, linkedQaParentIds, qaPhaseFor, blockerText,
 };
