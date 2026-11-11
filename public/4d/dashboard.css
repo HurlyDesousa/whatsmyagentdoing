@@ -69,15 +69,26 @@ body:not(.tower-site) :is(#topbar, #floors, #panel, #feed, .bhq-zoom, .bhq-dock,
 #panel {
   position: fixed; z-index: 20; right: var(--gutter, 24px); top: var(--below-top, 96px);
   width: min(var(--panel-w, 352px), calc(100vw - 2 * var(--gutter, 24px)));
-  max-height: calc(100vh - var(--below-top, 96px) - var(--gutter, 24px));
+  /* Leave room for the Activity feed stacked under the right panel (SWA-3408). */
+  max-height: calc(100vh - var(--below-top, 96px) - var(--gutter, 24px) - var(--feed-stack, 168px));
   display: flex; flex-direction: column; pointer-events: none;
 }
 #feed {
-  position: fixed; z-index: 20; left: var(--gutter, 24px); bottom: var(--gutter, 24px);
-  width: min(372px, calc(100vw - 2 * var(--gutter, 24px)));
+  position: fixed; z-index: 20; right: var(--gutter, 24px); bottom: var(--gutter, 24px);
+  left: auto;
+  width: min(var(--panel-w, 352px), calc(100vw - 2 * var(--gutter, 24px)));
 }
 @media (max-width: 1100px) {
+  /* Desktop/tablet without phone sheet: hide fixed right Activity to free the scene.
+     Phone sheet re-shows #feed via .bhq-phone .bhq-sheet #feed (SWA-3408 + SWA-3409). */
   #feed { display: none; }
+  #panel {
+    max-height: calc(100vh - var(--below-top, 96px) - var(--gutter, 24px));
+  }
+}
+/* Phone: panel is a bottom/side sheet — do not reserve desktop --feed-stack headroom. */
+html.bhq-phone #panel {
+  max-height: none;
 }
 
 html[data-theme="dark"] body.tower-site {

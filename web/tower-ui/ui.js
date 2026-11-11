@@ -3,7 +3,7 @@
  *   top-left   brand + live clock         top-center  status counters        top-right  DEMO + usage meter
  *   left       floors "elevator"          right       floor team / bot card
  *   left, under the floors   dock: Status check (while one runs) / Waiting on me / Pipeline / Finished / Routines
- *   bottom-left activity feed (last 4)    bottom-right (left of the card)  zoom - / +
+ *   bottom-right activity feed (last 4), under the bot/team panel    zoom - / + (left of that column)
  *
  *   initUI({ onSelectBot, onSelectFloor, onZoom, onOpenChat, onStartAgent, onClearErrorAgent })
  *   renderUI(state, { currentFloor, selectedBot })   // idempotent, cheap, safe to call every second
@@ -20,11 +20,12 @@
  * All data goes into the DOM through textContent / setAttribute, never innerHTML.
  * The UI text is English. The cards are graphite at every hour; no day/night switch here (see ui.css).
  *
- * Phones (<= 600 px wide, and landscape phones): <html> gets .bhq-phone (+ .bhq-land). The floors become a chip row,
+ * Phones (<= 900 px wide, and landscape phones): <html> gets .bhq-phone (+ .bhq-land). The floors become a chip row,
  * and the floor team, "Waiting on me", Pipeline, Finished, Routines and the activity feed move into one bottom sheet (a grabber, a
  * peek with the floor name and counts, a spring snap between peek and ~60% of the height); the bot card becomes a sheet
  * of its own (swipe down or x to close). Landscape: the sheet is a side column. Desktop is untouched: the same nodes move
  * back when the window grows. ?sheet=open starts with the sheet expanded (for screenshots).
+ * SWA-3409: 900 px matches the CSS that used to hide .bhq-dock, so mid-width no longer loses the queues.
  */
 
 // Resolved against this file, so it works from /web/index.html, from a server rooted at web/, and from the harness.
@@ -860,13 +861,12 @@ function buildDock(floors, feed) {
   waiting.eye.addEventListener('click', () => setWaitBlur(!U.dock.blurred));
   setWaitBlur(lsGet(LS_BLUR) === '1', false);
 
-  // keep the dock between the floors card and the feed, whatever their heights
+  // keep the dock under the floors card down the left column (feed lives on the right now)
   U.onResize = () => layoutDock();
   addEventListener('resize', U.onResize);
   if (typeof ResizeObserver === 'function') {
     U.ro2 = new ResizeObserver(() => layoutDock());
     if (floors) U.ro2.observe(floors);
-    if (feed) U.ro2.observe(feed);
   }
   layoutDock();
 }
@@ -880,7 +880,8 @@ function layoutDock() {
   const gutter = 24;
   // offsetTop/offsetHeight ignore the cards' entrance transform
   const top = shown(d.floors) ? d.floors.offsetTop + d.floors.offsetHeight + 10 : 96;
-  const bottom = shown(d.feed) ? d.feed.offsetTop - 10 : innerHeight - gutter;
+  // Activity feed is on the right under #panel; left dock can use the full column height.
+  const bottom = innerHeight - gutter;
   const avail = Math.max(0, bottom - top);
   setPx(d.root, 'top', top);
   setPx(d.root, 'maxHeight', avail);
@@ -891,7 +892,8 @@ function layoutDock() {
 /* ------------------------------------------------------------------ phones: the floor sheet and the bot sheet */
 
 // the same query as ui.css would use; JS owns it so the DOM and the CSS never disagree
-const MQ_PHONE = '(max-width: 600px), (max-height: 500px) and (max-width: 950px)';
+// SWA-3409: <=900 so tablet/narrow widths keep queues/Activity in the sheet (was 600; dock CSS hid at 900).
+const MQ_PHONE = '(max-width: 900px), (max-height: 500px) and (max-width: 950px)';
 const MQ_LAND = '(max-height: 500px) and (orientation: landscape)';
 const DRAG_HYST = 6;
 
@@ -1142,7 +1144,8 @@ function setPhone(on, land) {
     cardReset();
     if (d) d.root.append(d.waiting.root, d.pipeline.root, d.finished.root, d.routines.root);
     if (p) p.team.append(p.teamHead, p.tcard);
-    if (S.feed) { if (d && d.root.parentNode) d.root.parentNode.insertBefore(S.feed, d.root); else document.body.append(S.feed); }
+    // Activity lives on the right under #panel (SWA-3408); CSS positions #feed — just return it to body.
+    if (S.feed) document.body.append(S.feed);
     for (const k of Object.keys(rootVars)) document.documentElement.style.removeProperty(k);
     rootVars = {};
   } else if (on) {

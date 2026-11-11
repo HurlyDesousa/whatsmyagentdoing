@@ -416,7 +416,7 @@
 .bhq-zoom .bhq-sep { height: 14px; }
 
 /* ====================================================================== dock: waiting on me / finished / routines
-   Three slim cards under the floors; each folds to its header. ui.js sets top and max-height (below the floors, above the feed). */
+   Three slim cards under the floors; each folds to its header. ui.js sets top and max-height (below the floors, down the left column). */
 
 .bhq-dock {
   position: fixed; z-index: 20; left: var(--gutter, 24px); top: 380px;
@@ -633,14 +633,14 @@
   .bhq-word, .bhq-brand .bhq-sep { display: none; }
   .bhq-brand { padding-right: 12px; }
   .bhq-zoom { right: var(--gutter, 24px); bottom: calc(var(--gutter, 24px) + 8px); }
-  .bhq-dock { display: none; }
 }
 
 /* ====================================================================== phones
-   <html class="bhq-phone"> (ui.js, <= 600 px wide or a landscape phone) turns the cards into a native-feeling layout:
+   <html class="bhq-phone"> (ui.js, <= 900 px wide or a landscape phone — SWA-3409) turns the cards into a native-feeling layout:
    one compact top row, the floors as a chip row, ONE bottom sheet (grabber, peek, ~60% open) that holds the floor team,
-   Waiting on me, Finished, Routines and the feed, a sheet for the bot card, the zoom buttons riding above whichever
-   sheet is up, and the 3D view fitted into the free space between the chips and the sheet.
+   Waiting on me, Pipeline, Finished, Routines and the Activity feed (SWA-3408 right placement adapts into the sheet),
+   a sheet for the bot card, the zoom buttons riding above whichever sheet is up, and the 3D view fitted into the free
+   space between the chips and the sheet.
    Vertical stack, top to bottom: safe area, top row 62, chip row 56, the view, the sheet. Touch targets are >= 44 px. */
 
 :root {
@@ -654,7 +654,12 @@
 }
 
 html.bhq-phone { overscroll-behavior: none; -webkit-text-size-adjust: 100%; touch-action: manipulation; } /* no double-tap zoom; pinch stays */
-html.bhq-phone body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+html.bhq-phone, html.bhq-phone body {
+  overflow-x: hidden; max-width: 100%;
+  overscroll-behavior: none; -webkit-tap-highlight-color: transparent;
+}
+/* Dock cards live in the sheet on phone; keep the empty left dock shell out of the way (SWA-3409). */
+html.bhq-phone .bhq-dock { display: none; }
 .bhq-phone :is(#topbar, #floors, #panel, .bhq-zoom, .bhq-sheet) button {
   touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
 }
@@ -841,8 +846,10 @@ html.bhq-phone .bhq-floor[data-alert="error"]::after { background: #FF453A; }
 .bhq-phone .bhq-sheet .bhq-tcard { padding: 6px; flex: none; }
 .bhq-phone .bhq-sheet .bhq-members { overflow: visible; }
 .bhq-phone .bhq-sheet .bhq-member { min-height: 56px; }
+/* SWA-3409: beat dashboard.css `@media (max-width: 1100px) { #feed { display:none } }` while Activity is in the sheet. */
 .bhq-phone .bhq-sheet #feed {
-  position: static; width: auto; display: block; padding: 14px 16px 12px; border-radius: 22px;
+  position: static; left: auto; right: auto; bottom: auto; width: auto;
+  display: block !important; padding: 14px 16px 12px; border-radius: 22px;
 }
 .bhq-phone .bhq-sheet .bhq-frow:nth-child(n+3) { display: flex; }
 /* small buttons keep their look but get a 44 px hit area */
