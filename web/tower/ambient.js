@@ -34,10 +34,10 @@ export const TABLE1_Z = Object.freeze([-3.5, -1.95]);
 export const TABLE2_Z = Object.freeze([0.8, 2.2]);
 export const TABLE_X = Object.freeze([-6.85, 2.25]);
 // Legacy left/right cut (SWA-3195). Ambient still uses it as a soft east/west rail so
-// existing aislePath detours stay stable; the *visual* Websites|Marketing frost wall is
-// the aisle Z-cut (SWA-3378) — see DEPT_DIVIDER_* / crossesAisleDeptDivider.
+// existing aislePath detours stay stable; the *visual* Websites|Research frost wall is
+// the aisle Z-cut (SWA-3378 / SWA-3499) — see DEPT_DIVIDER_* / crossesAisleDeptDivider.
 export const DIVIDER_X = -3.15;
-// SWA-3378: frosted Websites|Marketing wall along +X just south of Marketing stools (z=0.3).
+// SWA-3378 / SWA-3499: frosted Websites|Research wall along +X (z=-0.15); Marketing is on Ops.
 export const DEPT_DIVIDER_Z = -0.15;
 export const DEPT_DIVIDER_X0 = -5.25;
 export const DEPT_DIVIDER_X1 = 0.95;
@@ -191,7 +191,7 @@ export function crossesDeptDivider(x0, x1) {
   return Math.min(x0, x1) < DIVIDER_X && Math.max(x0, x1) > DIVIDER_X;
 }
 
-/** True when a Z segment would walk through the SWA-3378 Websites|Marketing frost wall. */
+/** True when a Z segment would walk through the SWA-3378 / SWA-3499 Websites|Research frost wall. */
 export function crossesAisleDeptDivider(z0, z1, x = null) {
   if (!(Math.min(z0, z1) < DEPT_DIVIDER_Z && Math.max(z0, z1) > DEPT_DIVIDER_Z)) return false;
   if (x == null) return true;

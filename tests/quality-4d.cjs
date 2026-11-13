@@ -118,19 +118,26 @@ test('Main floor keeps Dept A vs B banks when mixed crew lands there', () => {
   }
 });
 
-test('SWA-3378: Main Floor labels/marker/divider use office.glb coords (not placeholder)', () => {
+test('SWA-3378/3499: Main Websites|Research + Ops Trading|Marketing use office.glb coords', () => {
   const fs = require('fs');
   const path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '../web/tower/office.js'), 'utf8');
   assert.match(src, /DEPT_DIVIDER_Z\s*=\s*-0\.15/);
   assert.match(src, /DEPT_DIVIDER_X0\s*=\s*-5\.25/);
   assert.match(src, /DEPT_DIVIDER_X1\s*=\s*0\.95/);
-  // Mid marker on table_2 (z=1.5), spanning bank B columns — not placeholder z=0.8.
-  assert.match(src, /const z = 1\.5;\s*\n\s*const x0 = -5\.4, x1 = 0\.9;/);
   assert.match(src, /websites\.position\.set\(-2\.3,\s*1\.85,\s*-2\.7\)/);
-  assert.match(src, /marketing\.position\.set\(-2\.3,\s*1\.85,\s*0\.3\)/);
   assert.match(src, /research\.position\.set\(-2\.3,\s*1\.85,\s*2\.7\)/);
+  // Trading Desk stays west wall; Marketing on Ops mid-bank, clear of Trading.
   assert.match(src, /label\.position\.set\(-5\.7,\s*1\.9,\s*-2\.7\)/);
+  assert.match(src, /function addMarketingZone/);
+  assert.match(src, /g\.name = 'marketing_zone'/);
+  assert.match(src, /deptLabelSprite\('Marketing',\s*'dept_label_marketing'\)/);
+  assert.match(src, /label\.position\.set\(-2\.3,\s*1\.9,\s*0\.3\)/);
+  // Main nameplates are Websites + Research only; mid Marketing|Research marker retired.
+  const platesFn = src.match(/function addDeptNameplates\(open\) \{[\s\S]*?\n\}/);
+  assert.ok(platesFn, 'addDeptNameplates present');
+  assert.doesNotMatch(platesFn[0], /Marketing|dept_label_marketing/);
+  assert.doesNotMatch(src, /function addMarketingResearchMarker/);
   // Must not keep the old left/right X-wall anchors as the Main Floor cut.
   assert.doesNotMatch(src, /const x0 = -3\.15, z0 = 1\.49/);
   assert.doesNotMatch(src, /marketing\.position\.set\(-0\.6,\s*1\.85,\s*-0\.35\)/);

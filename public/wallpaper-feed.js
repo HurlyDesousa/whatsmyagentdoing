@@ -1122,9 +1122,10 @@
   };
   const FLOOR_RANK = { ops: 0, infra: 1, watch: 2, 'main-floor': 3 };
   const COUNT_KEYS = ['working', 'idle', 'waiting_user', 'error', 'stuck', 'done'];
-  // SWA-3171 / SWA-3378: floors come from wallpaper group (Ops/Infra/Watch + Main floor).
-  // Main Floor Websites zone (desks 1–10). Marketing 11–15 / Research 16–20 stay empty of
-  // dedicated agents — no FE/BE/UI seats invented. Bank seating only when on Main floor.
+  // SWA-3171 / SWA-3378 / SWA-3499: floors come from wallpaper group (Ops/Infra/Watch + Main).
+  // Main Floor Websites zone (desks 1–10). Research 16–20 stay empty of dedicated agents —
+  // no FE/BE/UI/Marketing seats invented. Marketing is an Ops labelled area only (SWA-3499).
+  // Bank seating only when on Main floor.
   const DEPT_A = [
     'dispatcher', 'code master 1', 'code master 2', 'qa engineer', 'qa engineer 2',
   ];

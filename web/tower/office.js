@@ -102,10 +102,10 @@ function finish(templates, spots, nightMaps, source) {
     console.warn('[office] dept divider skipped:', err.message);
   }
   try {
-    // SWA-3378: Marketing|Research mid-bank marker + canvas nameplates + Ops Trading Desk zone.
-    addMarketingResearchMarker(templates.floor_open);
+    // SWA-3378 / SWA-3499: Main Websites|Research nameplates; Ops Trading Desk + Marketing zones.
     addDeptNameplates(templates.floor_open);
     addTradingDeskZone(templates.floor_open);
+    addMarketingZone(templates.floor_open);
   } catch (err) {
     console.warn('[office] dept zones skipped:', err.message);
   }
@@ -475,7 +475,7 @@ export function applyWatchFloor(obj, isWatch) {
 }
 
 /**
- * SWA-3378: Main Floor dept nameplates + mid marker; Ops Trading Desk zone.
+ * SWA-3378 / SWA-3499: Main Floor Websites|Research nameplates; Ops Trading Desk + Marketing.
  * Call after Infra/Watch toggles so floor-specific labels win.
  */
 export function applyDeptZones(obj, floorId) {
@@ -487,10 +487,13 @@ export function applyDeptZones(obj, floorId) {
   const plates = obj.getObjectByName('dept_nameplates');
   const mid = obj.getObjectByName('dept_mid_marker');
   const trading = obj.getObjectByName('trading_desk_zone');
+  const marketing = obj.getObjectByName('marketing_zone');
   const divider = obj.getObjectByName('dept_divider');
   if (plates) plates.visible = main;
-  if (mid) mid.visible = main;
+  // SWA-3499: Marketing|Research mid marker retired with Marketing's move to Ops.
+  if (mid) mid.visible = false;
   if (trading) trading.visible = ops;
+  if (marketing) marketing.visible = ops;
   // Frost divider stays on Main (+ Ops when not kitchen/recreation); never on Infra/Watch.
   if (divider && (infra || watch)) divider.visible = false;
 }
@@ -660,11 +663,11 @@ function stripMeshTris(root, dropCentroid) {
   });
 }
 
-// SWA-3378: frosted Websites | Marketing boundary on the live office.glb aisle.
-// Bank A (Websites, logical 1–10) stools at z=-3.9 / -1.5; Marketing (11–15) at z=0.3;
-// Research (16–20) at z=2.7; table_2 at z=1.5. Prior SWA-3195/3212 cut was a left/right
-// X-wall at x=-3.15 through both banks — that did not separate Websites from Marketing.
-// Reorient along +X in the aisle just south of Marketing so bank A stays behind the frost.
+// SWA-3378 / SWA-3499: frosted Websites | Research boundary on the live office.glb aisle.
+// Bank A (Websites, logical 1–10) stools at z=-3.9 / -1.5; Research (16–20) at z=2.7;
+// mid-bank stools (was Marketing 11–15 at z=0.3) stay unlabelled on Main after SWA-3499.
+// Prior SWA-3195/3212 cut was a left/right X-wall at x=-3.15 through both banks.
+// Aisle Z-cut at z=-0.15 keeps bank A behind the frost; Marketing now lives on Ops.
 // End gaps keep west hub / east lounge walks open (ambient still prefers those rails).
 export const DEPT_DIVIDER_Z = -0.15;
 export const DEPT_DIVIDER_X0 = -5.25;
@@ -688,7 +691,7 @@ function addDeptDivider(open) {
   const z = DEPT_DIVIDER_Z;
   const dx = x1 - x0;
   const span = Math.abs(dx);
-  const yaw = 0; // local +X along the aisle; panel faces ±Z (Websites ↔ Marketing)
+  const yaw = 0; // local +X along the aisle; panel faces ±Z (Websites ↔ Research)
   const y = 0.72;
   const h = 1.28;
   const thick = 0.04;
@@ -725,44 +728,6 @@ function addDeptDivider(open) {
   open.add(g);
 }
 
-// SWA-3378: lighter mid-bank marker between Marketing (GLB z=0.3) and Research (z=2.7).
-// Runs along table_2 centerline (z=1.5) across the bank B stool columns.
-function addMarketingResearchMarker(open) {
-  if (!open || open.getObjectByName('dept_mid_marker')) return;
-  const g = new THREE.Group();
-  g.name = 'dept_mid_marker';
-  const glass = new THREE.MeshStandardMaterial({
-    name: 'dept_mid_glass',
-    color: 0xEEF3F7,
-    roughness: 0.45,
-    metalness: 0.02,
-    transparent: true,
-    opacity: 0.28,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
-  const rail = new THREE.MeshStandardMaterial({ name: 'dept_mid_rail', color: 0xA8B0B8, roughness: 0.55, metalness: 0.15 });
-  // office.glb table_2 at z=1.5; stool columns x=-5.7,-4.0,-2.3,-0.6,1.1.
-  const z = 1.5;
-  const x0 = -5.4, x1 = 0.9;
-  const span = x1 - x0;
-  const y = 0.55;
-  const h = 0.72;
-  const thick = 0.025;
-  const panel = new THREE.Mesh(new THREE.BoxGeometry(span * 0.92, h, thick), glass);
-  panel.position.set((x0 + x1) / 2, y, z);
-  g.add(panel);
-  const top = new THREE.Mesh(new THREE.BoxGeometry(span * 0.94, 0.02, thick + 0.015), rail);
-  top.position.set((x0 + x1) / 2, y + h / 2 + 0.01, z);
-  g.add(top);
-  const base = new THREE.Mesh(new THREE.BoxGeometry(span * 0.94, 0.03, 0.08), new THREE.MeshStandardMaterial({
-    name: 'dept_mid_oak', color: 0xD2B896, roughness: 0.65,
-  }));
-  base.position.set((x0 + x1) / 2, 0.05, z);
-  g.add(base);
-  open.add(g);
-}
-
 function deptLabelSprite(text, name) {
   const tex = canvasTex(512, 128, (ctx, w, h) => {
     ctx.clearRect(0, 0, w, h);
@@ -789,8 +754,8 @@ function deptLabelSprite(text, name) {
   return spr;
 }
 
-// SWA-3378: Main Floor department nameplates (Websites / Marketing / Research).
-// Anchored to office.glb empties: table_1 z=-2.7; Marketing stools z=0.3; Research z=2.7.
+// SWA-3378 / SWA-3499: Main Floor department nameplates (Websites / Research).
+// Marketing moved to Ops (addMarketingZone). Anchors: table_1 z=-2.7; Research z=2.7.
 function addDeptNameplates(open) {
   if (!open || open.getObjectByName('dept_nameplates')) return;
   const g = new THREE.Group();
@@ -798,9 +763,6 @@ function addDeptNameplates(open) {
   const websites = deptLabelSprite('Websites', 'dept_label_websites');
   websites.position.set(-2.3, 1.85, -2.7);
   g.add(websites);
-  const marketing = deptLabelSprite('Marketing', 'dept_label_marketing');
-  marketing.position.set(-2.3, 1.85, 0.3);
-  g.add(marketing);
   const research = deptLabelSprite('Research', 'dept_label_research');
   research.position.set(-2.3, 1.85, 2.7);
   g.add(research);
@@ -830,6 +792,33 @@ function addTradingDeskZone(open) {
     }),
   );
   strip.position.set(-5.7, 0.03, -2.7);
+  g.add(strip);
+  open.add(g);
+}
+
+// SWA-3499: Ops-only Marketing labelled area (no invented agents).
+// Place east of Trading Desk wall column so the two Ops zones do not collide:
+// Trading at x=-5.7 / z≈-2.7; Marketing over mid-bank stools (z=0.3, x≈-2.3).
+function addMarketingZone(open) {
+  if (!open || open.getObjectByName('marketing_zone')) return;
+  const g = new THREE.Group();
+  g.name = 'marketing_zone';
+  g.visible = false; // shown only on Ops via applyDeptZones
+  const label = deptLabelSprite('Marketing', 'dept_label_marketing');
+  label.position.set(-2.3, 1.9, 0.3);
+  g.add(label);
+  const strip = new THREE.Mesh(
+    new THREE.BoxGeometry(3.4, 0.02, 1.35),
+    new THREE.MeshStandardMaterial({
+      name: 'marketing_zone_strip',
+      color: 0x8B4A6B,
+      roughness: 0.55,
+      metalness: 0.06,
+      transparent: true,
+      opacity: 0.5,
+    }),
+  );
+  strip.position.set(-2.3, 0.03, 0.3);
   g.add(strip);
   open.add(g);
 }
