@@ -761,3 +761,47 @@ test('SWA-3259 Infra middle desks are closed; other floors keep them', () => {
   assert.equal(tower.bots[chief].floor, 'ops');
   assert.equal(tower.bots[chief].desk, 7);
 });
+
+test('SWA-3535 Main Websites aisle-mid desks are closed; Ops keeps them', () => {
+  const mem = new Map();
+  const sandbox = {
+    URL, URLSearchParams, encodeURIComponent, decodeURIComponent, Promise, Date, JSON, Math, Number, Object, Array, String,
+    Map, Set,
+    history: { replaceState() {} },
+    location: { hash: '', search: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, v),
+      removeItem: (k) => mem.delete(k),
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  require('node:vm').runInNewContext(feedSrc, sandbox, { filename: 'wallpaper-feed.js' });
+  const W = sandbox.WallpaperFeed;
+  assert.equal(W.isDeskOpen(7), true);
+  assert.equal(W.isDeskOpen(7, 'ops'), true);
+  assert.equal(W.isDeskOpen(7, 'main-floor'), false);
+  assert.equal(W.isDeskOpen(8, 'main-floor'), false);
+  assert.equal(W.isDeskOpen(9, 'main-floor'), false);
+  assert.equal(W.isDeskOpen(1, 'main-floor'), true);
+  assert.equal(W.isDeskOpen(6, 'main-floor'), true);
+  assert.equal(W.isDeskOpen(10, 'main-floor'), true);
+  assert.equal(W.assignSeat(W.botId('Code Master 2'), 7, null, 'main-floor'), null);
+  assert.equal(W.assignSeat(W.botId('Code Master 2'), 1, null, 'main-floor'), 1);
+  assert.equal(W.assignSeat(W.botId('Chief Master'), 7, null, 'ops'), 7);
+
+  // Auto-seat Websites bots on remaining bank-A opens (1,6,10), then overflow to bank B.
+  const sessions = [
+    { key: 'pc:disp', id: 'disp', agent: 'paperclip', project: 'Dispatcher', status: 'thinking', activity: 'route' },
+    { key: 'pc:cm1', id: 'cm1', agent: 'paperclip', project: 'Code Master 1', status: 'thinking', activity: 'code' },
+    { key: 'pc:cm2', id: 'cm2', agent: 'paperclip', project: 'Code Master 2', status: 'thinking', activity: 'code' },
+    { key: 'pc:qa', id: 'qa', agent: 'paperclip', project: 'QA Engineer', status: 'thinking', activity: 'qa' },
+  ];
+  for (const s of sessions) s.wallpaper = { group: 'Main floor' };
+  const tower = W.towerState(sessions, {});
+  const desks = sessions.map((s) => tower.bots[W.botId(s.project)].desk).sort((a, b) => a - b);
+  assert.deepEqual(desks, [1, 6, 10, 11]);
+  for (const d of desks) assert.equal(W.isDeskOpen(d, 'main-floor'), true);
+  assert.ok([...W.MAIN_WEBSITES_TRIM_LOGICAL_DESKS].every((d) => !desks.includes(d)));
+});

@@ -96,6 +96,9 @@
   const INFRA_REMOVED_LOGICAL_DESKS = new Set([7, 8, 9, 12, 13, 14, 17, 18, 19]);
   // SWA-3258: Watch middle columns (same bay) — recreation replaces those seats on Watch only.
   const WATCH_REMOVED_LOGICAL_DESKS = new Set([7, 8, 9, 12, 13, 14, 17, 18, 19]);
+  // SWA-3535: Main Floor Websites aisle-mid (visual 04/06/08 → logical 7/8/9) — empty stools removed.
+  // Ops keeps 7–9; Infra/Watch already clear them via the mid-bay sets above.
+  const MAIN_WEBSITES_TRIM_LOGICAL_DESKS = new Set([7, 8, 9]);
   function isInfraFloor(floorId) {
     const id = String(floorId || '');
     return id === 'infra' || id.startsWith('infra-');
@@ -104,11 +107,16 @@
     const id = String(floorId || '');
     return id === 'watch' || id.startsWith('watch-');
   }
+  function isMainFloor(floorId) {
+    const id = String(floorId || '');
+    return id === 'main-floor' || id.startsWith('main-floor-');
+  }
   function isDeskOpen(n, floorId) {
     if (!Number.isInteger(n) || n < 1 || n > PER_FLOOR) return false;
     if (REMOVED_LOGICAL_DESKS.has(n)) return false;
     if (floorId != null && isInfraFloor(floorId) && INFRA_REMOVED_LOGICAL_DESKS.has(n)) return false;
     if (floorId != null && isWatchFloor(floorId) && WATCH_REMOVED_LOGICAL_DESKS.has(n)) return false;
+    if (floorId != null && isMainFloor(floorId) && MAIN_WEBSITES_TRIM_LOGICAL_DESKS.has(n)) return false;
     return true;
   }
   function nextOpenInRange(start, maxInclusive, taken, floorId) {
@@ -1235,6 +1243,7 @@
       if (floor.id === 'main-floor' || floor.id.startsWith('main-floor-')) {
         // Dept A → bank A (1–10), Dept B → bank B (11–20); overflow fills the other bank.
         // SWA-3221 skips cleared logical desks 2–5 (removed window-side visuals).
+        // SWA-3535 also skips Main aisle-mid 7–9; further Websites bots overflow to bank B.
         const takeA = () => {
           const d = nextOpenInRange(floor.nextA, 10, taken, floor.id);
           if (d == null) return null;
@@ -1403,6 +1412,7 @@
     PAPERCLIP_ORIGIN, PAPERCLIP_PREFIX, PAPERCLIP_CHAT_KEYS, PAPERCLIP_AGENT_IDS,
     SEAT_STORE_KEY, FLOOR_STORE_KEY, LOUNGE_STORE_KEY, PER_FLOOR, LOUNGE_MAX,
     REMOVED_LOGICAL_DESKS, INFRA_REMOVED_LOGICAL_DESKS, WATCH_REMOVED_LOGICAL_DESKS,
+    MAIN_WEBSITES_TRIM_LOGICAL_DESKS, isMainFloor,
     isInfraFloor, isWatchFloor, isDeskOpen,
     parseFeedLink, parseFeedInput, defaultFeedLink, resolveFeedTarget,
     mapLook, reduceFeed, mergeSessions, officeStatus,

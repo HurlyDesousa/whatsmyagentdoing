@@ -8,6 +8,7 @@ import {
   loadOfficeAssets, REMOVED_BANK_DESKS,
   INFRA_MIDDLE_VISUAL_DESKS, isInfraFloor,
   WATCH_MIDDLE_VISUAL_DESKS, isWatchFloor,
+  MAIN_WEBSITES_TRIM_VISUAL_DESKS, isMainFloor,
 } from './office.js';
 import { Building } from './building.js';
 import { createDaylight } from './daylight.js';
@@ -37,6 +38,7 @@ const DESK_ORDER = [1, 3, 5, 7, 9, 2, 4, 6, 8, 10, 11, 13, 15, 17, 19, 12, 14, 1
 const REMOVED_VISUAL = new Set(REMOVED_BANK_DESKS);
 const INFRA_MIDDLE_VISUAL = new Set(INFRA_MIDDLE_VISUAL_DESKS);
 const WATCH_MIDDLE_VISUAL = new Set(WATCH_MIDDLE_VISUAL_DESKS);
+const MAIN_WEBSITES_TRIM_VISUAL = new Set(MAIN_WEBSITES_TRIM_VISUAL_DESKS);
 
 let renderer, labels, camera, scene, container, callbacks, daylight, building, post;
 let assets = null;
@@ -709,11 +711,13 @@ function nearestDeskLogical() {
   let best = null, bestD = Infinity;
   const infra = building && isInfraFloor(building.activeId);
   const watch = building && isWatchFloor(building.activeId);
+  const main = building && isMainFloor(building.activeId);
   for (let visual = 0; visual < assets.spots.desks.length; visual++) {
     const spot = assets.spots.desks[visual];
     if (!spot || !spot.pos || REMOVED_VISUAL.has(visual + 1)) continue;
     if (infra && INFRA_MIDDLE_VISUAL.has(visual + 1)) continue;
     if (watch && WATCH_MIDDLE_VISUAL.has(visual + 1)) continue;
+    if (main && MAIN_WEBSITES_TRIM_VISUAL.has(visual + 1)) continue;
     const d = (spot.pos.x - gx) ** 2 + (spot.pos.z - gz) ** 2;
     if (d < bestD) { bestD = d; best = visual; }
   }
