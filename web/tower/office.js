@@ -23,11 +23,17 @@ export const INFRA_REMOVED_LOGICAL_DESKS = Object.freeze([7, 8, 9, 12, 13, 14, 1
 // SWA-3258: Watch uses the same mid columns → recreation lounge (shared clear + infra_mid_desks restore).
 export const WATCH_MIDDLE_VISUAL_DESKS = INFRA_MIDDLE_VISUAL_DESKS;
 export const WATCH_REMOVED_LOGICAL_DESKS = INFRA_REMOVED_LOGICAL_DESKS;
+// SWA-3535: Main Floor only — hide the three empty Websites aisle-mid stools (visual 04/06/08).
+// Keep wall-end aisle desk_02 + lounge-end desk_10 + window desk_01. Ops/Infra/Watch keep mid restores.
+// Logical via DESK_ORDER: visual 4/6/8 → 7/8/9. Extra Websites bots still seat on 1/6/10 then overflow bank B.
+export const MAIN_WEBSITES_TRIM_VISUAL_DESKS = Object.freeze([4, 6, 8]);
+export const MAIN_WEBSITES_TRIM_LOGICAL_DESKS = Object.freeze([7, 8, 9]);
 const SPOT_RE = /^(desk|screen|lounge)_(\d{2})$/;
 const LAMP_RE = /^lamp_(\d{2})$/;
 const NAMES = ['floor_open', 'floor_closed', 'roof', 'elevator_shaft', 'elevator_cabin'];
 const REMOVED_BANK_SET = new Set(REMOVED_BANK_DESKS);
 const INFRA_MIDDLE_SET = new Set(INFRA_MIDDLE_VISUAL_DESKS);
+const MAIN_WEBSITES_TRIM_SET = new Set(MAIN_WEBSITES_TRIM_VISUAL_DESKS);
 
 export function isInfraFloor(floorId) {
   const id = String(floorId || '');
@@ -304,6 +310,11 @@ function buildInfraMidDesks(open, spots) {
   if (g) return g;
   g = new THREE.Group();
   g.name = 'infra_mid_desks';
+  // SWA-3535: bank-A aisle-mid stools live in a child group so Main can hide them without
+  // touching Research mid (13–18) or Ops/Infra/Watch mid restores.
+  const trim = new THREE.Group();
+  trim.name = 'main_websites_trim';
+  g.add(trim);
   const oak = new THREE.MeshStandardMaterial({ name: 'infra_mid_oak', color: 0xC9A57C, roughness: 0.55 });
   const black = new THREE.MeshStandardMaterial({ name: 'infra_mid_frame', color: 0x1C1C1E, roughness: 0.45, metalness: 0.25 });
   const fabric = new THREE.MeshStandardMaterial({ name: 'infra_mid_seat', color: 0x3A3A3E, roughness: 0.85 });
@@ -318,22 +329,23 @@ function buildInfraMidDesks(open, spots) {
     const x = spot.pos.x, z = spot.pos.z;
     const bank = n <= 10 ? 0 : 1;
     const { dz, yaw } = infraTableward(z, bank);
+    const parent = MAIN_WEBSITES_TRIM_SET.has(n) ? trim : g;
     const stool = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.29, 18), fabric);
     stool.position.set(x, SEAT_Y / 2, z);
-    g.add(stool);
+    parent.add(stool);
     const lx = x, lz = z + dz * 0.75;
     const base = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.012, 0.22), laptopMat);
     base.position.set(lx, 0.756, lz);
     base.rotation.y = yaw;
-    g.add(base);
+    parent.add(base);
     const lid = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.2, 0.008), laptopMat);
     lid.position.set(lx, 0.86, lz - dz * 0.02);
     lid.rotation.y = yaw;
     lid.rotation.x = 0.35;
-    g.add(lid);
+    parent.add(lid);
     const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, SEAT_Y - 0.05, 10), black);
     leg.position.set(x, (SEAT_Y - 0.05) / 2, z);
-    g.add(leg);
+    parent.add(leg);
   }
   open.add(g);
   return g;
@@ -489,6 +501,7 @@ export function applyDeptZones(obj, floorId) {
   const trading = obj.getObjectByName('trading_desk_zone');
   const marketing = obj.getObjectByName('marketing_zone');
   const divider = obj.getObjectByName('dept_divider');
+  const websitesTrim = obj.getObjectByName('main_websites_trim');
   if (plates) plates.visible = main;
   // SWA-3499: Marketing|Research mid marker retired with Marketing's move to Ops.
   if (mid) mid.visible = false;
@@ -496,6 +509,22 @@ export function applyDeptZones(obj, floorId) {
   if (marketing) marketing.visible = ops;
   // Frost divider stays on Main (+ Ops when not kitchen/recreation); never on Infra/Watch.
   if (divider && (infra || watch)) divider.visible = false;
+  // SWA-3535: hide the three empty Websites aisle-mid workstations on Main only.
+  // Parent infra_mid_desks stays visible so Research mid stools (13–18) remain.
+  if (websitesTrim) websitesTrim.visible = !main;
+}
+
+/**
+ * SWA-3535: on Main, null the three Websites aisle-mid spots after Infra/Watch restore.
+ * No-op on other floors (Ops keeps mid seats; Infra/Watch already cleared the whole mid bay).
+ */
+export function applyMainWebsitesTrimSpots(spots, isMain) {
+  if (!spots?.desks || !isMain) return;
+  for (const n of MAIN_WEBSITES_TRIM_VISUAL_DESKS) {
+    const i = n - 1;
+    spots.desks[i] = undefined;
+    if (spots.screens) spots.screens[i] = undefined;
+  }
 }
 
 /** Null or restore shared desk spots for the Infra middle columns. */

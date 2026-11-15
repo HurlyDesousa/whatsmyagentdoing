@@ -10,6 +10,7 @@ import {
   FLOOR_STEP, SLAB, SHAFT_POS,
   isInfraFloor, applyInfraFloor, applyInfraDeskSpots,
   isWatchFloor, applyWatchFloor, applyDeptZones,
+  isMainFloor, applyMainWebsitesTrimSpots,
 } from './office.js';
 import { WallDisplays } from './walls.js';
 import { floorStyles, applyFloorStyle, styleObjects, styleNightMaps } from './floorstyle.js';
@@ -294,6 +295,8 @@ export class Building {
     if (slot !== this.activeSlot) return;
     // Mid bay cleared on Infra (kitchen) or Watch (recreation); restore elsewhere.
     applyInfraDeskSpots(this.assets.spots, infra || watch, this.assets.infraDeskBackup);
+    // SWA-3535: after mid restore, drop the three empty Websites aisle-mid spots on Main only.
+    applyMainWebsitesTrimSpots(this.assets.spots, isMainFloor(slot.id));
     const lounges = this.assets.spots.lounges;
     if (st && this.assets.style?.layouts?.[st.layout]) {
       this.assets.style.layouts[st.layout].forEach((s, i) => {
