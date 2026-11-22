@@ -2,12 +2,14 @@
 // Bundled into public/office4d.js. Behaviour-preserving lift from public/index.html (SWA-3639).
 import { blobLookFor } from './grokblobs.js';
 import { installOfficeLightGlobals } from './office-light.js';
+import { installOfficeBadges } from './office-badges.js';
 
 export function bootOfficeShell({ Office4D }) {
   if (typeof document === 'undefined') return;
   if (document.documentElement.dataset.officeShellBooted === '1') return;
   document.documentElement.dataset.officeShellBooted = '1';
   installOfficeLightGlobals(globalThis);
+  installOfficeBadges(globalThis);
 
 
   // SWA-2995: looping office background music + top-right mute toggle.
