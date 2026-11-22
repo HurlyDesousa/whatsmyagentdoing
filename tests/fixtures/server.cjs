@@ -81,7 +81,6 @@ async function main() {
         '/scenes/fixture/blocked.txt', '/assets/missing.png', '/scenes/missing/manifest.json',
       ]) assert.equal((await request(url)).status, 404, url);
       await resource('/scenes/fixture/literal%25name.json', path.join(scene, 'literal%name.json'), 'application/json');
-      await resource('/office.js', path.join(__dirname, '../../public/office.js'), 'text/javascript; charset=utf-8', 'no-store');
       await ping();
     }
   } finally {

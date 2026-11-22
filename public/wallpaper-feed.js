@@ -126,7 +126,7 @@
   }
 
   // Wallpaper picker shapes -> the office blobs that already exist
-  // (web/grokblobs.js / public/office.js). Triangle in the wallpaper is the
+  // (web/grokblobs.js). Triangle in the wallpaper is the
   // play-button wedge; rounded_square is the upright squircle.
   const SHAPE_MAP = {
     sphere: 'oval', cloud: 'cloud', rounded_square: 'squircle', star4: 'cloud',

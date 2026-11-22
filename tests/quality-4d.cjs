@@ -24,6 +24,20 @@ function line(message, timeSec) {
   return { time: timeSec == null ? NOW / 1000 : timeSec, message: JSON.stringify(message) };
 }
 
+test('legacy 2D/3D shells are gone; index boots the office4d module', () => {
+  const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
+  assert.equal(html.includes('/office.js'), false);
+  assert.equal(html.includes('office3d'), false);
+  assert.match(html, /type="module"\s+src="\/office4d\.js"/);
+  assert.equal(fs.existsSync(path.join(root, 'public/office.js')), false);
+  assert.equal(fs.existsSync(path.join(root, 'public/office3d.js')), false);
+  assert.equal(fs.existsSync(path.join(root, 'web/office3d.js')), false);
+  const entry = fs.readFileSync(path.join(root, 'web/office4d.js'), 'utf8');
+  assert.match(entry, /bootOfficeShell\(\{\s*Office4D\s*\}\)/);
+  assert.equal(fs.existsSync(path.join(root, 'web/office-shell.js')), true);
+  assert.equal(fs.existsSync(path.join(root, 'web/office-light.js')), true);
+});
+
 test('quality is always 4D; legacy mid/high resolve to the sole view', () => {
   assert.equal(WF.DEFAULT_QUALITY, '4d');
   assert.equal(JSON.stringify(WF.QUALITIES), JSON.stringify(['4d']));

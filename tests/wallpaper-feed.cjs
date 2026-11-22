@@ -132,46 +132,7 @@ test('a connected but quiet feed still dresses the six remembered bots', () => {
   assert.equal(off[0].look, undefined);
 });
 
-test('the office blob uses a session look and still hops on Paperclip status', () => {
-  const el = (tag) => ({
-    tag, className: '', hidden: false, children: [], style: {}, dataset: {},
-    appendChild(c) { this.children.push(c); return c; },
-    removeChild(c) { return c; },
-    addEventListener() {}, removeEventListener() {}, setAttribute() {}, remove() {},
-    contains() { return false; }, getContext() { return {}; },
-    getBoundingClientRect() { return { left: 0, top: 0, width: 900, height: 700, right: 900, bottom: 700 }; },
-  });
-  const sandbox = {
-    document: { head: el('head'), body: el('body'), getElementById() { return null; }, createElement: el, addEventListener() {}, removeEventListener() {} },
-    Image: class { set src(v) { this._src = v; } },
-    ResizeObserver: class { observe() {} disconnect() {} },
-    matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
-    requestAnimationFrame: () => 1, cancelAnimationFrame() {},
-    localStorage: { getItem: () => null, setItem() {} },
-    performance: { now: () => Date.now() }, devicePixelRatio: 1, innerWidth: 1280, innerHeight: 800,
-    console, Date, Intl, Math, Map, Set, Number,
-  };
-  sandbox.window = sandbox;
-  sandbox.globalThis = sandbox;
-  vm.runInNewContext(fs.readFileSync(path.join(root, 'public/office.js'), 'utf8'), sandbox, { filename: 'office.js' });
-  const office = new sandbox.Office(el('div'), {});
-  const cues = [];
-  office.playCue = (kind) => cues.push(kind);
-  office.update([{ key: 'bot', agent: 'grokbot', id: 'chief', status: 'thinking', project: 'Chief Master', lastEventAt: Date.now(), startedAt: 1 }]);
-  office.update([{
-    key: 'bot', agent: 'grokbot', id: 'chief', status: 'waiting', project: 'Chief Master', lastEventAt: Date.now(), startedAt: 1,
-    look: { shape: 'wedge', color: 0x8F59F9, accessory: 'none' },
-    wallpaper: { effective: 'waiting_user', step: 'needs Hurly' },
-  }]);
-  const p = office.people.get('bot');
-  assert.equal(p.look.shape, 'wedge');
-  assert.equal(p.look.color, 0x8F59F9);
-  assert.deepEqual(cues, ['ding']);
-  assert.equal(office.speechLine(p.s).includes('needs Hurly'), true);
-  office.destroy();
-});
-
-test('3D blobLookFor honors the same session look', async () => {
+test('blobLookFor honors the same session look', async () => {
   const { blobLookFor } = await import('../web/grokblobs.js');
   const look = blobLookFor({ key: 'grokbot:monitor', s: { id: 'monitor', project: 'Monitor Master', look: { shape: 'squircle', color: 0xFD690F, accessory: 'none' } } });
   assert.equal(look.shape, 'squircle');
