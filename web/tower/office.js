@@ -4,6 +4,21 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildFloorStyles } from './floorstyle.js';
+import {
+  FloorKind,
+  getFloorBlueprint,
+  REMOVED_BANK_DESKS,
+  INFRA_MIDDLE_VISUAL_DESKS,
+  INFRA_REMOVED_LOGICAL_DESKS,
+  WATCH_MIDDLE_VISUAL_DESKS,
+  WATCH_REMOVED_LOGICAL_DESKS,
+  MAIN_WEBSITES_TRIM_VISUAL_DESKS,
+  MAIN_WEBSITES_TRIM_LOGICAL_DESKS,
+  isInfraFloor,
+  isWatchFloor,
+  isOpsFloor,
+  isMainFloor,
+} from './floor-blueprint.js';
 
 export const BANK_DESK_COUNT = 20; // communal bank stools from the GLB / placeholder (before SWA-3221 removals)
 export const DESK_COUNT = 21;      // + department manager desk (SWA-3195)
@@ -12,48 +27,28 @@ export const SLAB = 0.36;
 export const FLOOR_STEP = 1.6;
 export const OPEN_H = 2.7;
 export const SHAFT_POS = new THREE.Vector2(9.05, -2.6);
-// SWA-3221: rear/window bank, window-side stools behind the dept divider (leave wall-end desk_01).
-// Visual desk_NN indices; logical bot.desk numbers that map here via DESK_ORDER are 2–5.
-export const REMOVED_BANK_DESKS = Object.freeze([3, 5, 7, 9]);
-// SWA-3259: Infra-only middle columns (pair x ≈ -3.9 / -2.1 / -0.3) on both banks → kitchen.
-// Keep wall-side (x≈-5.7) and lounge-side (x≈1.5) stools; keep the GLB lounge (armchairs + TV).
-export const INFRA_MIDDLE_VISUAL_DESKS = Object.freeze([4, 6, 8, 13, 14, 15, 16, 17, 18]);
-// Logical bot.desk via DESK_ORDER [1,3,5,7,9,2,4,6,8,10,11,13,15,17,19,12,14,16,18,20,21].
-export const INFRA_REMOVED_LOGICAL_DESKS = Object.freeze([7, 8, 9, 12, 13, 14, 17, 18, 19]);
-// SWA-3258: Watch uses the same mid columns → recreation lounge (shared clear + infra_mid_desks restore).
-export const WATCH_MIDDLE_VISUAL_DESKS = INFRA_MIDDLE_VISUAL_DESKS;
-export const WATCH_REMOVED_LOGICAL_DESKS = INFRA_REMOVED_LOGICAL_DESKS;
-// SWA-3535: Main Floor only — hide the three empty Websites aisle-mid stools (visual 04/06/08).
-// Keep wall-end aisle desk_02 + lounge-end desk_10 + window desk_01. Ops/Infra/Watch keep mid restores.
-// Logical via DESK_ORDER: visual 4/6/8 → 7/8/9. Extra Websites bots still seat on 1/6/10 then overflow bank B.
-export const MAIN_WEBSITES_TRIM_VISUAL_DESKS = Object.freeze([4, 6, 8]);
-export const MAIN_WEBSITES_TRIM_LOGICAL_DESKS = Object.freeze([7, 8, 9]);
+// Floor desk-trim / zone rules live in floor-blueprint.js (SWA-3641). Re-export for callers.
+export {
+  REMOVED_BANK_DESKS,
+  INFRA_MIDDLE_VISUAL_DESKS,
+  INFRA_REMOVED_LOGICAL_DESKS,
+  WATCH_MIDDLE_VISUAL_DESKS,
+  WATCH_REMOVED_LOGICAL_DESKS,
+  MAIN_WEBSITES_TRIM_VISUAL_DESKS,
+  MAIN_WEBSITES_TRIM_LOGICAL_DESKS,
+  isInfraFloor,
+  isWatchFloor,
+  isOpsFloor,
+  isMainFloor,
+  getFloorBlueprint,
+  FloorKind,
+};
 const SPOT_RE = /^(desk|screen|lounge)_(\d{2})$/;
 const LAMP_RE = /^lamp_(\d{2})$/;
 const NAMES = ['floor_open', 'floor_closed', 'roof', 'elevator_shaft', 'elevator_cabin'];
 const REMOVED_BANK_SET = new Set(REMOVED_BANK_DESKS);
 const INFRA_MIDDLE_SET = new Set(INFRA_MIDDLE_VISUAL_DESKS);
 const MAIN_WEBSITES_TRIM_SET = new Set(MAIN_WEBSITES_TRIM_VISUAL_DESKS);
-
-export function isInfraFloor(floorId) {
-  const id = String(floorId || '');
-  return id === 'infra' || id.startsWith('infra-');
-}
-
-export function isWatchFloor(floorId) {
-  const id = String(floorId || '');
-  return id === 'watch' || id.startsWith('watch-');
-}
-
-export function isOpsFloor(floorId) {
-  const id = String(floorId || '');
-  return id === 'ops' || id.startsWith('ops-');
-}
-
-export function isMainFloor(floorId) {
-  const id = String(floorId || '');
-  return id === 'main-floor' || id.startsWith('main-floor-');
-}
 
 export async function loadOfficeAssets(baseUrl) {
   let glb = null;
@@ -487,31 +482,48 @@ export function applyWatchFloor(obj, isWatch) {
 }
 
 /**
- * SWA-3378 / SWA-3499: Main Floor Websites|Research nameplates; Ops Trading Desk + Marketing.
- * Call after Infra/Watch toggles so floor-specific labels win.
+ * Apply declarative Floor Blueprint mesh visibility (GLB patcher seam).
+ * Accepts a blueprint object or a floor id string.
  */
-export function applyDeptZones(obj, floorId) {
+export function applyFloorBlueprintMesh(obj, floorIdOrBlueprint) {
   if (!obj) return;
-  const main = isMainFloor(floorId);
-  const ops = isOpsFloor(floorId);
-  const infra = isInfraFloor(floorId);
-  const watch = isWatchFloor(floorId);
+  const bp = resolveBlueprint(floorIdOrBlueprint);
+  applyInfraFloor(obj, bp.kind === FloorKind.INFRA);
+  applyWatchFloor(obj, bp.kind === FloorKind.WATCH);
+  applyDeptZones(obj, bp);
+}
+
+function resolveBlueprint(floorIdOrBlueprint) {
+  if (floorIdOrBlueprint && typeof floorIdOrBlueprint === 'object' && floorIdOrBlueprint.zones) {
+    return floorIdOrBlueprint;
+  }
+  return getFloorBlueprint(floorIdOrBlueprint);
+}
+
+/**
+ * SWA-3378 / SWA-3499: Main Floor Websites|Research nameplates; Ops Trading Desk + Marketing.
+ * Driven by Floor Blueprint zones (SWA-3641). Accepts blueprint or floor id.
+ */
+export function applyDeptZones(obj, floorIdOrBlueprint) {
+  if (!obj) return;
+  const bp = resolveBlueprint(floorIdOrBlueprint);
+  const z = bp.zones;
   const plates = obj.getObjectByName('dept_nameplates');
   const mid = obj.getObjectByName('dept_mid_marker');
   const trading = obj.getObjectByName('trading_desk_zone');
   const marketing = obj.getObjectByName('marketing_zone');
   const divider = obj.getObjectByName('dept_divider');
   const websitesTrim = obj.getObjectByName('main_websites_trim');
-  if (plates) plates.visible = main;
+  if (plates) plates.visible = !!z.deptNameplates;
   // SWA-3499: Marketing|Research mid marker retired with Marketing's move to Ops.
   if (mid) mid.visible = false;
-  if (trading) trading.visible = ops;
-  if (marketing) marketing.visible = ops;
-  // Frost divider stays on Main (+ Ops when not kitchen/recreation); never on Infra/Watch.
-  if (divider && (infra || watch)) divider.visible = false;
+  if (trading) trading.visible = !!z.tradingDeskZone;
+  if (marketing) marketing.visible = !!z.marketingZone;
+  // Frost divider: blueprint false on Infra/Watch; leave prior Infra/Watch toggle otherwise.
+  if (divider && !z.deptDivider) divider.visible = false;
   // SWA-3535: hide the three empty Websites aisle-mid workstations on Main only.
   // Parent infra_mid_desks stays visible so Research mid stools (13–18) remain.
-  if (websitesTrim) websitesTrim.visible = !main;
+  if (websitesTrim) websitesTrim.visible = !!z.mainWebsitesTrimVisible;
 }
 
 /**
@@ -547,6 +559,15 @@ export function applyInfraDeskSpots(spots, isInfra, backup) {
 /** Null or restore shared desk spots for the Watch middle columns (same bay as Infra). */
 export function applyWatchDeskSpots(spots, isWatch, backup) {
   applyInfraDeskSpots(spots, isWatch, backup);
+}
+
+/**
+ * Spot resolver seam: mid-bay clear + Main Websites aisle trim from Floor Blueprint.
+ */
+export function applyFloorBlueprintDeskSpots(spots, floorIdOrBlueprint, backup) {
+  const bp = resolveBlueprint(floorIdOrBlueprint);
+  applyInfraDeskSpots(spots, bp.midBayCleared, backup);
+  applyMainWebsitesTrimSpots(spots, bp.websitesAisleTrim);
 }
 
 function buildWatchRecreation(open) {

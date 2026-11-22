@@ -4,12 +4,10 @@ import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { loadOfficeAssets } from './office.js';
 import {
-  loadOfficeAssets, REMOVED_BANK_DESKS,
-  INFRA_MIDDLE_VISUAL_DESKS, isInfraFloor,
-  WATCH_MIDDLE_VISUAL_DESKS, isWatchFloor,
-  MAIN_WEBSITES_TRIM_VISUAL_DESKS, isMainFloor,
-} from './office.js';
+  logicalToVisual, visualToLogical, isVisualDeskOpen,
+} from './floor-blueprint.js';
 import { Building } from './building.js';
 import { createDaylight } from './daylight.js';
 import { createPost } from './post.js';
@@ -31,14 +29,7 @@ const PHONE_SPAN_W = 29.5;                          // m across a phone's scene 
 const ZOOM = { min: 0.75, max: 3, focus: 2 };
 const UI_LEFT = 230, UI_RIGHT = 360;                   // glass panels the building must not hide behind
 const SIN_E = Math.sin(Math.atan(1 / Math.SQRT2));      // sin(35.264°) = ground foreshortening
-// Server desk numbers: Bank A (table_1, 01–10) then Bank B (table_2, 11–20), then manager desk 21.
-// Within each bank seat the far side first (odd desks face the camera) so tags stay clear of each other.
-// SWA-3221 removed visual desks 03/05/07/09 (logical 2–5); spots are sparse — skip nulls when seating.
-const DESK_ORDER = [1, 3, 5, 7, 9, 2, 4, 6, 8, 10, 11, 13, 15, 17, 19, 12, 14, 16, 18, 20, 21];
-const REMOVED_VISUAL = new Set(REMOVED_BANK_DESKS);
-const INFRA_MIDDLE_VISUAL = new Set(INFRA_MIDDLE_VISUAL_DESKS);
-const WATCH_MIDDLE_VISUAL = new Set(WATCH_MIDDLE_VISUAL_DESKS);
-const MAIN_WEBSITES_TRIM_VISUAL = new Set(MAIN_WEBSITES_TRIM_VISUAL_DESKS);
+// Desk order + floor seatability live in floor-blueprint.js (SWA-3641).
 
 let renderer, labels, camera, scene, container, callbacks, daylight, building, post;
 let assets = null;
@@ -240,7 +231,7 @@ function sync() {
       actors.set(bot.id, actor);
       attachModel(actor, bot);
     }
-    const deskIdx = (DESK_ORDER[(bot.desk || 1) - 1] || 1) - 1;
+    const deskIdx = logicalToVisual(bot.desk || 1) - 1;
     const desk = assets.spots.desks[deskIdx] || assets.spots.desks.find(Boolean);
     const home = lounge.get(bot.id) || desk;
     homeOf.set(bot.id, home);
@@ -709,22 +700,15 @@ function nearestDeskLogical() {
   if (!raycaster.ray.intersectPlane(groundPlane, tmp)) return null;
   const gx = tmp.x, gz = tmp.z;
   let best = null, bestD = Infinity;
-  const infra = building && isInfraFloor(building.activeId);
-  const watch = building && isWatchFloor(building.activeId);
-  const main = building && isMainFloor(building.activeId);
+  const floorId = building?.activeId;
   for (let visual = 0; visual < assets.spots.desks.length; visual++) {
     const spot = assets.spots.desks[visual];
-    if (!spot || !spot.pos || REMOVED_VISUAL.has(visual + 1)) continue;
-    if (infra && INFRA_MIDDLE_VISUAL.has(visual + 1)) continue;
-    if (watch && WATCH_MIDDLE_VISUAL.has(visual + 1)) continue;
-    if (main && MAIN_WEBSITES_TRIM_VISUAL.has(visual + 1)) continue;
+    if (!spot || !spot.pos || !isVisualDeskOpen(floorId, visual + 1)) continue;
     const d = (spot.pos.x - gx) ** 2 + (spot.pos.z - gz) ** 2;
     if (d < bestD) { bestD = d; best = visual; }
   }
   if (best == null || bestD > 4.5) return null; // ~2.1 m radius
-  const visualNum = best + 1;
-  const logical = DESK_ORDER.indexOf(visualNum) + 1;
-  return logical > 0 ? logical : visualNum;
+  return visualToLogical(best + 1);
 }
 
 function onWheel(e) {
@@ -935,7 +919,7 @@ function frame(t) {
     applyLoungeOverrides(lounge, floorBots);
     const homeOf = new Map();
     for (const bot of floorBots) {
-      const deskIdx = (DESK_ORDER[(bot.desk || 1) - 1] || 1) - 1;
+      const deskIdx = logicalToVisual(bot.desk || 1) - 1;
       const desk = assets.spots.desks[deskIdx] || assets.spots.desks.find(Boolean);
       homeOf.set(bot.id, lounge.get(bot.id) || desk);
     }

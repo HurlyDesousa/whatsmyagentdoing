@@ -8,10 +8,9 @@ import * as THREE from 'three';
 import { Spring, smoothstep } from './spring.js';
 import {
   FLOOR_STEP, SLAB, SHAFT_POS,
-  isInfraFloor, applyInfraFloor, applyInfraDeskSpots,
-  isWatchFloor, applyWatchFloor, applyDeptZones,
-  isMainFloor, applyMainWebsitesTrimSpots,
+  applyFloorBlueprintMesh, applyFloorBlueprintDeskSpots,
 } from './office.js';
+import { getFloorBlueprint } from './floor-blueprint.js';
 import { WallDisplays } from './walls.js';
 import { floorStyles, applyFloorStyle, styleObjects, styleNightMaps } from './floorstyle.js';
 
@@ -285,18 +284,14 @@ export class Building {
   applyStyle(slot) {
     const st = this.styles.get(slot.id);
     if (!slot.open) return;
-    const infra = isInfraFloor(slot.id);
-    const watch = isWatchFloor(slot.id);
+    const bp = getFloorBlueprint(slot.id);
     if (st) applyFloorStyle(slot.open.obj, st);
-    applyInfraFloor(slot.open.obj, infra);
-    applyWatchFloor(slot.open.obj, watch); // after Infra so Watch clears mid desks for recreation
-    applyDeptZones(slot.open.obj, slot.id); // SWA-3378/3499: Main Websites|Research + Ops Trading|Marketing
+    // SWA-3641: mesh visibility + dept zones from Floor Blueprint (Watch wins via blueprint.zones).
+    applyFloorBlueprintMesh(slot.open.obj, bp);
     if (st) slot.open.walls?.setAccent(st.accent);
     if (slot !== this.activeSlot) return;
-    // Mid bay cleared on Infra (kitchen) or Watch (recreation); restore elsewhere.
-    applyInfraDeskSpots(this.assets.spots, infra || watch, this.assets.infraDeskBackup);
-    // SWA-3535: after mid restore, drop the three empty Websites aisle-mid spots on Main only.
-    applyMainWebsitesTrimSpots(this.assets.spots, isMainFloor(slot.id));
+    // Mid bay cleared on Infra/Watch; Main Websites aisle trim — from blueprint.
+    applyFloorBlueprintDeskSpots(this.assets.spots, bp, this.assets.infraDeskBackup);
     const lounges = this.assets.spots.lounges;
     if (st && this.assets.style?.layouts?.[st.layout]) {
       this.assets.style.layouts[st.layout].forEach((s, i) => {
@@ -304,12 +299,12 @@ export class Building {
         if (!cur || cur.pos.distanceToSquared(s.pos) > 1e-6 || cur.yaw !== s.yaw) lounges[i] = { pos: s.pos.clone(), yaw: s.yaw, lounge: true };
       });
     }
-    // SWA-3258: on Watch, recreation seats become the idle lounge so blobs sit in the chill zone.
-    if (watch && Array.isArray(this.assets.watchRecreationSeats)) {
+    // Lounge seating mode from blueprint (recreation / kitchen / default).
+    if (bp.loungeMode === 'recreation' && Array.isArray(this.assets.watchRecreationSeats)) {
       this.assets.watchRecreationSeats.forEach((s, i) => {
         lounges[i] = { pos: s.pos.clone(), yaw: s.yaw, lounge: true };
       });
-    } else if (infra && Array.isArray(this.assets.infraKitchenSeats)) {
+    } else if (bp.loungeMode === 'kitchen' && Array.isArray(this.assets.infraKitchenSeats)) {
       // SWA-3259: keep the existing lounge (armchairs + TV); kitchen fridge/counter sit spots follow.
       lounges.length = 6;
       this.assets.infraKitchenSeats.forEach((s, i) => {
