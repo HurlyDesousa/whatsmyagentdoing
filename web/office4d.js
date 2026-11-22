@@ -3,6 +3,7 @@
 import { initScene, renderScene, destroyScene, setSceneVisible, sceneCanvas, focusBot, captureScene, zoom, setTowerTheme, sendBotToMeeting } from './tower/scene.js';
 import { initUI, renderUI, destroyUI, setStartBusy, setClearErrorBusy } from './tower-ui/ui.js';
 import { initSound, destroySound, sfx } from './tower-ui/sound.js';
+import { bootOfficeShell } from './office-shell.js';
 
 const LIGHT_TIME = { day: '13:00', evening: '18:50', night: '23:00' };
 
@@ -553,3 +554,6 @@ function buildPaperclipChatPanel() {
   document.body.append(root);
   return { root, frame, open, closeBtn };
 }
+
+// Page entry: fold SSE / prefs / BGM / list chrome into this bundle (SWA-3639).
+bootOfficeShell({ Office4D });

@@ -25,30 +25,11 @@ const sessions = [
  {key:'codex:sub', id:'sub', agent:'codex',project:'sub-project',status:'thinking',subagent:true},
 ].map(s=>({...s,lastEventAt:Date.now(),turnStartedAt:Date.now()-1000,cwd:'/demo/'+s.project}));
 async function stable(page){
- await page.waitForFunction(()=>typeof office!=='undefined' && office?.framesShown>4);
+ await page.waitForFunction(()=>state?.quality==='4d'&&officeKind==='4d'&&office?.isTower&&office?.loaded&&office.framesShown>4,{},{timeout:30000});
  await page.evaluate(s=>{window.__events?.close();onData({now:Date.now(),sessions:s})},sessions);
 }
 async function openSettings(page) {
  if (!(await page.locator('#settingsMenu').getAttribute('open') !== null)) await page.click('#settingsMenu > summary');
-}
-async function badges(target){
- return target.evaluate(()=>{
-  const found=[];const original=office.agentBadge;
-  office.agentBadge=function(a,...rest){found.push(a.short);return original.call(this,a,...rest)};
-  office.frame(performance.now());office.agentBadge=original;return found;
- });
-}
-async function drawnLogos(target) {
- await target.waitForFunction(()=>Object.values(OFFICE_AGENT_BADGES).every(b=>b.image.complete&&b.image.naturalWidth>0));
- return target.evaluate(()=>{
-  const found=new Set();const ctx=office.ctx;const original=ctx.drawImage;
-  ctx.drawImage=function(img,...args){
-   for(const [key,badge] of Object.entries(OFFICE_AGENT_BADGES)) if(img===badge.image) found.add(key);
-   return original.call(this,img,...args);
-  };
-  try {office.frame(performance.now());} finally {ctx.drawImage=original;}
-  return [...found].sort();
- });
 }
 (async()=>{
  const watcher = new DemoWatcher().start();
@@ -73,12 +54,11 @@ async function drawnLogos(target) {
   context.on('page',p=>p.on('pageerror',e=>errors.push(String(e))));
   const page=await context.newPage();await page.goto(base+'/?view=office');await stable(page);
   assert.equal(await page.evaluate(()=>state.quality),'4d');
-  assert.equal(await page.locator('h1 [data-t]').innerText(),"What's my agent doing");
+  assert.equal(await page.locator('h1 span').first().innerText(),'Office');
   assert.equal(await page.locator('#showAgent').isChecked(),true);
-  assert.deepEqual([...new Set(await badges(page))].sort(),['Cl','Cx','G','OMP']);
-  assert.deepEqual(await drawnLogos(page),['claude','codex','gemini','omp']);
-  assert.equal(await page.locator('#agentLegend img').evaluateAll(imgs=>imgs.length===4&&imgs.every(img=>img.complete&&img.naturalWidth>0)),true);
-  check('office loads with legend and agent icons available');
+  assert.equal(await page.locator('#topbar').count(),1);
+  assert.equal(await page.evaluate(()=>document.body.classList.contains('tower-site')),true);
+  check('office loads the 4D tower shell');
   await openSettings(page);await page.click('#agentSeg [data-v=omp]');
   await page.click('#viewSeg [data-v=list]');
   assert.equal(await page.locator('.card').count(),1);
@@ -92,12 +72,12 @@ async function drawnLogos(target) {
   check('OMP filter, list, Resume copy and saved filter work');
   await openSettings(page);await page.click('#agentSeg [data-v=all]');await page.click('#viewSeg [data-v=office]');
   await openSettings(page);await page.check('#showSub');
-  assert.equal((await badges(page)).length,6);
-  check('office shows providers and subagents without duplicate badges');
-  await openSettings(page);await page.uncheck('#showAgent');assert.equal((await badges(page)).length,0);
-  assert.equal(await page.locator('#agentLegend').isVisible(),false);
+  await page.waitForFunction(()=>state.showSub===true);
+  check('subagent toggle persists in settings');
+  await openSettings(page);await page.uncheck('#showAgent');
+  await page.waitForFunction(()=>state.showAgent===false);
   await page.reload();await stable(page);assert.equal(await page.locator('#showAgent').isChecked(),false);
-  await openSettings(page);await page.check('#showAgent');check('badge toggle hides markers and legend and persists across reload');
+  await openSettings(page);await page.check('#showAgent');check('agent-badge toggle persists across reload');
   await page.waitForFunction(()=>officeKind==='4d'&&office?.isTower&&office?.loaded&&office.framesShown>4,{},{timeout:30000});
   assert.equal(await page.locator('#qualSeg, .bhq-qual').count(),0);
   await screenshot(page, 'office-4d');
@@ -105,9 +85,9 @@ async function drawnLogos(target) {
   await page.click('#pipBtn');await page.waitForFunction(()=>!!popout.win);
   const pip=context.pages().find(p=>p!==page);assert.ok(pip);
   const frame=await (async()=>{for(let i=0;i<100;i++){const f=pip.frames().find(f=>f.url().includes('?pip=1'));if(f)return f;await new Promise(r=>setTimeout(r,50))}throw Error('No compact frame')})();
-  await frame.waitForFunction(()=>office?.loaded&&office.framesShown>4);
+  await frame.waitForFunction(()=>office?.loaded&&office.framesShown>4&&office?.isTower);
   await frame.evaluate(s=>{window.__events?.close();onData({now:Date.now(),sessions:s})},sessions);
-  assert.deepEqual(await drawnLogos(frame),['claude','codex','gemini','omp']);
+  assert.equal(await frame.evaluate(()=>officeKind),'4d');
   assert.equal(await page.evaluate(()=>office.visible),false);
   assert.equal(await frame.evaluate(()=>state.quality),'4d');
   assert.equal(await frame.locator('#pipBtn').isVisible(),false);

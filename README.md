@@ -94,7 +94,7 @@ No hooks, no config, no API keys. Both tools already append every message and to
 
 `whatsmyagentdoing` tails those files (read-only), turns the latest event into a status, and pushes it to the page over Server-Sent Events. Set `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `GEMINI_CLI_HOME` if yours live elsewhere.
 
-**Privacy:** nothing leaves your machine. The server binds to `127.0.0.1` only and rejects requests that aren't addressed to localhost. No runtime dependencies — read `src/` in five minutes. (`web/office3d.js` is the 3D source; `npm run build` bundles it with three.js into `public/office3d.js`.)
+**Privacy:** nothing leaves your machine. The server binds to `127.0.0.1` only and rejects requests that aren't addressed to localhost. No runtime dependencies — read `src/` in five minutes. (`web/office4d.js` is the tower frontend entry; `npm run build` bundles it with three.js into `public/office4d.js`.)
 
 ## Limits
 
@@ -105,13 +105,13 @@ No hooks, no config, no API keys. Both tools already append every message and to
 
 ## Wallpaper feed
 
-The Hurly office can also show a [Grok Bot wallpaper](https://github.com/Bodila51/grokbot-wallpaper) feed: live step text, blob looks, a usage pill, chat links and routines. **4D** (the default quality) draws that feed as the wallpaper tower — glossy blobs on stacked floors — beside the existing 2D and 3D offices. The browser reads the relay or ntfy topic itself; the office server never sees a custom topic from the address bar. On the Hurly office deploy a default topic is baked into the client so Open chat works without a hash or Settings paste (Settings/hash still override). Setup: [docs/wallpaper-feed.md](docs/wallpaper-feed.md).
+The Hurly office can also show a [Grok Bot wallpaper](https://github.com/Bodila51/grokbot-wallpaper) feed: live step text, blob looks, a usage pill, chat links and routines. **4D** draws that feed as the wallpaper tower — glossy blobs on stacked floors. The browser reads the relay or ntfy topic itself; the office server never sees a custom topic from the address bar. On the Hurly office deploy a default topic is baked into the client so Open chat works without a hash or Settings paste (Settings/hash still override). Setup: [docs/wallpaper-feed.md](docs/wallpaper-feed.md).
 
 ## Development checks
 
 `npm run test:watcher` runs isolated filesystem regression checks for session discovery, resumed old chats, the hours window, unreadable paths and large logs. It requires Node.js 18+ and never reads your real agent history.
 
-Browser development checks require Node.js 20+ (the dashboard itself still runs on Node.js 18+). Run `npm install`, then `npm run build` to rebuild the committed 3D bundle. With Google Chrome installed, `npm run test:ui` runs the browser regression checks against a temporary local server and made-up sessions. Use `WMAD_HEADED=1 npm run test:ui` to see the test windows, or set `WMAD_SCREENSHOTS` to an output folder to save screenshots. The checks cover logo rendering, compact views, settings synchronization, notifications, PiP recovery, video-stream cleanup and responsive settings in light and dark themes. They use Chrome; Firefox and Safari's native video controls still need manual testing.
+Browser development checks require Node.js 20+ (the dashboard itself still runs on Node.js 18+). Run `npm install`, then `npm run build` to rebuild the committed 4D tower bundle. With Google Chrome installed, `npm run test:ui` runs the browser regression checks against a temporary local server and made-up sessions. Use `WMAD_HEADED=1 npm run test:ui` to see the test windows, or set `WMAD_SCREENSHOTS` to an output folder to save screenshots. The checks cover the tower view, compact views, settings synchronization, notifications, PiP recovery, video-stream cleanup and responsive settings in light and dark themes. They use Chrome; Firefox and Safari's native video controls still need manual testing.
 
 ## License
 
